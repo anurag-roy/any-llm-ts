@@ -1,0 +1,63 @@
+{
+  "name": "any-llm-ts",
+  "version": "0.1.0",
+  "description": "A unified TypeScript interface for multiple LLM providers",
+  "keywords": [
+    "ai",
+    "anthropic",
+    "llm",
+    "openai",
+    "typescript"
+  ],
+  "license": "Apache-2.0",
+  "author": "Anurag Roy",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/anurag-roy/any-llm-ts.git"
+  },
+  "bugs": {
+    "url": "https://github.com/anurag-roy/any-llm-ts/issues"
+  },
+  "homepage": "https://github.com/anurag-roy/any-llm-ts#readme",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "NOTICE"
+  ],
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsup",
+    "check": "npm run lint && npm run typecheck && npm test && npm run build",
+    "lint": "eslint .",
+    "test": "vitest run --coverage",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.115.0",
+    "openai": "^7.4.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.1.2",
+    "@vitest/coverage-v8": "^4.1.10",
+    "eslint": "^10.8.0",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.66.0",
+    "vitest": "^4.1.10"
+  }
+}
