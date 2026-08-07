@@ -1,0 +1,63 @@
+---
+title: AnyLLM class
+description: Create reusable provider clients and inspect the provider registry.
+---
+
+## Creation
+
+```ts
+const llm = AnyLLM.create(provider, options);
+const llm = AnyLLM.fromProvider(adapter);
+const llm = AnyLLM.createOpenAICompatible(options);
+```
+
+`AnyLLM.create()` resolves a registered provider. `fromProvider()` wraps an already constructed
+adapter. `createOpenAICompatible()` creates an isolated OpenAI-compatible client without modifying
+the registry.
+
+## Instance properties
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `provider` | `string` | Normalized provider name. |
+| `metadata` | `ProviderMetadata` | Configuration and conservative capability flags. |
+
+## Instance operations
+
+```ts
+llm.completion(params)
+llm.responses(params)
+llm.embedding(params)
+llm.listModels(providerOptions?)
+llm.imageGeneration(params)
+llm.transcription(params)
+llm.speech(params)
+llm.moderation(params)
+llm.messages(params)
+```
+
+`messages()` provides direct access to the native Anthropic Messages API. Other built-in adapters
+reject it with `UnsupportedOperationError`.
+
+## Registry methods
+
+```ts
+AnyLLM.getSupportedProviders();
+AnyLLM.getProviderMetadata("openai");
+AnyLLM.getAllProviderMetadata();
+```
+
+## Model parsing
+
+```ts
+AnyLLM.splitModelProvider("anthropic:claude-sonnet-4-5");
+// { provider: "anthropic", model: "claude-sonnet-4-5" }
+```
+
+The method throws `InvalidModelSyntaxError` when no provider can be determined.
+
+## Declaration
+
+The table below is generated from `src/any-llm.ts`.
+
+<AutoTypeTable path="../../src/any-llm.ts" name="AnyLLM" />

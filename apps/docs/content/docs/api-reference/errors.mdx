@@ -1,0 +1,65 @@
+---
+title: Error classes
+description: The normalized error hierarchy exported from any-llm-ts.
+---
+
+## `AnyLLMError`
+
+All normalized provider errors extend `AnyLLMError`, which itself extends the built-in `Error`.
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `name` | `string` | Concrete error class name. |
+| `message` | `string` | Provider or library error message. |
+| `cause` | `unknown` | Original SDK error when one exists. |
+| `provider` | `string \| undefined` | Normalized provider name. |
+| `statusCode` | `number \| undefined` | HTTP status inferred from the SDK error. |
+| `code` | `string \| undefined` | Provider error code. |
+| `errorType` | `string \| undefined` | Provider error type. |
+| `param` | `string \| undefined` | Invalid provider parameter, when supplied. |
+
+## Provider failures
+
+```ts
+AuthenticationError
+ContentFilterError
+ContextLengthExceededError
+GatewayTimeoutError
+InsufficientFundsError
+InvalidRequestError
+ModelNotFoundError
+ProviderError
+RateLimitError
+UpstreamProviderError
+```
+
+`RateLimitError` also exposes `retryAfter?: string`.
+
+## Library and configuration failures
+
+```ts
+MissingApiKeyError
+UnsupportedProviderError
+UnsupportedOperationError
+InvalidModelSyntaxError
+```
+
+These errors represent failures detected before or independently of a provider HTTP response.
+
+## Narrowing
+
+```ts
+try {
+  await llm.completion(params);
+} catch (error) {
+  if (error instanceof RateLimitError) {
+    scheduleRetry(error.retryAfter);
+  } else if (error instanceof AnyLLMError) {
+    reportProviderFailure(error);
+  } else {
+    throw error;
+  }
+}
+```
+
+See the [error handling guide](../guides/error-handling.mdx) for a complete example.

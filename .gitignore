@@ -5,3 +5,7 @@ node_modules/
 .env.*
 !.env.example
 *.log
+apps/docs/.next/
+apps/docs/.source/
+apps/docs/out/
+apps/docs/tsconfig.tsbuildinfo

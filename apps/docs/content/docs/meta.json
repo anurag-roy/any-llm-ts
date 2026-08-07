@@ -1,0 +1,12 @@
+{
+  "title": "Documentation",
+  "pages": [
+    "index",
+    "getting-started",
+    "guides",
+    "operations",
+    "providers",
+    "api-reference",
+    "migration"
+  ]
+}

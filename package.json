@@ -21,6 +21,9 @@
   "homepage": "https://github.com/anurag-roy/any-llm-ts#readme",
   "type": "module",
   "sideEffects": false,
+  "workspaces": [
+    "apps/*"
+  ],
   "files": [
     "dist",
     "NOTICE"
@@ -41,6 +44,10 @@
   "scripts": {
     "build": "tsup",
     "check": "npm run lint && npm run typecheck && npm test && npm run build",
+    "docs:build": "npm run build --workspace=any-llm-ts-docs",
+    "docs:check": "npm run build && npm run generate:providers --workspace=any-llm-ts-docs -- --check && npm run lint --workspace=any-llm-ts-docs && npm run types:check --workspace=any-llm-ts-docs && npm run docs:build && npm run check:links --workspace=any-llm-ts-docs",
+    "docs:dev": "npm run dev --workspace=any-llm-ts-docs",
+    "docs:generate": "npm run build && npm run generate:providers --workspace=any-llm-ts-docs",
     "lint": "eslint .",
     "test": "vitest run --coverage",
     "test:watch": "vitest",

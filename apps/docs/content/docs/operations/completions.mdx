@@ -1,0 +1,77 @@
+---
+title: Chat completions
+description: Send messages and receive a normalized completion or stream.
+---
+
+Chat completion is the common operation supported by every registered provider.
+
+## Stateless helper
+
+```ts
+import { completion } from "any-llm-ts";
+
+const response = await completion({
+  provider: "openai",
+  model: "gpt-4.1-mini",
+  messages: [{ role: "user", content: "Hello" }],
+  temperature: 0.2,
+  maxCompletionTokens: 500,
+});
+```
+
+The stateless form also accepts `apiKey`, `apiBase`, and `clientOptions` because it creates a client
+for the call.
+
+## Reusable client
+
+```ts
+const llm = AnyLLM.create("openai");
+
+const response = await llm.completion({
+  model: "gpt-4.1-mini",
+  messages: [{ role: "user", content: "Hello" }],
+});
+```
+
+When using a client, pass the provider's native model name without a provider prefix.
+
+## Multimodal messages
+
+Message content can be a string or a list of content parts:
+
+```ts
+const response = await llm.completion({
+  model: "vision-capable-model",
+  messages: [
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "What is in this image?" },
+        {
+          type: "image_url",
+          image_url: { url: "https://example.com/image.jpg", detail: "auto" },
+        },
+      ],
+    },
+  ],
+});
+```
+
+The common content types include text, image URLs, files, and input audio. Actual support depends on
+the provider and selected model.
+
+## Normalized response
+
+```ts
+const choice = response.choices[0];
+
+console.log(choice?.finishReason);
+console.log(choice?.message.content);
+console.log(choice?.message.reasoning);
+console.log(choice?.message.toolCalls);
+console.log(response.usage);
+console.log(response.provider);
+```
+
+The provider SDK response remains available as `response.raw` for fields that have no normalized
+equivalent.

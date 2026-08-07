@@ -1,0 +1,62 @@
+---
+title: Reusable clients
+description: Reuse an SDK client and its connection pool across multiple requests.
+---
+
+Stateless helpers are convenient, but each call constructs an adapter and underlying SDK client.
+For applications that make repeated requests, create an `AnyLLM` client once and reuse it.
+
+```ts
+import { AnyLLM } from "any-llm-ts";
+
+const llm = AnyLLM.create("mistral");
+
+const first = await llm.completion({
+  model: "mistral-small-latest",
+  messages: [{ role: "user", content: "Suggest a project name." }],
+});
+
+const second = await llm.completion({
+  model: "mistral-small-latest",
+  messages: [{ role: "user", content: "Suggest another one." }],
+});
+```
+
+The SDK client and its connection pool remain attached to `llm`. The instance contains provider
+configuration, not conversation state, so it is safe to share across independent requests.
+
+## Application pattern
+
+Create clients near your application composition root rather than inside request handlers:
+
+```ts
+// llm.ts
+import { AnyLLM } from "any-llm-ts";
+
+export const primaryLlm = AnyLLM.create("anthropic");
+export const fallbackLlm = AnyLLM.create("openai");
+```
+
+```ts
+// summarize.ts
+import { primaryLlm } from "./llm.js";
+
+export async function summarize(text: string) {
+  return primaryLlm.completion({
+    model: "claude-sonnet-4-5",
+    messages: [{ role: "user", content: `Summarize:\n\n${text}` }],
+  });
+}
+```
+
+## Supplying an adapter directly
+
+Custom integrations can construct a `BaseProvider` subclass and wrap it without registering a
+global provider name:
+
+```ts
+const llm = AnyLLM.fromProvider(new CompanyProvider(options));
+```
+
+Use `registerProvider()` instead when multiple parts of the application should create the adapter
+by name.

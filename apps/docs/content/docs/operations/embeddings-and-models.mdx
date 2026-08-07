@@ -1,0 +1,66 @@
+---
+title: Embeddings and models
+description: Create vector embeddings and discover models supported by a provider endpoint.
+---
+
+## Embeddings
+
+```ts
+import { embedding } from "any-llm-ts";
+
+const result = await embedding({
+  provider: "openai",
+  model: "text-embedding-3-small",
+  input: ["First document", "Second document"],
+});
+
+for (const item of result.data) {
+  console.log(item.index, item.embedding);
+}
+```
+
+The result normalizes token usage and vector data:
+
+```ts
+result.provider;
+result.model;
+result.usage.promptTokens;
+result.usage.totalTokens;
+```
+
+You can request dimensions and an encoding format when the provider supports them:
+
+```ts
+await llm.embedding({
+  model: "text-embedding-3-small",
+  input: "Hello",
+  dimensions: 512,
+  encodingFormat: "float",
+});
+```
+
+## List models
+
+```ts
+import { listModels } from "any-llm-ts";
+
+const models = await listModels({ provider: "openai" });
+
+for (const model of models) {
+  console.log(model.id, model.ownedBy);
+}
+```
+
+Or use a reusable client:
+
+```ts
+const models = await llm.listModels();
+```
+
+Some providers expose compatible inference endpoints but no model-list endpoint. Check
+`metadata.capabilities.listModels` before relying on discovery.
+
+<Callout title="No reranking API yet">
+  The Python source project includes reranking integrations. This TypeScript port does not expose a
+  rerank operation yet, so it is deliberately absent from the active API documentation.
+</Callout>

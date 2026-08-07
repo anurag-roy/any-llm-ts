@@ -1,0 +1,80 @@
+---
+title: Tool calling
+description: Define function tools and return tool results through the common message format.
+---
+
+Tools use the widely supported OpenAI function-tool shape. Native adapters translate this shape
+when their provider uses a different wire format.
+
+```ts
+import { completion, type Tool } from "any-llm-ts";
+
+const tools: Tool[] = [
+  {
+    type: "function",
+    function: {
+      name: "get_weather",
+      description: "Get the current weather for a city",
+      parameters: {
+        type: "object",
+        properties: {
+          city: { type: "string" },
+        },
+        required: ["city"],
+      },
+    },
+  },
+];
+
+const response = await completion({
+  provider: "anthropic",
+  model: "claude-sonnet-4-5",
+  messages: [{ role: "user", content: "What is the weather in Kolkata?" }],
+  tools,
+});
+
+const toolCalls = response.choices[0]?.message.toolCalls ?? [];
+```
+
+## Execute and return a result
+
+Tool arguments are normalized as a JSON string:
+
+```ts
+const call = toolCalls[0];
+
+if (call?.function.name === "get_weather") {
+  const args = JSON.parse(call.function.arguments) as { city: string };
+  const result = await getWeather(args.city);
+
+  const followUp = await completion({
+    provider: "anthropic",
+    model: "claude-sonnet-4-5",
+    messages: [
+      { role: "user", content: "What is the weather in Kolkata?" },
+      response.choices[0]!.message,
+      {
+        role: "tool",
+        toolCallId: call.id,
+        content: JSON.stringify(result),
+      },
+    ],
+    tools,
+  });
+}
+```
+
+The library does not execute tools or run an agent loop. Your application remains responsible for
+validating arguments, authorizing operations, executing functions, limiting iterations, and
+returning results.
+
+## Force or disable tool use
+
+```ts
+toolChoice: "auto"
+toolChoice: "required"
+toolChoice: "none"
+toolChoice: { type: "function", function: { name: "get_weather" } }
+```
+
+Provider support varies. Consult the provider's documentation for model-specific limitations.

@@ -1,0 +1,43 @@
+---
+title: API reference
+description: The public entry point, its operation groups, and TypeScript declaration reference.
+---
+
+Everything documented in this section is exported from the package root:
+
+```ts
+import {
+  AnyLLM,
+  completion,
+  embedding,
+  responses,
+  type CompletionParams,
+} from "any-llm-ts";
+```
+
+## Surface overview
+
+<Cards>
+  <Card title="AnyLLM" href="/docs/api-reference/any-llm">
+    Reusable clients, provider metadata, model parsing, and custom compatible endpoints.
+  </Card>
+  <Card title="Functions" href="/docs/api-reference/functions">
+    Stateless helpers for every operation exposed by the common facade.
+  </Card>
+  <Card title="Types" href="/docs/api-reference/types">
+    Type tables generated from the repository's TypeScript source declarations.
+  </Card>
+  <Card title="Errors" href="/docs/api-reference/errors">
+    Normalized provider errors and configuration failures.
+  </Card>
+</Cards>
+
+## Naming conventions
+
+- Public JavaScript names use idiomatic camelCase: `imageGeneration`, `listModels`, and
+  `providerOptions`.
+- Wire-format fields are translated to camelCase in normalized responses.
+- Provider-specific fields retain the provider's naming inside `providerOptions`, `clientOptions`,
+  `raw`, and `extraContent`.
+- All network operations are promise-based.
+- Streams use the standard JavaScript `AsyncIterable` protocol.

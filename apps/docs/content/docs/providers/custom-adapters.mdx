@@ -1,0 +1,82 @@
+---
+title: Custom adapters
+description: Implement provider-specific translation behind the BaseProvider contract.
+---
+
+Create a dedicated adapter when a provider has a different wire format, authentication scheme, or
+response model. Extend `BaseProvider`, implement `metadata` and `completion()`, and override any
+other supported operations.
+
+```ts
+import {
+  BaseProvider,
+  registerProvider,
+  type ChatCompletion,
+  type ChatCompletionChunk,
+  type CompletionParams,
+  type ProviderMetadata,
+  type ProviderOptions,
+} from "any-llm-ts";
+
+const metadata: ProviderMetadata = {
+  name: "company",
+  documentationUrl: "https://developers.example.com/llm",
+  requiresApiKey: true,
+  envApiKey: "COMPANY_LLM_API_KEY",
+  capabilities: {
+    completion: true,
+    streaming: true,
+    embedding: false,
+    listModels: false,
+    responses: false,
+    vision: false,
+    reasoning: false,
+    moderation: false,
+    imageGeneration: false,
+    audioSpeech: false,
+    audioTranscription: false,
+    batch: false,
+    messages: false,
+    rerank: false,
+  },
+};
+
+class CompanyProvider extends BaseProvider {
+  readonly metadata = metadata;
+
+  constructor(private readonly options: ProviderOptions = {}) {
+    super();
+  }
+
+  async completion(
+    params: CompletionParams,
+  ): Promise<ChatCompletion | AsyncIterable<ChatCompletionChunk>> {
+    // Call the provider and normalize its response here.
+    throw new Error("Implement company completion");
+  }
+}
+
+registerProvider(
+  "company",
+  (options) => new CompanyProvider(options),
+  { metadata },
+);
+```
+
+After registration:
+
+```ts
+const llm = AnyLLM.create("company");
+```
+
+## Adapter responsibilities
+
+- validate required credentials and endpoint configuration
+- translate common request fields to the provider protocol
+- normalize non-streamed and streamed responses
+- preserve unmodeled data in `raw` or `extraContent`
+- normalize SDK errors, including errors raised during stream consumption
+- reject unsupported operations clearly
+
+Use the protected `execute()` and `protectStream()` helpers from `BaseProvider` to apply common
+error normalization around provider calls.

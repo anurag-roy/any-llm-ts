@@ -1,0 +1,62 @@
+---
+title: Error handling
+description: Handle normalized provider failures and errors raised during streaming.
+---
+
+Provider SDK errors are converted into a common hierarchy rooted at `AnyLLMError`.
+
+```ts
+import {
+  AnyLLMError,
+  AuthenticationError,
+  RateLimitError,
+  UnsupportedOperationError,
+  completion,
+} from "any-llm-ts";
+
+try {
+  await completion({
+    provider: "openai",
+    model: "gpt-4.1-mini",
+    messages: [{ role: "user", content: "Hello" }],
+  });
+} catch (error) {
+  if (error instanceof AuthenticationError) {
+    // Replace or refresh credentials.
+  } else if (error instanceof RateLimitError) {
+    console.error(error.retryAfter);
+  } else if (error instanceof UnsupportedOperationError) {
+    // Choose a provider that supports the operation.
+  } else if (error instanceof AnyLLMError) {
+    console.error(error.provider, error.statusCode, error.code);
+  } else {
+    throw error;
+  }
+}
+```
+
+## Common classes
+
+| Error | Meaning |
+| --- | --- |
+| `MissingApiKeyError` | No explicit key or expected environment variable was found. |
+| `AuthenticationError` | The provider returned HTTP 401 or 403. |
+| `InvalidRequestError` | The provider rejected a request with another 4xx status. |
+| `RateLimitError` | HTTP 429; `retryAfter` is retained when present. |
+| `ModelNotFoundError` | HTTP 404. |
+| `ContextLengthExceededError` | The provider reported a context or token limit. |
+| `ContentFilterError` | The provider reported filtered content. |
+| `UpstreamProviderError` | HTTP 502. |
+| `GatewayTimeoutError` | HTTP 504. |
+| `ProviderError` | Another provider-side or unclassified SDK failure. |
+| `UnsupportedProviderError` | The requested provider name is not registered. |
+| `UnsupportedOperationError` | The adapter does not implement the requested operation. |
+| `InvalidModelSyntaxError` | A stateless helper could not determine a provider from the model. |
+
+Every `AnyLLMError` retains the original error as `cause` and exposes `provider`, `statusCode`,
+`code`, `param`, and `errorType` when the SDK supplied them.
+
+## Streaming errors
+
+Wrap both stream creation and iteration in the same `try` block. A network or provider failure may
+occur after several chunks have already arrived.

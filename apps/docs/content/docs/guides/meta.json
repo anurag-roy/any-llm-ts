@@ -1,0 +1,4 @@
+{
+  "title": "Guides",
+  "pages": ["reusable-clients", "streaming", "tool-calling", "structured-output", "error-handling"]
+}

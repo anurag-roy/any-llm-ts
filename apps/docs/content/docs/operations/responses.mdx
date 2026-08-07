@@ -1,0 +1,62 @@
+---
+title: Responses API
+description: Access compatible provider Responses endpoints without losing provider-specific fields.
+---
+
+Use `responses()` for providers that expose an OpenAI-compatible Responses API.
+
+```ts
+import { responses } from "any-llm-ts";
+
+const response = await responses({
+  provider: "openai",
+  model: "gpt-4.1-mini",
+  input: "Explain event loops in one paragraph.",
+});
+```
+
+The reusable client exposes the same operation:
+
+```ts
+const response = await llm.responses({
+  model: "gpt-4.1-mini",
+  input: [
+    {
+      role: "user",
+      content: [{ type: "input_text", text: "Hello" }],
+    },
+  ],
+});
+```
+
+`ResponsesParams` intentionally allows additional keys, and the result is currently `unknown`.
+The Responses API evolves quickly and has a much larger provider-specific surface than chat
+completions; this design avoids throwing away fields or publishing an inaccurate lowest-common-
+denominator type.
+
+Narrow the result in application code or use the relevant provider SDK's response type:
+
+```ts
+const response = await llm.responses(params);
+
+if (typeof response === "object" && response !== null && "output" in response) {
+  // Work with the provider response after validation.
+}
+```
+
+## Streaming
+
+```ts
+const events = await llm.responses({
+  model: "gpt-4.1-mini",
+  input: "Hello",
+  stream: true,
+});
+
+for await (const event of events) {
+  // Validate and handle provider response events.
+}
+```
+
+Check `metadata.capabilities.responses` first. Unsupported providers reject with
+`UnsupportedOperationError`.

@@ -1,0 +1,50 @@
+---
+title: Stateless functions
+description: Operation helpers that create a provider client for a single call.
+---
+
+## `completion(params)`
+
+```ts
+function completion(
+  params: DirectCompletionParams & { stream?: false },
+): Promise<ChatCompletion>;
+
+function completion(
+  params: DirectCompletionParams & { stream: true },
+): Promise<AsyncIterable<ChatCompletionChunk>>;
+```
+
+## `responses(params)`
+
+```ts
+function responses(
+  params: DirectResponsesParams & { stream?: false },
+): Promise<unknown>;
+
+function responses(
+  params: DirectResponsesParams & { stream: true },
+): Promise<AsyncIterable<unknown>>;
+```
+
+## Other operations
+
+```ts
+function embedding(params: DirectEmbeddingParams): Promise<EmbeddingResponse>;
+function listModels(params: DirectProviderOptions & { provider: string }): Promise<Model[]>;
+function imageGeneration(params: DirectImageGenerationParams): Promise<ImageGenerationResponse>;
+function transcription(params: DirectTranscriptionParams): Promise<Transcription>;
+function speech(params: DirectSpeechParams): Promise<Uint8Array>;
+function moderation(params: DirectModerationParams): Promise<unknown>;
+```
+
+## Direct provider options
+
+Stateless operation parameters extend the operation's common parameter type with:
+
+<AutoTypeTable path="../../src/api.ts" name="DirectProviderOptions" />
+
+For model-based operations, omit `provider` only when `model` uses `provider:model` syntax.
+`listModels()` has no model from which to infer a provider, so its `provider` field is required.
+
+`moderation()` is the exception: it defaults to `openai` when the provider is omitted.

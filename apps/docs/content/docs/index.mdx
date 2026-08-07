@@ -1,0 +1,51 @@
+---
+title: Introduction
+description: A typed, provider-independent interface for LLM applications written in TypeScript.
+---
+
+`any-llm-ts` is a thin, framework-independent layer over official provider SDKs. It gives your
+application one interface for chat completions, streaming, tools, embeddings, model discovery,
+responses, images, moderation, and audio—without requiring a hosted proxy.
+
+The library is an independent TypeScript port inspired by Mozilla.ai's Python
+[`any-llm`](https://github.com/mozilla-ai/any-llm). It preserves the original project's central
+idea while using TypeScript-native primitives such as promises, `AsyncIterable`, discriminated
+unions, and overloads.
+
+## Choose how you call it
+
+<Cards>
+  <Card title="Stateless helpers" href="/docs/getting-started/quickstart">
+    Ideal for scripts and isolated calls. Specify a provider or use the `provider:model` syntax.
+  </Card>
+  <Card title="Reusable client" href="/docs/guides/reusable-clients">
+    Create `AnyLLM` once and reuse its underlying SDK client across requests.
+  </Card>
+  <Card title="Provider guide" href="/docs/providers">
+    Inspect supported providers, environment variables, and conservative capability metadata.
+  </Card>
+  <Card title="API reference" href="/docs/api-reference">
+    Explore the exported functions, classes, types, and normalized error hierarchy.
+  </Card>
+</Cards>
+
+## Design goals
+
+- **One application-facing contract.** Provider-specific translation stays behind adapters.
+- **Type-safe streaming.** `stream: true` changes the inferred result to an `AsyncIterable`.
+- **No proxy requirement.** Requests go directly from your Node.js application to the provider.
+- **Escape hatches.** Use `providerOptions`, `clientOptions`, custom endpoints, or custom adapters
+  when the common surface is not enough.
+- **Conservative metadata.** Capability flags describe configured support without claiming that
+  every provider and model combination is continuously integration-tested.
+
+<Callout title="Independent project">
+  This package is not an official Mozilla.ai project. See the repository's `NOTICE` and `LICENSE`
+  files for attribution and Apache-2.0 licensing details.
+</Callout>
+
+## Runtime support
+
+The library supports Node.js 20 and newer and ships ESM, CommonJS, and TypeScript declarations.
+It does not depend on Next.js, React, or Fumadocs at runtime; those packages are used only by this
+documentation site.

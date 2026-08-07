@@ -1,0 +1,92 @@
+---
+title: Migrating from Python any-llm
+description: Translate the original Python library's central patterns into idiomatic TypeScript.
+---
+
+This is an intent-level port, not a line-by-line translation. The provider facade and adapter
+architecture remain recognizable, but the public API follows TypeScript and JavaScript conventions.
+
+## Import and naming changes
+
+```py
+from any_llm import completion
+```
+
+```ts
+import { completion } from "any-llm-ts";
+```
+
+Public identifiers use camelCase: `listModels`, `imageGeneration`, `apiKey`, `providerOptions`, and
+`toolCalls`.
+
+## Async operations
+
+Network operations always return promises:
+
+```ts
+const response = await completion(params);
+```
+
+Streaming uses the standard `AsyncIterable` protocol:
+
+```ts
+const stream = await completion({ ...params, stream: true });
+
+for await (const chunk of stream) {
+  // ...
+}
+```
+
+## Client construction
+
+Use a reusable `AnyLLM` instance when making repeated calls:
+
+```ts
+const llm = AnyLLM.create("anthropic");
+await llm.completion(params);
+```
+
+This replaces Python-specific factory and context patterns with an explicit object that owns the
+underlying SDK client.
+
+## Model syntax
+
+Use `provider:model` when a stateless helper must infer the provider:
+
+```ts
+await completion({
+  model: "anthropic:claude-sonnet-4-5",
+  messages,
+});
+```
+
+The slash form is deprecated in the TypeScript port because model names frequently contain slashes.
+
+## Data models
+
+Python model classes and dictionaries become TypeScript interfaces and discriminated unions.
+They do not perform runtime validation by themselves. Validate untrusted inputs with your preferred
+runtime schema library before passing them to provider operations.
+
+## Exceptions
+
+Catch exported error classes with `instanceof`:
+
+```ts
+try {
+  await llm.completion(params);
+} catch (error) {
+  if (error instanceof RateLimitError) {
+    // ...
+  }
+}
+```
+
+## Current scope differences
+
+The TypeScript port currently focuses on chat completions, streaming, tools, embeddings, model
+listing, Responses-compatible APIs, images, moderation, and audio. It does not yet include every
+native Python adapter, batch helper, or reranking integration from the source project.
+
+For the architectural rationale and a detailed parity map, see
+[`docs/PORTING.md`](https://github.com/anurag-roy/any-llm-ts/blob/main/docs/PORTING.md).
