@@ -1,0 +1,8 @@
+any-llm-ts
+Copyright 2026 Anurag Roy
+
+This project is an independent TypeScript port inspired by any-llm:
+https://github.com/mozilla-ai/any-llm
+
+The original any-llm project is Copyright Mozilla.ai and contributors and is
+licensed under the Apache License, Version 2.0.
