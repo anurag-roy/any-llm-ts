@@ -6,6 +6,8 @@
 
 An independent TypeScript port inspired by [mozilla-ai/any-llm](https://github.com/mozilla-ai/any-llm).
 
+<img src=".github/assets/quickstart.png" alt="Syntax-highlighted any-llm-ts quickstart example" width="768" />
+
 </div>
 
 `any-llm-ts` is a thin, framework-independent layer over official provider SDKs. It gives applications one API for chat completions, streaming, tools, embeddings, model discovery, the OpenAI Responses API, images, moderation, and audio without requiring a hosted proxy.
