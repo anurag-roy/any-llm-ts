@@ -199,6 +199,9 @@ registerProvider("company", (options) => new CompanyProvider(options), {
 
 See [PORTING.md](./docs/PORTING.md) for the architectural analysis, what was deliberately preserved, and where TypeScript-specific choices differ from the Python project.
 
+The Fumadocs site is maintained in [`apps/docs`](./apps/docs). Run `npm run docs:dev` on Node.js 22
+or newer to preview it locally.
+
 ## Development
 
 ```bash

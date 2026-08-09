@@ -1,0 +1,80 @@
+---
+title: Configuration
+description: Configure providers, base URLs, SDK clients, and provider-specific request fields.
+---
+
+Configuration can happen at three levels: provider discovery, SDK client construction, and an
+individual request.
+
+## Provider configuration
+
+`AnyLLM.create()` accepts a provider name and `ProviderOptions`:
+
+```ts
+import { AnyLLM } from "any-llm-ts";
+
+const llm = AnyLLM.create("openai", {
+  apiKey: process.env.OPENAI_API_KEY,
+  apiBase: "https://api.openai.com/v1",
+  clientOptions: {
+    maxRetries: 3,
+    timeout: 30_000,
+  },
+});
+```
+
+| Option | Purpose |
+| --- | --- |
+| `apiKey` | Overrides the provider's conventional API-key environment variable. |
+| `apiBase` | Overrides the configured API base URL or endpoint. |
+| `clientOptions` | Passes additional constructor options to the underlying provider SDK. |
+
+The values in `clientOptions` are intentionally typed as `Record<string, unknown>` because the
+accepted keys differ between SDKs and versions.
+
+## Request-specific fields
+
+Use `providerOptions` for request properties not represented by the common interface:
+
+```ts
+await llm.completion({
+  model: "provider-model-name",
+  messages: [{ role: "user", content: "Hello" }],
+  providerOptions: {
+    service_tier: "priority",
+  },
+});
+```
+
+`providerOptions` is merged into the outgoing payload after normalized fields, so it can override
+wire-level values. That is useful as an escape hatch, but it also means you should validate or
+hard-code these options rather than accepting them directly from untrusted callers.
+
+## Azure OpenAI
+
+Azure OpenAI requires both an endpoint and an API key:
+
+```bash
+export AZURE_OPENAI_ENDPOINT="https://example.openai.azure.com"
+export AZURE_OPENAI_API_KEY="..."
+export OPENAI_API_VERSION="2024-10-21" # optional
+```
+
+```ts
+const azure = AnyLLM.create("azureopenai");
+```
+
+The default API version is `2024-10-21`. You can pass Azure SDK constructor fields through
+`clientOptions` when necessary.
+
+## Inspect effective metadata
+
+```ts
+const metadata = AnyLLM.getProviderMetadata("openai");
+
+console.log(metadata.envApiKey);
+console.log(metadata.apiBase);
+console.log(metadata.capabilities.streaming);
+```
+
+Metadata is returned as a clone, so changing the returned object does not modify the registry.

@@ -1,0 +1,78 @@
+---
+title: Installation
+description: Install any-llm-ts and configure your TypeScript project.
+---
+
+## Requirements
+
+- Node.js 20 or newer
+- A provider API key, unless you use a keyless local provider such as Ollama, llama.cpp, or vLLM
+
+Install the package with your preferred package manager:
+
+<Tabs items={["npm", "pnpm", "yarn"]}>
+  <Tab value="npm">
+    ```bash
+    npm install any-llm-ts
+    ```
+  </Tab>
+  <Tab value="pnpm">
+    ```bash
+    pnpm add any-llm-ts
+    ```
+  </Tab>
+  <Tab value="yarn">
+    ```bash
+    yarn add any-llm-ts
+    ```
+  </Tab>
+</Tabs>
+
+## Module formats
+
+The package exports ESM and CommonJS builds from the same entry point.
+
+```ts
+import { AnyLLM, completion } from "any-llm-ts";
+```
+
+```js
+const { AnyLLM, completion } = require("any-llm-ts");
+```
+
+TypeScript declarations are included. No `@types` package is required.
+
+## Configure an API key
+
+The recommended approach is to use the provider's conventional environment variable:
+
+```bash
+export OPENAI_API_KEY="..."
+export ANTHROPIC_API_KEY="..."
+export MISTRAL_API_KEY="..."
+```
+
+You may instead provide a key while creating a client or making a stateless call:
+
+```ts
+const llm = AnyLLM.create("openai", {
+  apiKey: process.env.MY_OPENAI_KEY,
+});
+```
+
+Do not put provider keys in browser bundles. `any-llm-ts` is intended to run in trusted server-side
+code unless the provider explicitly supports a safe browser authentication flow.
+
+## Verify the setup
+
+```ts
+import { completion } from "any-llm-ts";
+
+const response = await completion({
+  provider: "openai",
+  model: "gpt-4.1-mini",
+  messages: [{ role: "user", content: "Reply with: it works" }],
+});
+
+console.log(response.choices[0]?.message.content);
+```

@@ -1,0 +1,75 @@
+---
+title: Images, audio, and moderation
+description: Use compatible image generation, transcription, speech, and moderation endpoints.
+---
+
+These operations are available on adapters whose capability metadata marks them as supported.
+
+## Image generation
+
+```ts
+import { imageGeneration } from "any-llm-ts";
+
+const image = await imageGeneration({
+  provider: "openai",
+  model: "gpt-image-1",
+  prompt: "A small robot reading TypeScript documentation",
+  size: "1024x1024",
+  outputFormat: "png",
+});
+
+console.log(image.data[0]?.url ?? image.data[0]?.b64Json);
+```
+
+## Audio transcription
+
+```ts
+import { readFile } from "node:fs/promises";
+import { transcription } from "any-llm-ts";
+
+const bytes = await readFile("meeting.mp3");
+const file = new File([bytes], "meeting.mp3", { type: "audio/mpeg" });
+
+const result = await transcription({
+  provider: "openai",
+  model: "whisper-1",
+  file,
+});
+
+console.log(result.text);
+```
+
+## Text to speech
+
+```ts
+import { writeFile } from "node:fs/promises";
+import { speech } from "any-llm-ts";
+
+const audio = await speech({
+  provider: "openai",
+  model: "gpt-4o-mini-tts",
+  voice: "alloy",
+  input: "Hello from any-llm-ts.",
+  responseFormat: "mp3",
+});
+
+await writeFile("speech.mp3", audio);
+```
+
+## Moderation
+
+```ts
+import { moderation } from "any-llm-ts";
+
+const result = await moderation({
+  input: "Text to classify",
+});
+```
+
+The stateless moderation helper defaults to `openai` when `provider` is omitted. Moderation results
+are left as `unknown` so provider-specific categories and scores are preserved.
+
+<Callout title="Capability flags are endpoint-level guidance">
+  A `true` capability does not guarantee that every model offered by the provider implements the
+  operation. Validate the selected model against the provider's own documentation.
+</Callout>

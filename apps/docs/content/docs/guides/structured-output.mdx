@@ -1,0 +1,54 @@
+---
+title: Structured output and reasoning
+description: Request JSON schemas and provider reasoning through normalized completion fields.
+---
+
+## Structured output
+
+Pass a provider-compatible response format through the common `responseFormat` field:
+
+```ts
+const response = await llm.completion({
+  model: "gpt-4.1-mini",
+  messages: [{ role: "user", content: "Extract the city from: I live in Kolkata." }],
+  responseFormat: {
+    type: "json_schema",
+    json_schema: {
+      name: "location",
+      strict: true,
+      schema: {
+        type: "object",
+        properties: { city: { type: "string" } },
+        required: ["city"],
+        additionalProperties: false,
+      },
+    },
+  },
+});
+```
+
+For Anthropic, `responseFormat.type` must be `json_schema`, and the schema must be available at
+`responseFormat.json_schema.schema`. The adapter translates it to Anthropic's structured-output
+configuration.
+
+The library returns model output as text. Parse and validate it in your application with the schema
+library of your choice.
+
+## Reasoning effort
+
+```ts
+const response = await llm.completion({
+  model: "reasoning-model",
+  messages: [{ role: "user", content: "Solve this problem..." }],
+  reasoningEffort: "high",
+});
+```
+
+Supported normalized values are `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, and
+`auto`. Providers may support only a subset. Reasoning text, when exposed by the provider, is
+normalized to `message.reasoning` or `delta.reasoning`.
+
+<Callout title="Treat reasoning as optional">
+  A provider or model may use reasoning internally without returning it. Always handle the
+  `reasoning` field as optional and avoid making application correctness depend on it.
+</Callout>

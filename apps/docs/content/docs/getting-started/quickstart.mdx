@@ -1,0 +1,83 @@
+---
+title: Quick start
+description: Make a completion request, stream tokens, and switch providers.
+---
+
+## Make a completion request
+
+The stateless `completion()` helper is the smallest way to make a request:
+
+```ts
+import { completion } from "any-llm-ts";
+
+const response = await completion({
+  provider: "openai",
+  model: "gpt-4.1-mini",
+  messages: [
+    { role: "system", content: "Be concise." },
+    { role: "user", content: "Why is the sky blue?" },
+  ],
+});
+
+console.log(response.choices[0]?.message.content);
+console.log(response.usage?.totalTokens);
+```
+
+The normalized response includes a `provider` field and keeps the SDK response in `raw` when you
+need data outside the common contract.
+
+## Switch providers
+
+For compatible requests, switching providers is usually a configuration change:
+
+```ts
+const response = await completion({
+  provider: "anthropic",
+  model: "claude-sonnet-4-5",
+  messages: [{ role: "user", content: "Explain TypeScript overloads." }],
+});
+```
+
+The Anthropic adapter translates the common OpenAI-style messages, tools, tool results, reasoning,
+and streaming events to and from the native Messages API.
+
+## Use compact model syntax
+
+When `provider` is omitted, prefix the model with `provider:`:
+
+```ts
+const response = await completion({
+  model: "groq:llama-3.3-70b-versatile",
+  messages: [{ role: "user", content: "Write a two-line poem." }],
+});
+```
+
+The old `provider/model` form is recognized for registered providers but emits a deprecation
+warning. New code should always use `provider:model`.
+
+## Stream a response
+
+```ts
+const stream = await completion({
+  provider: "openai",
+  model: "gpt-4.1-mini",
+  messages: [{ role: "user", content: "Count to five." }],
+  stream: true,
+});
+
+for await (const chunk of stream) {
+  process.stdout.write(chunk.choices[0]?.delta.content ?? "");
+}
+```
+
+Because `stream` is the literal value `true`, TypeScript infers
+`Promise<AsyncIterable<ChatCompletionChunk>>`.
+
+## Next steps
+
+<Cards>
+  <Card title="Reuse a client" href="/docs/guides/reusable-clients" />
+  <Card title="Use tools" href="/docs/guides/tool-calling" />
+  <Card title="Handle errors" href="/docs/guides/error-handling" />
+  <Card title="Explore providers" href="/docs/providers" />
+</Cards>

@@ -1,0 +1,4 @@
+{
+  "title": "Operations",
+  "pages": ["completions", "embeddings-and-models", "responses", "images-audio-and-moderation"]
+}

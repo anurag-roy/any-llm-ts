@@ -1,0 +1,67 @@
+---
+title: Custom OpenAI-compatible endpoints
+description: Connect a private gateway or local inference server without registering a provider globally.
+---
+
+Use `AnyLLM.createOpenAICompatible()` when an endpoint speaks the OpenAI protocol but is not in the
+built-in registry.
+
+```ts
+import { AnyLLM } from "any-llm-ts";
+
+const llm = AnyLLM.createOpenAICompatible({
+  name: "company-gateway",
+  apiBase: "https://llm.example.com/v1",
+  apiKey: process.env.COMPANY_LLM_API_KEY,
+});
+
+const response = await llm.completion({
+  model: "internal-model",
+  messages: [{ role: "user", content: "Hello" }],
+});
+```
+
+For a keyless local endpoint:
+
+```ts
+const local = AnyLLM.createOpenAICompatible({
+  name: "local-server",
+  apiBase: "http://127.0.0.1:8000/v1",
+  requiresApiKey: false,
+});
+```
+
+## Describe capabilities
+
+Custom metadata is conservative by default. Override it when the endpoint supports additional
+operations:
+
+```ts
+const gateway = AnyLLM.createOpenAICompatible({
+  name: "company-gateway",
+  apiBase: "https://llm.example.com/v1",
+  envApiKey: "COMPANY_LLM_API_KEY",
+  metadata: {
+    documentationUrl: "https://developers.example.com/llm",
+    capabilities: {
+      completion: true,
+      streaming: true,
+      embedding: true,
+      listModels: true,
+      responses: false,
+      vision: false,
+      reasoning: false,
+      moderation: false,
+      imageGeneration: false,
+      audioSpeech: false,
+      audioTranscription: false,
+      batch: false,
+      messages: false,
+      rerank: false,
+    },
+  },
+});
+```
+
+This creates a standalone client. It does not add the name to the global registry. Use a custom
+adapter and `registerProvider()` when name-based creation is required across the application.

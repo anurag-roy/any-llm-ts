@@ -1,0 +1,66 @@
+---
+title: Streaming
+description: Consume normalized streaming chunks with AsyncIterable.
+---
+
+Set `stream: true` to receive an `AsyncIterable<ChatCompletionChunk>` instead of a single
+`ChatCompletion`.
+
+```ts
+import { completion } from "any-llm-ts";
+
+const stream = await completion({
+  provider: "groq",
+  model: "llama-3.3-70b-versatile",
+  messages: [{ role: "user", content: "Write a haiku about TypeScript." }],
+  stream: true,
+});
+
+for await (const chunk of stream) {
+  process.stdout.write(chunk.choices[0]?.delta.content ?? "");
+}
+```
+
+## Collect text
+
+```ts
+let text = "";
+
+for await (const chunk of stream) {
+  text += chunk.choices[0]?.delta.content ?? "";
+}
+```
+
+Chunks can also contain reasoning text and partial tool calls:
+
+```ts
+for await (const chunk of stream) {
+  for (const choice of chunk.choices) {
+    const { content, reasoning, toolCalls } = choice.delta;
+    // Handle each field independently.
+  }
+}
+```
+
+## Error boundary
+
+Errors can occur while the provider creates the stream or later while your application consumes
+it. The adapter normalizes both cases into the common error hierarchy.
+
+```ts
+try {
+  const stream = await llm.completion({ ...params, stream: true });
+
+  for await (const chunk of stream) {
+    // Consumption errors are caught here too.
+  }
+} catch (error) {
+  // Inspect AnyLLMError subclasses.
+}
+```
+
+<Callout title="Keep the literal type">
+  If `stream` comes from a plain `boolean` variable, the inferred result may be a union of the
+  streamed and non-streamed forms. Narrow the value first or use a literal `true`/`false` when you
+  want the most specific return type.
+</Callout>
