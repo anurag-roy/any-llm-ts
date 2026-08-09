@@ -1,5 +1,16 @@
 import { ArrowRight, Braces, PlugZap, RefreshCw } from "lucide-react";
+import { ServerCodeBlock } from "fumadocs-ui/components/codeblock.rsc";
 import Link from "next/link";
+
+const quickstartCode = `import { completion } from "any-llm-ts";
+
+const response = await completion({
+  provider: "openai",
+  model: "gpt-4.1-mini",
+  messages: [{ role: "user", content: "Hello!" }],
+});
+
+console.log(response.choices[0]?.message.content);`;
 
 const features = [
   {
@@ -49,25 +60,28 @@ export default function HomePage() {
           </Link>
         </div>
 
-        <div className="mt-14 w-full max-w-3xl overflow-hidden rounded-xl border bg-fd-card text-left shadow-2xl shadow-fd-primary/5">
-          <div className="flex items-center gap-2 border-b px-4 py-3">
-            <span className="size-2.5 rounded-full bg-red-400" />
-            <span className="size-2.5 rounded-full bg-amber-400" />
-            <span className="size-2.5 rounded-full bg-emerald-400" />
-            <span className="ml-2 font-mono text-xs text-fd-muted-foreground">quickstart.ts</span>
-          </div>
-          <pre className="overflow-x-auto p-5 text-sm leading-7 md:p-7">
-            <code>{`import { completion } from "any-llm-ts";
-
-const response = await completion({
-  provider: "openai",
-  model: "gpt-4.1-mini",
-  messages: [{ role: "user", content: "Hello!" }],
-});
-
-console.log(response.choices[0]?.message.content);`}</code>
-          </pre>
-        </div>
+        <ServerCodeBlock
+          code={quickstartCode}
+          lang="ts"
+          codeblock={{
+            "aria-label": "TypeScript quickstart example",
+            allowCopy: false,
+            className:
+              "mt-14 w-full max-w-3xl text-left shadow-2xl shadow-fd-primary/5",
+            id: "quickstart-code",
+            icon: (
+              <span aria-hidden="true" className="flex gap-2">
+                <span className="size-2.5 rounded-full bg-red-400" />
+                <span className="size-2.5 rounded-full bg-amber-400" />
+                <span className="size-2.5 rounded-full bg-emerald-400" />
+              </span>
+            ),
+            title: <span className="font-mono text-xs">quickstart.ts</span>,
+            viewportProps: {
+              className: "px-5 py-5 text-sm leading-7 md:px-7 md:py-7",
+            },
+          }}
+        />
       </section>
 
       <section className="mx-auto grid w-full max-w-6xl gap-4 px-6 pb-24 md:grid-cols-3">
