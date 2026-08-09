@@ -33,13 +33,13 @@ production URL. Elsewhere, it uses `http://localhost:3000` unless `NEXT_PUBLIC_S
 Import `anurag-roy/any-llm-ts` as a new Vercel project, then use these settings:
 
 - Root Directory: `apps/docs`
-- Include source files outside the Root Directory: enabled
-- Framework Preset: Next.js
 - Node.js Version: 24.x
-- Build Command and Output Directory: use the detected Next.js defaults
+- Build settings: use the values committed in `apps/docs/vercel.json`
 
-The outside-source option is required because API reference tables read the library's root `src/`
-and `tsconfig.json` during the docs build. Do not set `NEXT_PUBLIC_BASE_PATH` on Vercel.
+The committed Vercel configuration selects Next.js and publishes the static export from `out`.
+The API reference build also reads the library's root `src/` and `tsconfig.json`; Vercel's Git build
+checks out those files even though `apps/docs` is the project Root Directory. Do not set
+`NEXT_PUBLIC_BASE_PATH` on Vercel.
 
 After adding a custom domain, set `NEXT_PUBLIC_SITE_URL` to its full HTTPS origin for the Production
 environment and redeploy. This keeps canonical metadata pinned to the custom domain.
