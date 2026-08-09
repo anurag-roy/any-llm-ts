@@ -36,7 +36,8 @@ Import `anurag-roy/any-llm-ts` as a new Vercel project, then use these settings:
 - Node.js Version: 24.x
 - Build settings: use the values committed in `apps/docs/vercel.json`
 
-The committed Vercel configuration selects Next.js and publishes the static export from `out`.
+The committed Vercel configuration selects Next.js and clears custom build/output overrides so
+Vercel's Next.js builder handles the static export from `out`.
 The API reference build also reads the library's root `src/` and `tsconfig.json`; Vercel's Git build
 checks out those files even though `apps/docs` is the project Root Directory. Do not set
 `NEXT_PUBLIC_BASE_PATH` on Vercel.
