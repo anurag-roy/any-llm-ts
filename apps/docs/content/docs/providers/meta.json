@@ -1,4 +1,4 @@
 {
   "title": "Providers",
-  "pages": ["index", "custom-endpoints", "custom-adapters"]
+  "pages": ["index", "gemini", "custom-endpoints", "custom-adapters"]
 }

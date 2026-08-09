@@ -37,6 +37,7 @@ export {
 } from "./errors.js";
 export { BaseProvider } from "./providers/base.js";
 export { AnthropicProvider } from "./providers/anthropic.js";
+export { GeminiProvider } from "./providers/gemini.js";
 export { AzureOpenAIProvider, OpenAIProvider } from "./providers/openai.js";
 export { registerProvider } from "./providers/registry.js";
 export type { ProviderFactory } from "./providers/registry.js";

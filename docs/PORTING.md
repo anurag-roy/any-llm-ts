@@ -67,4 +67,6 @@ The Python project has native adapters for additional non-OpenAI-compatible APIs
 6. Cover request conversion, response conversion, every stream event used, tool calls, and error paths with SDK-mocked unit tests.
 7. Add credential-gated integration tests before advertising live verification.
 
-Good candidates for subsequent native adapters are Gemini, Amazon Bedrock, Cohere, Voyage, and Mistral features that are not exposed through its OpenAI-compatible API.
+Gemini is implemented as a native adapter using Google's official Gen AI SDK. Good candidates for
+subsequent native adapters are Amazon Bedrock, Cohere, Voyage, and Mistral features that are not
+exposed through its OpenAI-compatible API.

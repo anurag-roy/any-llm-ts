@@ -10,7 +10,9 @@ Pass a provider-compatible response format through the common `responseFormat` f
 ```ts
 const response = await llm.completion({
   model: "gpt-4.1-mini",
-  messages: [{ role: "user", content: "Extract the city from: I live in Kolkata." }],
+  messages: [
+    { role: "user", content: "Extract the city from: I live in Kolkata." },
+  ],
   responseFormat: {
     type: "json_schema",
     json_schema: {
@@ -31,6 +33,11 @@ For Anthropic, `responseFormat.type` must be `json_schema`, and the schema must 
 `responseFormat.json_schema.schema`. The adapter translates it to Anthropic's structured-output
 configuration.
 
+Gemini accepts `json_schema`, `json_object`, and `text`. For `json_schema`, the adapter sends the
+schema through the native Google Gen AI SDK and requests the `application/json` response MIME type.
+If Gemini reports truncation or content filtering before structured output is complete, the adapter
+rejects with `ContextLengthExceededError` or `ContentFilterError` instead of returning partial JSON.
+
 The library returns model output as text. Parse and validate it in your application with the schema
 library of your choice.
 
@@ -49,6 +56,7 @@ Supported normalized values are `none`, `minimal`, `low`, `medium`, `high`, `xhi
 normalized to `message.reasoning` or `delta.reasoning`.
 
 <Callout title="Treat reasoning as optional">
-  A provider or model may use reasoning internally without returning it. Always handle the
-  `reasoning` field as optional and avoid making application correctness depend on it.
+  A provider or model may use reasoning internally without returning it. Always
+  handle the `reasoning` field as optional and avoid making application
+  correctness depend on it.
 </Callout>

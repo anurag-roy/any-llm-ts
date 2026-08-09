@@ -5,6 +5,8 @@
   "keywords": [
     "ai",
     "anthropic",
+    "gemini",
+    "google",
     "llm",
     "openai",
     "typescript"
@@ -59,6 +61,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
+    "@google/genai": "^2.16.0",
     "openai": "^7.4.0"
   },
   "devDependencies": {

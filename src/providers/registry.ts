@@ -2,6 +2,7 @@ import { UnsupportedProviderError } from "../errors.js";
 import type { ProviderCapabilities, ProviderMetadata, ProviderOptions } from "../types.js";
 import { AnthropicProvider } from "./anthropic.js";
 import type { BaseProvider } from "./base.js";
+import { GeminiProvider } from "./gemini.js";
 import {
   AzureOpenAIProvider,
   OpenAIProvider,
@@ -375,6 +376,18 @@ addBuiltIn("anthropic", {
     envApiBase: "ANTHROPIC_BASE_URL",
     envApiKey: "ANTHROPIC_API_KEY",
     name: "anthropic",
+    requiresApiKey: true,
+  },
+});
+
+addBuiltIn("gemini", {
+  create: (options) => new GeminiProvider(options),
+  metadata: {
+    capabilities: capabilities({ embedding: true, reasoning: true, vision: true }),
+    documentationUrl: "https://ai.google.dev/gemini-api/docs",
+    envApiBase: "GOOGLE_GEMINI_BASE_URL",
+    envApiKey: "GEMINI_API_KEY or GOOGLE_API_KEY",
+    name: "gemini",
     requiresApiKey: true,
   },
 });
