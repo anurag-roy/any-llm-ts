@@ -12,7 +12,7 @@ An independent TypeScript port inspired by [mozilla-ai/any-llm](https://github.c
 
 `any-llm-ts` is a thin, framework-independent layer over official provider SDKs. It gives applications one API for chat completions, streaming, tools, embeddings, model discovery, the OpenAI Responses API, images, moderation, and audio without requiring a hosted proxy.
 
-The package uses the official OpenAI and Anthropic SDKs. OpenAI-compatible providers share a data-driven adapter, so switching providers is usually one string change.
+The package uses the official OpenAI, Anthropic, and Google Gen AI SDKs. OpenAI-compatible providers share a data-driven adapter, so switching providers is usually one string change.
 
 ## Installation
 
@@ -36,7 +36,7 @@ const response = await completion({
 console.log(response.choices[0]?.message.content);
 ```
 
-Set the provider's conventional environment variable first, such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `MISTRAL_API_KEY`. You can also pass `apiKey` explicitly.
+Set the provider's conventional environment variable first, such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or `MISTRAL_API_KEY`. You can also pass `apiKey` explicitly.
 
 The combined `provider:model` form is useful for small scripts:
 
@@ -88,7 +88,7 @@ Errors raised while consuming a stream are normalized just like errors raised wh
 
 ## Tool calling
 
-Tools use the widely supported OpenAI function-tool shape. The Anthropic adapter translates tools, tool choices, assistant tool calls, and tool results in both directions.
+Tools use the widely supported OpenAI function-tool shape. The Anthropic and Gemini adapters translate tools, tool choices, assistant tool calls, and tool results in both directions.
 
 ```ts
 const response = await completion({
@@ -135,13 +135,14 @@ Set `requiresApiKey: false` for a keyless local endpoint.
 
 ## Providers
 
-The initial port includes 37 provider configurations.
+The port includes 38 provider configurations.
 
-| Adapter | Providers |
-| --- | --- |
-| Native Anthropic translation | `anthropic` |
-| Official OpenAI SDK | `openai`, `azureopenai` |
-| OpenAI-compatible registry | `atlascloud`, `cascadia`, `cerebras`, `dashscope`, `databricks`, `deepinfra`, `deepseek`, `edenai`, `fireworks`, `gmi`, `groq`, `inception`, `kenari`, `llama`, `llamacpp`, `llamafile`, `lmstudio`, `minimax`, `mistral`, `moonshot`, `nebius`, `neosantara`, `ollama`, `openrouter`, `perplexity`, `portkey`, `qiniu`, `requesty`, `sambanova`, `telnyx`, `together`, `vllm`, `xai`, `zai` |
+| Adapter                          | Providers                                                                                                                                                                                                                                                                                                                                                                                    |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Native Anthropic translation     | `anthropic`                                                                                                                                                                                                                                                                                                                                                                                  |
+| Native Google Gen AI translation | `gemini`                                                                                                                                                                                                                                                                                                                                                                                     |
+| Official OpenAI SDK              | `openai`, `azureopenai`                                                                                                                                                                                                                                                                                                                                                                      |
+| OpenAI-compatible registry       | `atlascloud`, `cascadia`, `cerebras`, `dashscope`, `databricks`, `deepinfra`, `deepseek`, `edenai`, `fireworks`, `gmi`, `groq`, `inception`, `kenari`, `llama`, `llamacpp`, `llamafile`, `lmstudio`, `minimax`, `mistral`, `moonshot`, `nebius`, `neosantara`, `ollama`, `openrouter`, `perplexity`, `portkey`, `qiniu`, `requesty`, `sambanova`, `telnyx`, `together`, `vllm`, `xai`, `zai` |
 
 Registry metadata is intentionally conservative. Inspect capabilities at runtime instead of assuming every provider implements every OpenAI endpoint:
 
@@ -152,7 +153,7 @@ console.log(metadata.capabilities);
 const providers = AnyLLM.getAllProviderMetadata();
 ```
 
-Provider configuration reflects API compatibility, not a claim that every provider is continuously integration-tested. Native adapters for non-OpenAI-compatible services such as Gemini, Bedrock, Cohere, and Voyage are natural follow-up work.
+Provider configuration reflects API compatibility, not a claim that every provider is continuously integration-tested. Native adapters for other non-OpenAI-compatible services such as Bedrock, Cohere, and Voyage are natural follow-up work.
 
 ## Other operations
 

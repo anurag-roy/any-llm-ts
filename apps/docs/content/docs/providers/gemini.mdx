@@ -1,0 +1,194 @@
+---
+title: Gemini
+description: Use Google's native Gemini API for completions, streaming, tools, thinking, multimodal input, embeddings, and model discovery.
+---
+
+The `gemini` adapter uses Google's official `@google/genai` SDK. It translates the common
+any-llm-ts request and response shapes rather than routing through Gemini's OpenAI-compatible
+endpoint.
+
+## Configure credentials
+
+Create a Gemini API key in Google AI Studio, then set either supported environment variable:
+
+```bash
+export GEMINI_API_KEY="..."
+# GOOGLE_API_KEY is also supported as a fallback.
+```
+
+You can override the key and native API base programmatically:
+
+```ts
+import { AnyLLM } from "any-llm-ts";
+
+const gemini = AnyLLM.create("gemini", {
+  apiKey: process.env.GEMINI_API_KEY,
+  apiBase: "https://generativelanguage.googleapis.com",
+  clientOptions: {
+    apiVersion: "v1beta",
+  },
+});
+```
+
+`GOOGLE_GEMINI_BASE_URL` is the environment-variable equivalent of `apiBase`. SDK constructor
+fields belong in `clientOptions`; per-request `GenerateContentConfig` fields belong in
+`providerOptions` and use the Google SDK's camel-cased names.
+
+## Complete and stream
+
+```ts
+import { completion } from "any-llm-ts";
+
+const response = await completion({
+  provider: "gemini",
+  model: "gemini-2.5-flash",
+  messages: [
+    { role: "system", content: "Be concise." },
+    { role: "user", content: "Explain discriminated unions." },
+  ],
+});
+
+console.log(response.choices[0]?.message.content);
+```
+
+Set `stream: true` to receive normalized `ChatCompletionChunk` values. Text is exposed on
+`delta.content`, thinking on `delta.reasoning`, and tool calls on `delta.toolCalls`.
+
+System and developer messages are combined into Gemini's `systemInstruction`. User, assistant,
+and tool messages are translated into native `Content` and `Part` values.
+
+## Thinking
+
+Use the common reasoning-effort vocabulary:
+
+```ts
+const response = await gemini.completion({
+  model: "gemini-2.5-pro",
+  messages: [{ role: "user", content: "Solve this carefully." }],
+  reasoningEffort: "high",
+});
+
+console.log(response.choices[0]?.message.reasoning);
+```
+
+The adapter maps `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` to Gemini thinking budgets.
+Use `none` to disable returned thoughts or `auto` to leave thinking configuration to the model.
+Reasoning is optional because availability depends on the selected model and account.
+
+## Function and built-in tools
+
+Function tools use the common OpenAI-shaped declaration:
+
+```ts
+const response = await gemini.completion({
+  model: "gemini-2.5-flash",
+  messages: [{ role: "user", content: "What's the weather in Paris?" }],
+  tools: [
+    {
+      type: "function",
+      function: {
+        name: "get_weather",
+        description: "Get the weather for a city",
+        parameters: {
+          type: "object",
+          properties: { city: { type: "string" } },
+          required: ["city"],
+        },
+      },
+    },
+  ],
+  toolChoice: "auto",
+});
+```
+
+`toolChoice` supports `auto`, `required`, `none`, `validated`, and a named function choice. Native
+built-ins can be requested with `{ type: "google_search" }`, `{ type: "code_execution" }`, or
+`{ type: "url_context" }`.
+
+Gemini thought signatures are preserved at
+`toolCall.extraContent.google.thoughtSignature`. Pass the returned tool call back unchanged in the
+next assistant message so the adapter can return the signature to Gemini. The adapter adds Google's
+documented validator-bypass sentinel only when an older or manually constructed first function call
+has no signature. Omit `parallelToolCalls`; Gemini does not implement that normalized request flag.
+
+## Images, files, and audio
+
+The adapter translates common message content blocks:
+
+```ts
+await gemini.completion({
+  model: "gemini-2.5-flash",
+  messages: [
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "Describe this image and PDF." },
+        {
+          type: "image_url",
+          image_url: { url: "https://example.com/photo.webp" },
+        },
+        {
+          type: "file",
+          file: {
+            file_id: "https://example.com/report.pdf",
+            filename: "report.pdf",
+          },
+        },
+      ],
+    },
+  ],
+});
+```
+
+Images and files can use a URI or a base64 data URL. `input_audio` supports base64 MP3 and WAV.
+Inline payloads are validated before the request and must not exceed Gemini's 20 MB inline-data
+limit. For larger content, upload it with Google's Files API and pass its URI as `file.file_id`.
+
+## Structured JSON
+
+Gemini supports `text`, `json_object`, and `json_schema` response formats:
+
+```ts
+const response = await gemini.completion({
+  model: "gemini-2.5-flash",
+  messages: [{ role: "user", content: "Extract the city: I live in Kolkata." }],
+  responseFormat: {
+    type: "json_schema",
+    json_schema: {
+      name: "location",
+      schema: {
+        type: "object",
+        properties: { city: { type: "string" } },
+        required: ["city"],
+      },
+    },
+  },
+});
+```
+
+The returned content remains a string for consistency across providers. Parse and validate it in
+your application.
+
+## Embeddings and models
+
+```ts
+const embeddings = await gemini.embedding({
+  model: "gemini-embedding-001",
+  input: ["First document", "Second document"],
+  dimensions: 768,
+  providerOptions: { taskType: "RETRIEVAL_DOCUMENT" },
+});
+
+const models = await gemini.listModels({ pageSize: 20 });
+```
+
+Gemini embeddings accept a string or an array of strings and return float vectors. Base64
+embedding output is not supported. Model listing consumes all pages returned by the SDK.
+
+## Capability boundary
+
+The adapter currently advertises completions, streaming, thinking, multimodal input, embeddings,
+and model listing. The Google API also has batch functionality, but any-llm-ts does not yet expose a
+provider-neutral batch API, so `metadata.capabilities.batch` remains `false`. Image generation,
+moderation, speech, transcription, the OpenAI Responses API, and a raw native-messages method are
+also outside this adapter's current public surface.

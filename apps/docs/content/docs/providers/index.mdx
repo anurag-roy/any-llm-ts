@@ -4,8 +4,8 @@ description: Registered providers, environment variables, and capability metadat
 full: true
 ---
 
-The registry contains native adapters for Anthropic, OpenAI, and Azure OpenAI, plus a data-driven
-set of OpenAI-compatible providers. The table below is generated from
+The registry contains native adapters for Anthropic, Gemini, OpenAI, and Azure OpenAI, plus a
+data-driven set of OpenAI-compatible providers. The table below is generated from
 `AnyLLM.getAllProviderMetadata()` during development and checked for drift in CI.
 
 <ProviderTable />
@@ -31,17 +31,18 @@ Each `ProviderMetadata` object includes:
 
 ## Adapter categories
 
-| Adapter | Providers |
-| --- | --- |
-| Native Anthropic translation | `anthropic` |
-| Official OpenAI SDK | `openai`, `azureopenai` |
-| OpenAI-compatible registry | All other rows in the table |
+| Adapter                          | Providers                   |
+| -------------------------------- | --------------------------- |
+| Native Anthropic translation     | `anthropic`                 |
+| Native Google Gen AI translation | `gemini`                    |
+| Official OpenAI SDK              | `openai`, `azureopenai`     |
+| OpenAI-compatible registry       | All other rows in the table |
 
 Provider registration indicates API compatibility. It is not a claim that every provider, model,
 region, account tier, and operation is continuously tested with live credentials.
 
 ## Not yet included
 
-Native adapters for non-OpenAI-compatible services such as Gemini, Bedrock, Cohere, and Voyage are
-not part of the current port. Reranking is also not implemented. Until those adapters exist, the
-docs do not present those features as available.
+Native adapters for non-OpenAI-compatible services such as Bedrock, Cohere, and Voyage are not part
+of the current port. Reranking is also not implemented. Until those adapters exist, the docs do not
+present those features as available.
