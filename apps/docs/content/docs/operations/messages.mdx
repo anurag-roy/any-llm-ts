@@ -1,0 +1,68 @@
+---
+title: Messages API
+description: Use a normalized Messages-shaped API across native and compatible providers.
+---
+
+`messages()` accepts Messages-style content blocks, tools, thinking controls, and stream events.
+Anthropic-family adapters use their native Messages protocol. Other compatible providers translate
+the request through chat completions and translate the result back into `MessageResponse`.
+
+```ts
+import { messages } from "any-llm-ts";
+
+const response = await messages({
+  provider: "anthropic",
+  model: "claude-sonnet-4-5",
+  maxTokens: 512,
+  system: "Be concise.",
+  messages: [{ role: "user", content: "Explain mapped types." }],
+});
+
+for (const block of response.content) {
+  if (block.type === "text") console.log(block.text);
+}
+```
+
+## Tools
+
+```ts
+const response = await llm.messages({
+  model,
+  maxTokens: 512,
+  messages: [{ role: "user", content: "Look up order 123." }],
+  tools: [{
+    name: "get_order",
+    description: "Retrieve an order",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "string" } },
+      required: ["id"],
+    },
+  }],
+  toolChoice: { type: "auto" },
+});
+```
+
+Tool uses and results are normalized as `tool_use` and `tool_result` blocks. Providers may preserve
+signatures and other native fields in their content blocks.
+
+## Streaming
+
+```ts
+const events = await llm.messages({
+  model,
+  maxTokens: 512,
+  messages: [{ role: "user", content: "Count to five." }],
+  stream: true,
+});
+
+for await (const event of events) {
+  if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+    process.stdout.write(event.delta.text);
+  }
+}
+```
+
+Compatibility streams emit the standard message-start, content-block, message-delta, and
+message-stop lifecycle. Native-only beta and context-management options reject on adapters that
+cannot preserve their semantics.

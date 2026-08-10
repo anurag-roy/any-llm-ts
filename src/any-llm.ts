@@ -1,24 +1,56 @@
-import { InvalidModelSyntaxError } from "./errors.js";
+import {
+  InvalidModelSyntaxError,
+  UnsupportedParameterError,
+} from "./errors.js";
 import type {
+  Batch,
+  BatchResult,
   ChatCompletion,
   ChatCompletionChunk,
   CompletionParams,
   CompletionResult,
+  CreateBatchParams,
   EmbeddingParams,
   EmbeddingResponse,
   ImageGenerationParams,
   ImageGenerationResponse,
+  ListBatchesParams,
   Model,
+  MessageResponse,
+  MessageResult,
+  MessageStreamEvent,
+  MessagesParams,
   ModerationParams,
+  ModerationResponse,
   OpenAICompatibleOptions,
   ProviderMetadata,
   ProviderOptions,
+  ParsedChatCompletion,
+  ParsedMessageResponse,
+  ParsedResponse,
+  RerankParams,
+  RerankResponse,
   ResponseResult,
+  Response,
+  ResponseStreamEvent,
   ResponsesParams,
   SpeechParams,
+  StructuredCompletionParams,
+  StructuredMessagesParams,
+  StructuredResponsesParams,
   Transcription,
   TranscriptionParams,
 } from "./types.js";
+import {
+  completionResponseFormat,
+  isStructuredOutputFormat,
+  messagesOutputFormat,
+  parseCompletion,
+  parseMessage,
+  parseResponse,
+  responsesTextFormat,
+} from "./structured-output.js";
+import { isAsyncIterable } from "./utils.js";
 import type { BaseProvider } from "./providers/base.js";
 import { OpenAIProvider } from "./providers/openai.js";
 import {
@@ -51,6 +83,7 @@ export class AnyLLM {
       apiBase: options.apiBase,
       documentationUrl: options.metadata?.documentationUrl ?? "https://platform.openai.com/docs/api-reference",
       name: options.name.trim().toLowerCase(),
+      promptCacheKeySupport: "passthrough" as const,
       ...(options.metadata?.capabilities === undefined ? {} : { capabilities: options.metadata.capabilities }),
       ...(options.envApiBase === undefined ? {} : { envApiBase: options.envApiBase }),
       ...(options.envApiKey === undefined ? {} : { envApiKey: options.envApiKey }),
@@ -102,24 +135,63 @@ export class AnyLLM {
     return this.metadata.name;
   }
 
+  private validatePromptCacheKey(value: string | undefined): void {
+    if (
+      value !== undefined &&
+      this.metadata.promptCacheKeySupport === "unsupported"
+    ) {
+      throw new UnsupportedParameterError("promptCacheKey", this.provider);
+    }
+  }
+
+  completion<T>(params: StructuredCompletionParams<T>): Promise<ParsedChatCompletion<T>>;
   completion(params: CompletionParams & { stream: true }): Promise<AsyncIterable<ChatCompletionChunk>>;
   completion(params: CompletionParams & { stream?: false | undefined }): Promise<ChatCompletion>;
   completion<TStream extends boolean | undefined>(
     params: CompletionParams & { stream?: TStream },
   ): Promise<CompletionResult<TStream>>;
   async completion(
-    params: CompletionParams,
-  ): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion> {
-    return this.adapter.completion(params);
+    params: CompletionParams | StructuredCompletionParams<unknown>,
+  ): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion | ParsedChatCompletion<unknown>> {
+    this.validatePromptCacheKey(params.promptCacheKey);
+    if (isStructuredOutputFormat(params.responseFormat)) {
+      if (params.stream === true) throw new TypeError("stream is not supported with structured responseFormat.");
+      const format = params.responseFormat;
+      const { stream, ...request } = params;
+      const response = await this.adapter.completion({
+        ...request,
+        responseFormat: completionResponseFormat(format),
+        ...(stream === undefined ? {} : { stream }),
+      });
+      if (isAsyncIterable(response)) throw new TypeError("A provider returned a stream for a non-streaming request.");
+      return parseCompletion(response, format);
+    }
+    return this.adapter.completion(params as CompletionParams);
   }
 
-  responses(params: ResponsesParams & { stream: true }): Promise<AsyncIterable<unknown>>;
-  responses(params: ResponsesParams & { stream?: false | undefined }): Promise<unknown>;
+  responses<T>(params: StructuredResponsesParams<T>): Promise<ParsedResponse<T>>;
+  responses(params: ResponsesParams & { stream: true }): Promise<AsyncIterable<ResponseStreamEvent>>;
+  responses(params: ResponsesParams & { stream?: false | undefined }): Promise<Response>;
   responses<TStream extends boolean | undefined>(
     params: ResponsesParams & { stream?: TStream },
   ): Promise<ResponseResult<TStream>>;
-  async responses(params: ResponsesParams): Promise<unknown> {
-    return this.adapter.responses(params);
+  async responses(
+    params: ResponsesParams | StructuredResponsesParams<unknown>,
+  ): Promise<AsyncIterable<ResponseStreamEvent> | ParsedResponse<unknown> | Response> {
+    this.validatePromptCacheKey(params.promptCacheKey);
+    if (isStructuredOutputFormat(params.responseFormat)) {
+      if (params.stream === true) throw new TypeError("stream is not supported with structured responseFormat.");
+      const format = params.responseFormat;
+      const { stream, ...request } = params;
+      const response = await this.adapter.responses({
+        ...request,
+        responseFormat: responsesTextFormat(format),
+        ...(stream === undefined ? {} : { stream }),
+      });
+      if (isAsyncIterable(response)) throw new TypeError("A provider returned a stream for a non-streaming request.");
+      return parseResponse(response, format);
+    }
+    return this.adapter.responses(params as ResponsesParams);
   }
 
   embedding(params: EmbeddingParams): Promise<EmbeddingResponse> {
@@ -142,11 +214,56 @@ export class AnyLLM {
     return this.adapter.speech(params);
   }
 
-  moderation(params: ModerationParams): Promise<unknown> {
+  moderation(params: ModerationParams): Promise<ModerationResponse> {
     return this.adapter.moderation(params);
   }
 
-  messages(params: Record<string, unknown>): Promise<unknown> {
-    return this.adapter.messages(params);
+  createBatch(params: CreateBatchParams): Promise<Batch> {
+    return this.adapter.createBatch(params);
+  }
+
+  retrieveBatch(batchId: string, providerOptions?: Record<string, unknown>): Promise<Batch> {
+    return this.adapter.retrieveBatch(batchId, providerOptions);
+  }
+
+  cancelBatch(batchId: string, providerOptions?: Record<string, unknown>): Promise<Batch> {
+    return this.adapter.cancelBatch(batchId, providerOptions);
+  }
+
+  listBatches(params: ListBatchesParams = {}): Promise<Batch[]> {
+    return this.adapter.listBatches(params);
+  }
+
+  retrieveBatchResults(batchId: string, providerOptions?: Record<string, unknown>): Promise<BatchResult> {
+    return this.adapter.retrieveBatchResults(batchId, providerOptions);
+  }
+
+  rerank(params: RerankParams): Promise<RerankResponse> {
+    return this.adapter.rerank(params);
+  }
+
+  messages<T>(params: StructuredMessagesParams<T>): Promise<ParsedMessageResponse<T>>;
+  messages(params: MessagesParams & { stream: true }): Promise<AsyncIterable<MessageStreamEvent>>;
+  messages(params: MessagesParams & { stream?: false | undefined }): Promise<MessageResponse>;
+  messages<TStream extends boolean | undefined>(
+    params: MessagesParams & { stream?: TStream },
+  ): Promise<MessageResult<TStream>>;
+  async messages(
+    params: MessagesParams | StructuredMessagesParams<unknown>,
+  ): Promise<AsyncIterable<MessageStreamEvent> | MessageResponse | ParsedMessageResponse<unknown>> {
+    this.validatePromptCacheKey(params.promptCacheKey);
+    if (isStructuredOutputFormat(params.outputFormat)) {
+      if (params.stream === true) throw new TypeError("stream is not supported with structured outputFormat.");
+      const format = params.outputFormat;
+      const { stream, ...request } = params;
+      const response = await this.adapter.messages({
+        ...request,
+        outputFormat: messagesOutputFormat(format),
+        ...(stream === undefined ? {} : { stream }),
+      });
+      if (isAsyncIterable(response)) throw new TypeError("A provider returned a stream for a non-streaming request.");
+      return parseMessage(response, format);
+    }
+    return this.adapter.messages(params as MessagesParams);
   }
 }

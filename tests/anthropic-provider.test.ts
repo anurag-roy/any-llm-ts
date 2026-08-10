@@ -1,7 +1,8 @@
 import type Anthropic from "@anthropic-ai/sdk";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { MissingApiKeyError, ProviderError } from "../src/index.js";
+import { BatchNotCompleteError, MissingApiKeyError, ProviderError } from "../src/index.js";
 import { AnthropicProvider } from "../src/providers/anthropic.js";
 import type { ChatCompletion, ChatCompletionChunk } from "../src/types.js";
 
@@ -306,18 +307,125 @@ describe("Anthropic provider", () => {
   });
 
   it("passes through native Messages API responses and streams", async () => {
-    async function* events(): AsyncIterable<{ type: string }> {
-      yield { type: "message_start" };
-    }
-    const create = vi.fn().mockResolvedValueOnce({ id: "native" }).mockResolvedValueOnce(events());
-    const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
-    await expect(provider.messages({ max_tokens: 10, messages: [], model: "claude" })).resolves.toEqual({
+    const native = {
+      content: [
+        { text: "hello", type: "text" },
+        { signature: "signature", thinking: "reasoning", type: "thinking" },
+        { id: "tool-1", input: { city: "Paris" }, name: "weather", type: "tool_use" },
+        { data: true, type: "server_block" },
+      ],
       id: "native",
+      model: "claude",
+      role: "assistant",
+      stop_reason: "end_turn",
+      type: "message",
+      usage: {
+        cache_creation_input_tokens: 1,
+        cache_read_input_tokens: 2,
+        input_tokens: 4,
+        output_tokens: 3,
+      },
+    };
+    async function* events(): AsyncIterable<Record<string, unknown>> {
+      yield { message: native, type: "message_start" };
+      yield { content_block: { text: "", type: "text" }, index: 0, type: "content_block_start" };
+      yield { delta: { text: "hello", type: "text_delta" }, index: 0, type: "content_block_delta" };
+      yield { content_block: { thinking: "", type: "thinking" }, index: 1, type: "content_block_start" };
+      yield { content_block: { id: "tool-2", input: {}, name: "lookup", type: "tool_use" }, index: 2, type: "content_block_start" };
+      yield { delta: { partial_json: "{}", type: "input_json_delta" }, index: 2, type: "content_block_delta" };
+      yield { index: 2, type: "content_block_stop" };
+      yield {
+        delta: { stop_reason: "tool_use", stop_sequence: "STOP" },
+        type: "message_delta",
+        usage: { cache_read_input_tokens: 2, input_tokens: 4, output_tokens: 3 },
+      };
+      yield { type: "message_stop" };
+    }
+    const create = vi.fn().mockResolvedValueOnce(native).mockResolvedValueOnce(events());
+    const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
+    await expect(provider.messages({
+      cacheControl: { type: "ephemeral" },
+      maxTokens: 10,
+      messages: [
+        {
+          content: [
+            { cacheControl: { type: "ephemeral" }, text: "hello", type: "text" },
+            { content: "result", isError: false, toolUseId: "tool-1", type: "tool_result" },
+            { source: { data: "aGVsbG8=", mediaType: "image/png", type: "base64" }, type: "image" },
+            { custom: true, type: "custom" },
+          ],
+          role: "user",
+        },
+      ],
+      metadata: { userId: "user-1" },
+      model: "claude",
+      outputFormat: { format: { schema: { type: "object" }, type: "json_schema" } },
+      providerOptions: { custom_option: true },
+      stopSequences: ["STOP"],
+      system: [{ cacheControl: { type: "ephemeral" }, text: "system", type: "text" }],
+      temperature: 0.2,
+      thinking: { budget_tokens: 1_000, type: "enabled" },
+      toolChoice: { name: "weather", type: "tool" },
+      tools: [{ cacheControl: { type: "ephemeral" }, inputSchema: { type: "object" }, name: "weather" }],
+      topK: 10,
+      topP: 0.8,
+    })).resolves.toMatchObject({
+      content: [
+        { text: "hello", type: "text" },
+        { signature: "signature", thinking: "reasoning", type: "thinking" },
+        { id: "tool-1", input: { city: "Paris" }, name: "weather", type: "tool_use" },
+        { data: true, type: "server_block" },
+      ],
+      id: "native",
+      stopReason: "end_turn",
+      usage: {
+        cacheCreationInputTokens: 1,
+        cacheReadInputTokens: 2,
+        inputTokens: 4,
+        outputTokens: 3,
+      },
     });
-    const stream = await provider.messages({ max_tokens: 10, messages: [], model: "claude", stream: true });
+    const stream = await provider.messages({ maxTokens: 10, messages: [], model: "claude", stream: true });
     const values = [];
     for await (const event of stream as AsyncIterable<unknown>) values.push(event);
-    expect(values).toEqual([{ type: "message_start" }]);
+    expect(values).toMatchObject([
+      { message: { id: "native", stopReason: "end_turn" }, type: "message_start" },
+      { contentBlock: { text: "", type: "text" }, index: 0, type: "content_block_start" },
+      { delta: { text: "hello", type: "text_delta" }, index: 0, type: "content_block_delta" },
+      { contentBlock: { thinking: "", type: "thinking" }, index: 1, type: "content_block_start" },
+      { contentBlock: { id: "tool-2", type: "tool_use" }, index: 2, type: "content_block_start" },
+      { delta: { partialJson: "{}", type: "input_json_delta" }, index: 2, type: "content_block_delta" },
+      { index: 2, type: "content_block_stop" },
+      {
+        delta: { stopReason: "tool_use", stopSequence: "STOP" },
+        type: "message_delta",
+        usage: { cacheReadInputTokens: 2, inputTokens: 4, outputTokens: 3 },
+      },
+      { type: "message_stop" },
+    ]);
+    expect(create).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      cache_control: { type: "ephemeral" },
+      custom_option: true,
+      max_tokens: 10,
+      messages: [
+        {
+          content: [
+            { cache_control: { type: "ephemeral" }, text: "hello", type: "text" },
+            { content: "result", is_error: false, tool_use_id: "tool-1", type: "tool_result" },
+            {
+              source: { data: "aGVsbG8=", media_type: "image/png", type: "base64", url: undefined },
+              type: "image",
+            },
+            { custom: true, type: "custom" },
+          ],
+          role: "user",
+        },
+      ],
+      model: "claude",
+      stop_sequences: ["STOP"],
+      top_k: 10,
+      top_p: 0.8,
+    }));
   });
 
   it("normalizes model pages", async () => {
@@ -330,6 +438,85 @@ describe("Anthropic provider", () => {
     await expect(provider.listModels()).resolves.toMatchObject([
       { created: 1_767_225_600, id: "claude-test", ownedBy: "anthropic" },
     ]);
+  });
+
+  it("supports the Anthropic batch lifecycle", async () => {
+    const batch = {
+      cancel_initiated_at: null,
+      created_at: "2026-01-01T00:00:00.000Z",
+      ended_at: "2026-01-01T00:01:00.000Z",
+      expires_at: "2026-01-02T00:00:00.000Z",
+      id: "msgbatch-1",
+      processing_status: "ended",
+      request_counts: { canceled: 0, errored: 1, expired: 0, processing: 0, succeeded: 2 },
+      results_url: "https://example.com/results",
+      type: "message_batch",
+    };
+    const batches = {
+      cancel: vi.fn().mockResolvedValue({ ...batch, processing_status: "canceling" }),
+      create: vi.fn().mockResolvedValue(batch),
+      list: vi.fn().mockResolvedValue({ data: [batch] }),
+      results: vi.fn(),
+      retrieve: vi.fn().mockResolvedValue(batch),
+    };
+    const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { batches, create: vi.fn() } }));
+    const inputFilePath = fileURLToPath(new URL("./fixtures/batch.jsonl", import.meta.url));
+
+    await expect(
+      provider.createBatch({
+        endpoint: "/v1/chat/completions",
+        inputFilePath,
+        providerOptions: { user_profile_id: "profile-1" },
+      }),
+    ).resolves.toMatchObject({
+      completedAt: 1_767_225_660,
+      createdAt: 1_767_225_600,
+      id: "msgbatch-1",
+      outputFileId: "https://example.com/results",
+      provider: "anthropic",
+      requestCounts: { completed: 2, failed: 1, total: 3 },
+      status: "completed",
+    });
+    expect(batches.create).toHaveBeenCalledWith({
+      requests: [
+        {
+          custom_id: "request-1",
+          params: { max_tokens: 1_024, messages: [{ content: "Hello", role: "user" }], model: "model-a" },
+        },
+      ],
+      user_profile_id: "profile-1",
+    });
+    await expect(provider.retrieveBatch("msgbatch-1")).resolves.toMatchObject({ id: "msgbatch-1" });
+    await expect(provider.cancelBatch("msgbatch-1")).resolves.toMatchObject({ status: "cancelling" });
+    await expect(provider.listBatches({ after: "previous", limit: 2 })).resolves.toMatchObject([
+      { id: "msgbatch-1" },
+    ]);
+    expect(batches.list).toHaveBeenCalledWith({ after_id: "previous", limit: 2 });
+  });
+
+  it("normalizes Anthropic batch results and rejects incomplete batches", async () => {
+    const ended = { processing_status: "ended" };
+    async function* resultEntries() {
+      yield { custom_id: "ok", result: { message: anthropicResponse(), type: "succeeded" } };
+      yield {
+        custom_id: "error",
+        result: { error: { error: { message: "Bad request", type: "invalid_request_error" } }, type: "errored" },
+      };
+      yield { custom_id: "cancelled", result: { type: "canceled" } };
+    }
+    const retrieve = vi.fn().mockResolvedValueOnce(ended).mockResolvedValueOnce({ processing_status: "in_progress" });
+    const results = vi.fn().mockResolvedValue(resultEntries());
+    const batches = { cancel: vi.fn(), create: vi.fn(), list: vi.fn(), results, retrieve };
+    const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { batches, create: vi.fn() } }));
+
+    await expect(provider.retrieveBatchResults("msgbatch-1")).resolves.toMatchObject({
+      results: [
+        { customId: "ok", result: { id: "msg-1", provider: "anthropic" } },
+        { customId: "error", error: { code: "invalid_request_error", message: "Bad request" } },
+        { customId: "cancelled", error: { code: "canceled", message: "Request canceled" } },
+      ],
+    });
+    await expect(provider.retrieveBatchResults("msgbatch-2")).rejects.toBeInstanceOf(BatchNotCompleteError);
   });
 
   it("rejects empty messages and normalizes provider failures", async () => {

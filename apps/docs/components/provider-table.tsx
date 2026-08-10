@@ -3,19 +3,24 @@ import providerData from "@/lib/provider-data.json";
 const capabilityColumns = [
   ["completion", "Chat"],
   ["streaming", "Stream"],
+  ["messages", "Messages"],
   ["embedding", "Embed"],
   ["responses", "Responses"],
+  ["batch", "Batch"],
+  ["rerank", "Rerank"],
   ["vision", "Vision"],
+  ["pdfInput", "PDF"],
   ["reasoning", "Reasoning"],
 ] as const;
 
 export function ProviderTable() {
   return (
     <div className="my-6 overflow-x-auto rounded-lg border">
-      <table className="w-full min-w-[900px] text-sm">
+      <table className="w-full min-w-[1300px] text-sm">
         <thead className="bg-fd-muted/50 text-left">
           <tr>
             <th className="px-3 py-2 font-medium">Provider</th>
+            <th className="px-3 py-2 font-medium">Tier</th>
             <th className="px-3 py-2 font-medium">Environment variable</th>
             {capabilityColumns.map(([, label]) => (
               <th key={label} className="px-3 py-2 text-center font-medium">
@@ -31,6 +36,11 @@ export function ProviderTable() {
                 <a href={provider.documentationUrl} target="_blank" rel="noreferrer">
                   <code>{provider.name}</code>
                 </a>
+              </td>
+              <td className="px-3 py-2">
+                <span className="rounded-full border px-2 py-1 text-xs capitalize">
+                  {provider.tier}
+                </span>
               </td>
               <td className="px-3 py-2 text-fd-muted-foreground">
                 {provider.envApiKey ? <code>{provider.envApiKey}</code> : "Not required"}

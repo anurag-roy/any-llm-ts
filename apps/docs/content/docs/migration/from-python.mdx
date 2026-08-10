@@ -82,11 +82,17 @@ try {
 }
 ```
 
-## Current scope differences
+## Parity and deliberate differences
 
-The TypeScript port currently focuses on chat completions, streaming, tools, embeddings, model
-listing, Responses-compatible APIs, images, moderation, and audio. It does not yet include every
-native Python adapter, batch helper, or reranking integration from the source project.
+The TypeScript port tracks the same provider names and stateless operations as Python source commit
+`f2b11abfb5befb7d89b723eb170e33e60d275ec9`. That includes Messages compatibility, batches,
+reranking, structured output, provider tiers, prompt-cache policy, and the native adapters needed
+by non-OpenAI-compatible services.
+
+The parity contract records three deliberate capability-flag differences. Azure Anthropic and
+Vertex Anthropic do not advertise batches because their TypeScript SDK clients do not expose the
+Messages batch API. Voyage does not advertise Messages because its SDK provides embeddings only,
+even though the Python class inherits a default `True` flag.
 
 For the architectural rationale and a detailed parity map, see
 [`docs/PORTING.md`](https://github.com/anurag-roy/any-llm-ts/blob/main/docs/PORTING.md).

@@ -20,11 +20,11 @@ function completion(
 ```ts
 function responses(
   params: DirectResponsesParams & { stream?: false },
-): Promise<unknown>;
+): Promise<Response>;
 
 function responses(
   params: DirectResponsesParams & { stream: true },
-): Promise<AsyncIterable<unknown>>;
+): Promise<AsyncIterable<ResponseStreamEvent>>;
 ```
 
 ## Other operations
@@ -35,7 +35,14 @@ function listModels(params: DirectProviderOptions & { provider: string }): Promi
 function imageGeneration(params: DirectImageGenerationParams): Promise<ImageGenerationResponse>;
 function transcription(params: DirectTranscriptionParams): Promise<Transcription>;
 function speech(params: DirectSpeechParams): Promise<Uint8Array>;
-function moderation(params: DirectModerationParams): Promise<unknown>;
+function moderation(params: DirectModerationParams): Promise<ModerationResponse>;
+function messages(params: DirectMessagesParams): Promise<MessageResponse>;
+function rerank(params: DirectRerankParams): Promise<RerankResponse>;
+function createBatch(params: DirectCreateBatchParams): Promise<Batch>;
+function retrieveBatch(params: DirectBatchParams): Promise<Batch>;
+function cancelBatch(params: DirectBatchParams): Promise<Batch>;
+function listBatches(params: DirectListBatchesParams): Promise<Batch[]>;
+function retrieveBatchResults(params: DirectBatchParams): Promise<BatchResult>;
 ```
 
 ## Direct provider options

@@ -1,29 +1,48 @@
-import OpenAI, { AzureOpenAI } from "openai";
+import { basename } from "node:path";
+import { readFile } from "node:fs/promises";
+
+import OpenAI, { AzureOpenAI, toFile } from "openai";
 import type { ClientOptions } from "openai";
 
-import { MissingApiKeyError } from "../errors.js";
+import {
+  BatchNotCompleteError,
+  MissingApiKeyError,
+  UnsupportedParameterError,
+} from "../errors.js";
 import type {
+  Batch,
+  BatchResult,
+  BatchStatus,
   ChatCompletion,
   ChatCompletionChunk,
   ChatMessage,
   CompletionParams,
   CompletionUsage,
+  CreateBatchParams,
   EmbeddingParams,
   EmbeddingResponse,
   FinishReason,
   ImageGenerationParams,
   ImageGenerationResponse,
+  ListBatchesParams,
   Model,
   ModerationParams,
+  ModerationResponse,
   ProviderCapabilities,
   ProviderMetadata,
   ProviderOptions,
   ResponsesParams,
+  Response,
+  ResponseStreamEvent,
   SpeechParams,
   ToolCall,
   Transcription,
   TranscriptionParams,
 } from "../types.js";
+import {
+  providerPromptCacheKeySupport,
+  providerTier,
+} from "../provider-metadata.js";
 import { compactObject, getEnvironmentVariable, isAsyncIterable, mapAsyncIterable } from "../utils.js";
 import { BaseProvider } from "./base.js";
 
@@ -35,13 +54,23 @@ export const openAICapabilities: ProviderCapabilities = {
   embedding: true,
   imageGeneration: true,
   listModels: true,
-  messages: false,
+  messages: true,
   moderation: true,
-  reasoning: true,
+  pdfInput: true,
+  reasoning: false,
   rerank: false,
   responses: true,
   streaming: true,
   vision: true,
+};
+
+const baseOpenAICompatibleCapabilities: ProviderCapabilities = {
+  ...openAICapabilities,
+  audioSpeech: false,
+  audioTranscription: false,
+  batch: false,
+  imageGeneration: false,
+  responses: false,
 };
 
 interface OpenAIProviderConfig {
@@ -51,7 +80,22 @@ interface OpenAIProviderConfig {
   envApiBase?: string;
   envApiKey?: string;
   name: string;
+  promptCacheKeySupport?: ProviderMetadata["promptCacheKeySupport"];
+  quirks?: OpenAIProviderQuirks;
   requiresApiKey?: boolean;
+}
+
+interface OpenAIProviderQuirks {
+  defaultModelOwner?: string;
+  finishReasonMap?: Record<string, Exclude<FinishReason, null>>;
+  maxCompletionTokensAsMaxTokens?: boolean;
+  patchLlamaToolSchemas?: boolean;
+  rejectResponsesMaxToolCalls?: boolean;
+  reasoningDirective?: "deepseek" | "openrouter" | "requesty";
+  responseFormatMode?: "cerebras" | "together";
+  rejectResponseFormat?: boolean;
+  rejectStreamingResponseFormat?: boolean;
+  xmlReasoning?: boolean;
 }
 
 interface AzureProviderOptions extends ProviderOptions {
@@ -65,7 +109,10 @@ function resolveApiKey(config: OpenAIProviderConfig, value: string | undefined):
   throw new MissingApiKeyError(config.name, config.envApiKey ?? "provider-specific API key");
 }
 
-function toOpenAIMessage(message: ChatMessage): Record<string, unknown> {
+function toOpenAIMessage(
+  message: ChatMessage,
+  provider: string,
+): Record<string, unknown> {
   const converted: Record<string, unknown> = {
     content: message.content,
     name: message.name,
@@ -79,6 +126,15 @@ function toOpenAIMessage(message: ChatMessage): Record<string, unknown> {
       type: toolCall.type,
       ...(toolCall.extraContent ?? {}),
     }));
+  }
+  if (provider === "deepseek" && message.role === "assistant") {
+    const deepseek = message.extraContent?.deepseek;
+    if (typeof deepseek === "object" && deepseek !== null) {
+      const reasoningContent = (deepseek as Record<string, unknown>).reasoning_content;
+      if (typeof reasoningContent === "string") {
+        converted.reasoning_content = reasoningContent;
+      }
+    }
   }
   return compactObject(converted);
 }
@@ -107,23 +163,39 @@ function normalizeToolCalls(value: unknown): ToolCall[] | undefined {
 function normalizeUsage(value: unknown): CompletionUsage | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const usage = value as Record<string, unknown>;
-  const completionTokens = usage.completion_tokens;
-  const promptTokens = usage.prompt_tokens;
-  const totalTokens = usage.total_tokens;
+  const completionTokens = usage.completion_tokens ?? usage.completionTokens;
+  const promptTokens = usage.prompt_tokens ?? usage.promptTokens;
+  const totalTokens = usage.total_tokens ?? usage.totalTokens;
   if (typeof completionTokens !== "number" || typeof promptTokens !== "number" || typeof totalTokens !== "number") {
     return undefined;
   }
   const normalized: CompletionUsage = { completionTokens, promptTokens, totalTokens };
-  if (typeof usage.completion_tokens_details === "object" && usage.completion_tokens_details !== null) {
-    normalized.completionTokensDetails = usage.completion_tokens_details as Record<string, unknown>;
+  const completionTokensDetails = usage.completion_tokens_details ?? usage.completionTokensDetails;
+  const promptTokensDetails = usage.prompt_tokens_details ?? usage.promptTokensDetails;
+  if (typeof completionTokensDetails === "object" && completionTokensDetails !== null) {
+    normalized.completionTokensDetails = completionTokensDetails as Record<string, unknown>;
   }
-  if (typeof usage.prompt_tokens_details === "object" && usage.prompt_tokens_details !== null) {
-    normalized.promptTokensDetails = usage.prompt_tokens_details as Record<string, unknown>;
+  if (typeof promptTokensDetails === "object" && promptTokensDetails !== null) {
+    normalized.promptTokensDetails = promptTokensDetails as Record<string, unknown>;
+  }
+  const cachedTokens = usage.prompt_cache_hit_tokens;
+  if (
+    typeof cachedTokens === "number" &&
+    cachedTokens > 0 &&
+    normalized.promptTokensDetails === undefined
+  ) {
+    normalized.promptTokensDetails = { cachedTokens };
   }
   return normalized;
 }
 
-function normalizeFinishReason(value: unknown): FinishReason {
+function normalizeFinishReason(
+  value: unknown,
+  mapping: Record<string, Exclude<FinishReason, null>> = {},
+): FinishReason {
+  if (typeof value === "string" && mapping[value] !== undefined) {
+    return mapping[value];
+  }
   if (
     value === "content_filter" ||
     value === "function_call" ||
@@ -136,12 +208,294 @@ function normalizeFinishReason(value: unknown): FinishReason {
   return null;
 }
 
+const reasoningTags = [
+  "reasoning_content",
+  "thinking",
+  "think",
+  "chain_of_thought",
+] as const;
+
+function extractXmlReasoning(content: string): {
+  content: string;
+  reasoning?: string;
+} {
+  const reasoning: string[] = [];
+  let remaining = content;
+  for (const tag of reasoningTags) {
+    const pattern = new RegExp(
+      `<${tag}>([\\s\\S]*?)<\\/${tag}>`,
+      "gu",
+    );
+    remaining = remaining.replace(pattern, (_match, value: string) => {
+      reasoning.push(value);
+      return "";
+    });
+  }
+  const joined = reasoning.join("\n");
+  return {
+    content: remaining.trim(),
+    ...(joined.length === 0 ? {} : { reasoning: joined }),
+  };
+}
+
+interface XmlStreamState {
+  buffer: string;
+  mode: "content" | "reasoning";
+  tag?: string;
+}
+
+function partialTagLength(value: string, tags: string[]): number {
+  let longest = 0;
+  for (const tag of tags) {
+    const limit = Math.min(value.length, tag.length - 1);
+    for (let length = limit; length > 0; length -= 1) {
+      if (value.endsWith(tag.slice(0, length))) {
+        longest = Math.max(longest, length);
+        break;
+      }
+    }
+  }
+  return longest;
+}
+
+function feedXmlReasoning(
+  state: XmlStreamState,
+  value: string,
+  flush: boolean,
+): { content: string; reasoning: string } {
+  state.buffer += value;
+  const content: string[] = [];
+  const reasoning: string[] = [];
+  while (state.buffer.length > 0) {
+    if (state.mode === "content") {
+      const matches = reasoningTags.flatMap((tag) => {
+        const opening = `<${tag}>`;
+        const position = state.buffer.indexOf(opening);
+        return position < 0 ? [] : [{ opening, position, tag }];
+      }).sort((left, right) => left.position - right.position);
+      const match = matches[0];
+      if (match !== undefined) {
+        content.push(state.buffer.slice(0, match.position));
+        state.buffer = state.buffer.slice(match.position + match.opening.length);
+        state.mode = "reasoning";
+        state.tag = match.tag;
+        continue;
+      }
+      if (flush) {
+        content.push(state.buffer);
+        state.buffer = "";
+        continue;
+      }
+      const partial = partialTagLength(
+        state.buffer,
+        reasoningTags.map((tag) => `<${tag}>`),
+      );
+      content.push(state.buffer.slice(0, state.buffer.length - partial));
+      state.buffer = state.buffer.slice(state.buffer.length - partial);
+      break;
+    }
+
+    const closing = `</${state.tag ?? "think"}>`;
+    const position = state.buffer.indexOf(closing);
+    if (position >= 0) {
+      reasoning.push(state.buffer.slice(0, position));
+      state.buffer = state.buffer.slice(position + closing.length);
+      state.mode = "content";
+      delete state.tag;
+      continue;
+    }
+    if (flush) {
+      reasoning.push(state.buffer);
+      state.buffer = "";
+      continue;
+    }
+    const partial = partialTagLength(state.buffer, [closing]);
+    reasoning.push(state.buffer.slice(0, state.buffer.length - partial));
+    state.buffer = state.buffer.slice(state.buffer.length - partial);
+    break;
+  }
+  return { content: content.join(""), reasoning: reasoning.join("") };
+}
+
+async function* normalizeXmlReasoningStream(
+  stream: AsyncIterable<ChatCompletionChunk>,
+): AsyncIterable<ChatCompletionChunk> {
+  const states = new Map<number, XmlStreamState>();
+  for await (const chunk of stream) {
+    const choices = chunk.choices.map((choice) => {
+      const value = choice.delta.content;
+      if (typeof value !== "string" || value.length === 0) return choice;
+      const state = states.get(choice.index) ?? { buffer: "", mode: "content" };
+      states.set(choice.index, state);
+      const converted = feedXmlReasoning(
+        state,
+        value,
+        choice.finishReason !== null,
+      );
+      return {
+        ...choice,
+        delta: {
+          ...choice.delta,
+          content: converted.content.length === 0 ? null : converted.content,
+          ...(converted.reasoning.length === 0
+            ? {}
+            : { reasoning: converted.reasoning }),
+        },
+      };
+    });
+    yield { ...chunk, choices };
+  }
+}
+
+function normalizeReasoningDirective(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null) return {};
+  const raw = value as Record<string, unknown>;
+  return compactObject({
+    effort:
+      typeof raw.effort === "string" || typeof raw.effort === "number"
+        ? String(raw.effort).toLowerCase()
+        : undefined,
+    enabled:
+      raw.enabled === undefined ? undefined : Boolean(raw.enabled),
+    exclude:
+      raw.exclude === undefined ? undefined : Boolean(raw.exclude),
+    max_tokens:
+      raw.max_tokens === undefined
+        ? raw.maxTokens === undefined
+          ? undefined
+          : Number(raw.maxTokens)
+        : Number(raw.max_tokens),
+  });
+}
+
+function patchLlamaToolSchemas(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  return value.map((tool) => {
+    if (typeof tool !== "object" || tool === null) return tool;
+    const cloned = structuredClone(tool) as Record<string, unknown>;
+    const fn = cloned.function;
+    if (typeof fn !== "object" || fn === null) return cloned;
+    const parameters = (fn as Record<string, unknown>).parameters;
+    if (typeof parameters !== "object" || parameters === null) return cloned;
+    const properties = (parameters as Record<string, unknown>).properties;
+    if (typeof properties !== "object" || properties === null) return cloned;
+    for (const property of Object.values(properties as Record<string, unknown>)) {
+      if (typeof property !== "object" || property === null) continue;
+      const schema = property as Record<string, unknown>;
+      if (schema.oneOf !== undefined && schema.type === undefined) schema.type = "string";
+    }
+    return cloned;
+  });
+}
+
+function makeSchemaStrict(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(makeSchemaStrict);
+  if (typeof value !== "object" || value === null) return value;
+  const result = Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [key, makeSchemaStrict(entry)]),
+  );
+  if (result.type === "object" && typeof result.properties === "object" && result.properties !== null) {
+    result.additionalProperties = false;
+    result.required = Object.keys(result.properties);
+  }
+  return result;
+}
+
+function normalizeBatchStatus(value: unknown): BatchStatus {
+  if (
+    value === "cancelled" ||
+    value === "cancelling" ||
+    value === "completed" ||
+    value === "expired" ||
+    value === "failed" ||
+    value === "finalizing" ||
+    value === "in_progress" ||
+    value === "validating"
+  ) {
+    return value;
+  }
+  return "in_progress";
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  return typeof value === "number" ? value : undefined;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function booleanRecord(value: unknown): Record<string, boolean> {
+  if (typeof value !== "object" || value === null) return {};
+  return Object.fromEntries(
+    Object.entries(value).filter((entry): entry is [string, boolean] => typeof entry[1] === "boolean"),
+  );
+}
+
+function numberRecord(value: unknown): Record<string, number> {
+  if (typeof value !== "object" || value === null) return {};
+  return Object.fromEntries(
+    Object.entries(value).filter((entry): entry is [string, number] =>
+      typeof entry[1] === "number" && Number.isFinite(entry[1]),
+    ),
+  );
+}
+
+function stringArrayRecord(value: unknown): Record<string, string[]> | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const entries = Object.entries(value).flatMap(([key, item]) =>
+    Array.isArray(item) ? [[key, item.filter((entry): entry is string => typeof entry === "string")] as const] : [],
+  );
+  return entries.length === 0 ? undefined : Object.fromEntries(entries);
+}
+
+function normalizeBatch(value: unknown, provider: string): Batch {
+  const batch = value as Record<string, any>;
+  const counts = batch.request_counts as Record<string, unknown> | undefined;
+  return {
+    completionWindow: String(batch.completion_window ?? "24h"),
+    createdAt: Number(batch.created_at ?? 0),
+    endpoint: String(batch.endpoint ?? "/v1/chat/completions"),
+    id: String(batch.id ?? ""),
+    object: "batch",
+    provider,
+    status: normalizeBatchStatus(batch.status),
+    raw: value,
+    ...(optionalNumber(batch.cancelled_at) === undefined ? {} : { cancelledAt: batch.cancelled_at }),
+    ...(optionalNumber(batch.cancelling_at) === undefined ? {} : { cancellingAt: batch.cancelling_at }),
+    ...(optionalNumber(batch.completed_at) === undefined ? {} : { completedAt: batch.completed_at }),
+    ...(batch.error_file_id === undefined ? {} : { errorFileId: batch.error_file_id as string | null }),
+    ...(batch.errors === undefined ? {} : { errors: batch.errors }),
+    ...(optionalNumber(batch.expired_at) === undefined ? {} : { expiredAt: batch.expired_at }),
+    ...(optionalNumber(batch.expires_at) === undefined ? {} : { expiresAt: batch.expires_at }),
+    ...(optionalNumber(batch.failed_at) === undefined ? {} : { failedAt: batch.failed_at }),
+    ...(optionalNumber(batch.finalizing_at) === undefined ? {} : { finalizingAt: batch.finalizing_at }),
+    ...(optionalNumber(batch.in_progress_at) === undefined ? {} : { inProgressAt: batch.in_progress_at }),
+    ...(optionalString(batch.input_file_id) === undefined ? {} : { inputFileId: batch.input_file_id }),
+    ...(batch.metadata === undefined ? {} : { metadata: batch.metadata as Record<string, string> | null }),
+    ...(optionalString(batch.model) === undefined ? {} : { model: batch.model }),
+    ...(batch.output_file_id === undefined ? {} : { outputFileId: batch.output_file_id as string | null }),
+    ...(counts === undefined
+      ? {}
+      : {
+          requestCounts: {
+            completed: Number(counts.completed ?? 0),
+            failed: Number(counts.failed ?? 0),
+            total: Number(counts.total ?? 0),
+          },
+        }),
+    ...(batch.usage === undefined ? {} : { usage: batch.usage as Record<string, unknown> }),
+  };
+}
+
 export class OpenAIProvider extends BaseProvider {
   readonly metadata: ProviderMetadata;
   protected readonly client: OpenAI;
+  protected readonly config: OpenAIProviderConfig;
 
   constructor(config: OpenAIProviderConfig, options: ProviderOptions = {}, client?: OpenAI) {
     super();
+    this.config = config;
     const apiBase = options.apiBase ?? getEnvironmentVariable(config.envApiBase) ?? config.apiBase;
     const clientOptions = options.clientOptions ?? {};
     this.client =
@@ -152,10 +506,17 @@ export class OpenAIProvider extends BaseProvider {
         ...(apiBase === undefined ? {} : { baseURL: apiBase }),
       });
     this.metadata = {
-      capabilities: { ...openAICapabilities, ...config.capabilities },
+      capabilities: {
+        ...baseOpenAICompatibleCapabilities,
+        ...config.capabilities,
+      },
       documentationUrl: config.documentationUrl,
       name: config.name,
+      promptCacheKeySupport:
+        config.promptCacheKeySupport ??
+        providerPromptCacheKeySupport(config.name),
       requiresApiKey: config.requiresApiKey !== false,
+      tier: providerTier(config.name),
       ...(apiBase === undefined ? {} : { apiBase }),
       ...(config.envApiBase === undefined ? {} : { envApiBase: config.envApiBase }),
       ...(config.envApiKey === undefined ? {} : { envApiKey: config.envApiKey }),
@@ -166,6 +527,26 @@ export class OpenAIProvider extends BaseProvider {
     if (params.messages.length === 0) {
       return Promise.reject(new TypeError("The messages array cannot be empty."));
     }
+    if (
+      params.responseFormat !== undefined &&
+      this.config.quirks?.rejectResponseFormat === true
+    ) {
+      return Promise.reject(
+        new UnsupportedParameterError("responseFormat", this.metadata.name),
+      );
+    }
+    if (
+      params.stream === true &&
+      params.responseFormat !== undefined &&
+      this.config.quirks?.rejectStreamingResponseFormat === true
+    ) {
+      return Promise.reject(
+        new UnsupportedParameterError(
+          "stream and responseFormat",
+          this.metadata.name,
+        ),
+      );
+    }
 
     return this.execute(async () => {
       const request = this.completionRequest(params);
@@ -174,18 +555,66 @@ export class OpenAIProvider extends BaseProvider {
         const chunks = mapAsyncIterable(stream as unknown as AsyncIterable<unknown>, (chunk) =>
           this.normalizeChunk(chunk),
         );
-        return this.protectStream(chunks);
+        const normalized = this.config.quirks?.xmlReasoning === true
+          ? normalizeXmlReasoningStream(chunks)
+          : chunks;
+        return this.protectStream(normalized);
       }
       const response = await this.client.chat.completions.create({ ...request, stream: false } as never);
       return this.normalizeCompletion(response);
     });
   }
 
-  override responses(params: ResponsesParams): Promise<unknown> {
+  override responses(params: ResponsesParams): Promise<AsyncIterable<ResponseStreamEvent> | Response> {
+    if (
+      params.maxToolCalls !== undefined &&
+      this.config.quirks?.rejectResponsesMaxToolCalls === true
+    ) {
+      return Promise.reject(
+        new UnsupportedParameterError("maxToolCalls", this.metadata.name),
+      );
+    }
     return this.execute(async () => {
-      const { providerOptions, ...request } = params;
-      const response = await this.client.responses.create({ ...request, ...providerOptions } as never);
-      return isAsyncIterable(response) ? this.protectStream(response) : response;
+      const { providerOptions, responseFormat, ...paramsWithoutFormat } = params;
+      const request = compactObject({
+        background: paramsWithoutFormat.background,
+        context_management: paramsWithoutFormat.contextManagement,
+        conversation: paramsWithoutFormat.conversation,
+        frequency_penalty: paramsWithoutFormat.frequencyPenalty,
+        include: paramsWithoutFormat.include,
+        input: paramsWithoutFormat.input,
+        instructions: paramsWithoutFormat.instructions,
+        max_output_tokens: paramsWithoutFormat.maxOutputTokens,
+        max_tool_calls: paramsWithoutFormat.maxToolCalls,
+        metadata: paramsWithoutFormat.metadata,
+        model: paramsWithoutFormat.model,
+        parallel_tool_calls: paramsWithoutFormat.parallelToolCalls,
+        presence_penalty: paramsWithoutFormat.presencePenalty,
+        previous_response_id: paramsWithoutFormat.previousResponseId,
+        prompt_cache_key: paramsWithoutFormat.promptCacheKey,
+        prompt_cache_retention: paramsWithoutFormat.promptCacheRetention,
+        reasoning: paramsWithoutFormat.reasoning,
+        safety_identifier: paramsWithoutFormat.safetyIdentifier,
+        service_tier: paramsWithoutFormat.serviceTier,
+        store: paramsWithoutFormat.store,
+        stream: paramsWithoutFormat.stream ?? false,
+        stream_options: paramsWithoutFormat.streamOptions,
+        temperature: paramsWithoutFormat.temperature,
+        text: responseFormat === undefined
+          ? paramsWithoutFormat.text
+          : { ...(paramsWithoutFormat.text ?? {}), format: responseFormat },
+        tool_choice: paramsWithoutFormat.toolChoice,
+        tools: paramsWithoutFormat.tools,
+        top_logprobs: paramsWithoutFormat.topLogprobs,
+        top_p: paramsWithoutFormat.topP,
+        truncation: paramsWithoutFormat.truncation,
+        user: paramsWithoutFormat.user,
+        ...providerOptions,
+      });
+      const response = await this.client.responses.create(request as never);
+      return isAsyncIterable(response)
+        ? this.protectStream(response as unknown as AsyncIterable<ResponseStreamEvent>)
+        : (response as Response);
     });
   }
 
@@ -222,11 +651,16 @@ export class OpenAIProvider extends BaseProvider {
       const page = await this.client.models.list(providerOptions);
       const models: Model[] = [];
       for await (const model of page) {
+        const raw = model as unknown as Record<string, unknown>;
+        if (typeof raw.id !== "string") continue;
         models.push({
-          created: model.created,
-          id: model.id,
+          created: typeof raw.created === "number" ? raw.created : 0,
+          id: raw.id,
           object: "model",
-          ownedBy: model.owned_by,
+          ownedBy:
+            typeof raw.owned_by === "string"
+              ? raw.owned_by
+              : this.config.quirks?.defaultModelOwner ?? this.metadata.name,
           raw: model,
         });
       }
@@ -243,7 +677,10 @@ export class OpenAIProvider extends BaseProvider {
         output_format: params.outputFormat,
         prompt: params.prompt,
         quality: params.quality,
+        response_format: params.responseFormat,
         size: params.size,
+        style: params.style,
+        user: params.user,
         ...params.providerOptions,
       } as never);
       return {
@@ -268,6 +705,7 @@ export class OpenAIProvider extends BaseProvider {
         prompt: params.prompt,
         response_format: params.responseFormat,
         temperature: params.temperature,
+        timestamp_granularities: params.timestampGranularities,
         ...params.providerOptions,
       } as never);
       const text = typeof response === "string" ? response : response.text;
@@ -290,30 +728,127 @@ export class OpenAIProvider extends BaseProvider {
     });
   }
 
-  override moderation(params: ModerationParams): Promise<unknown> {
-    return this.execute(() =>
-      this.client.moderations.create({
+  override moderation(params: ModerationParams): Promise<ModerationResponse> {
+    return this.execute(async () => {
+      const response = await this.client.moderations.create({
         input: params.input,
         model: params.model,
         ...params.providerOptions,
-      } as never),
-    );
+      } as never);
+      return {
+        id: response.id,
+        model: response.model,
+        results: response.results.map((item) => {
+          const raw = item as unknown as Record<string, unknown>;
+          const categoryAppliedInputTypes = stringArrayRecord(raw.category_applied_input_types);
+          return {
+            categories: booleanRecord(raw.categories),
+            categoryScores: numberRecord(raw.category_scores),
+            flagged: item.flagged,
+            ...(categoryAppliedInputTypes === undefined ? {} : { categoryAppliedInputTypes }),
+            ...(params.includeRaw === true ? { providerRaw: raw } : {}),
+          };
+        }),
+      };
+    });
+  }
+
+  override createBatch(params: CreateBatchParams): Promise<Batch> {
+    if (!this.metadata.capabilities.batch) return super.createBatch(params);
+    return this.execute(async () => {
+      const bytes = await readFile(params.inputFilePath);
+      const file = await toFile(bytes, basename(params.inputFilePath));
+      const uploaded = await this.client.files.create({ file, purpose: "batch" });
+      const response = await this.client.batches.create({
+        completion_window: params.completionWindow ?? "24h",
+        endpoint: params.endpoint,
+        input_file_id: uploaded.id,
+        metadata: params.metadata ?? {},
+        ...params.providerOptions,
+      } as never);
+      return normalizeBatch(response, this.metadata.name);
+    });
+  }
+
+  override retrieveBatch(batchId: string, providerOptions: Record<string, unknown> = {}): Promise<Batch> {
+    if (!this.metadata.capabilities.batch) return super.retrieveBatch(batchId, providerOptions);
+    return this.execute(async () => {
+      const response = await this.client.batches.retrieve(batchId, providerOptions);
+      return normalizeBatch(response, this.metadata.name);
+    });
+  }
+
+  override cancelBatch(batchId: string, providerOptions: Record<string, unknown> = {}): Promise<Batch> {
+    if (!this.metadata.capabilities.batch) return super.cancelBatch(batchId, providerOptions);
+    return this.execute(async () => {
+      const response = await this.client.batches.cancel(batchId, providerOptions);
+      return normalizeBatch(response, this.metadata.name);
+    });
+  }
+
+  override listBatches(params: ListBatchesParams = {}): Promise<Batch[]> {
+    if (!this.metadata.capabilities.batch) return super.listBatches(params);
+    return this.execute(async () => {
+      const response = await this.client.batches.list(
+        compactObject({ after: params.after, limit: params.limit, ...params.providerOptions }),
+      );
+      return response.data.map((batch) => normalizeBatch(batch, this.metadata.name));
+    });
+  }
+
+  override retrieveBatchResults(
+    batchId: string,
+    providerOptions: Record<string, unknown> = {},
+  ): Promise<BatchResult> {
+    if (!this.metadata.capabilities.batch) return super.retrieveBatchResults(batchId, providerOptions);
+    return this.execute(async () => {
+      const batch = await this.client.batches.retrieve(batchId, providerOptions);
+      if (batch.status !== "completed") {
+        throw new BatchNotCompleteError(batchId, batch.status, this.metadata.name);
+      }
+      if (batch.output_file_id === undefined) return { results: [] };
+
+      const content = await this.client.files.content(batch.output_file_id);
+      const results: BatchResult["results"] = [];
+      for (const line of (await content.text()).split("\n")) {
+        if (line.trim().length === 0) continue;
+        const entry = JSON.parse(line) as Record<string, any>;
+        const customId = typeof entry.custom_id === "string" ? entry.custom_id : "";
+        const response = entry.response as Record<string, any> | undefined;
+        if (response?.status_code === 200 && typeof response.body === "object" && response.body !== null) {
+          results.push({ customId, result: this.normalizeCompletion(response.body) });
+          continue;
+        }
+        const error = entry.error as Record<string, unknown> | undefined;
+        results.push({
+          customId,
+          error: {
+            code: typeof error?.code === "string" ? error.code : "unknown",
+            message: typeof error?.message === "string" ? error.message : "Unexpected response format",
+          },
+        });
+      }
+      return { results };
+    });
   }
 
   protected completionRequest(params: CompletionParams): Record<string, unknown> {
     const maxCompletionTokens = params.maxCompletionTokens ?? params.maxTokens;
     const reasoningEffort = params.reasoningEffort === "auto" ? undefined : params.reasoningEffort;
-    return {
+    const request = {
       ...compactObject({
         frequency_penalty: params.frequencyPenalty,
         logit_bias: params.logitBias,
         logprobs: params.logprobs,
         max_completion_tokens: maxCompletionTokens,
-        messages: params.messages.map(toOpenAIMessage),
+        messages: params.messages.map((message) =>
+          toOpenAIMessage(message, this.metadata.name),
+        ),
         model: params.model,
         n: params.n,
         parallel_tool_calls: params.parallelToolCalls,
         presence_penalty: params.presencePenalty,
+        prompt_cache_key: params.promptCacheKey,
         reasoning_effort: reasoningEffort,
         response_format: params.responseFormat,
         seed: params.seed,
@@ -328,24 +863,145 @@ export class OpenAIProvider extends BaseProvider {
       }),
       ...params.providerOptions,
     };
+
+    const quirks = this.config.quirks;
+    if (
+      quirks?.maxCompletionTokensAsMaxTokens === true &&
+      request.max_completion_tokens !== undefined
+    ) {
+      request.max_tokens = request.max_completion_tokens;
+      delete request.max_completion_tokens;
+    }
+    if (quirks?.patchLlamaToolSchemas === true) {
+      request.tools = patchLlamaToolSchemas(request.tools);
+    }
+    if (quirks?.responseFormatMode !== undefined) {
+      const responseFormat = request.response_format;
+      if (typeof responseFormat === "object" && responseFormat !== null) {
+        const format = responseFormat as Record<string, unknown>;
+        const jsonSchema = format.json_schema;
+        if (
+          format.type === "json_schema" &&
+          typeof jsonSchema === "object" &&
+          jsonSchema !== null
+        ) {
+          const definition = jsonSchema as Record<string, unknown>;
+          if (quirks.responseFormatMode === "together") {
+            request.response_format = {
+              schema: definition.schema ?? jsonSchema,
+              type: "json_schema",
+            };
+          } else {
+            request.response_format = {
+              ...format,
+              json_schema: {
+                ...definition,
+                schema: makeSchemaStrict(definition.schema),
+                strict: true,
+              },
+            };
+          }
+        }
+      }
+    }
+    if (quirks?.reasoningDirective === "deepseek") {
+      const legacy = params.model === "deepseek-chat" || params.model === "deepseek-reasoner";
+      if (!legacy && request.thinking === undefined) {
+        request.thinking = {
+          type:
+            params.reasoningEffort === undefined ||
+            params.reasoningEffort === "auto" ||
+            params.reasoningEffort === "none"
+              ? "disabled"
+              : "enabled",
+        };
+      }
+      if (request.response_format !== undefined) {
+        const responseFormat = request.response_format as Record<string, unknown>;
+        const jsonSchema = responseFormat.json_schema;
+        if (
+          responseFormat.type === "json_schema" &&
+          typeof jsonSchema === "object" &&
+          jsonSchema !== null
+        ) {
+          const schema = (jsonSchema as Record<string, unknown>).schema;
+          const messages = request.messages;
+          if (!Array.isArray(messages)) {
+            throw new TypeError("DeepSeek structured output requires messages.");
+          }
+          const last = messages.at(-1) as Record<string, unknown> | undefined;
+          if (last?.role !== "user") {
+            throw new TypeError(
+              "DeepSeek structured output requires the last message to be a user message.",
+            );
+          }
+          const original = last.content;
+          const instruction = [
+            "Please respond with a JSON object that matches the following schema:",
+            "",
+            JSON.stringify(schema, null, 2),
+            "",
+            "Return the JSON object only, with no other text and no Markdown code fence.",
+            "",
+          ].join("\n");
+          const modified = messages.slice();
+          modified[modified.length - 1] = {
+            ...last,
+            content:
+              typeof original === "string"
+                ? `${instruction}${original}`
+                : original,
+          };
+          request.messages = modified;
+          request.response_format = { type: "json_object" };
+        }
+      }
+    } else if (
+      quirks?.reasoningDirective === "openrouter" ||
+      quirks?.reasoningDirective === "requesty"
+    ) {
+      const direct = params.providerOptions?.reasoning;
+      let reasoning: Record<string, unknown> | undefined;
+      if (direct !== undefined) reasoning = normalizeReasoningDirective(direct);
+      else if (
+        params.reasoningEffort === "low" ||
+        params.reasoningEffort === "medium" ||
+        params.reasoningEffort === "high"
+      ) {
+        reasoning = { effort: params.reasoningEffort };
+      }
+      delete request.reasoning_effort;
+      if (reasoning !== undefined) request.reasoning = reasoning;
+    }
+    return request;
   }
 
   protected normalizeCompletion(value: unknown): ChatCompletion {
     const response = value as Record<string, any>;
     const usage = normalizeUsage(response.usage);
-    return {
+    const normalized: ChatCompletion = {
       choices: (response.choices as Record<string, any>[]).map((choice) => {
         const message = choice.message as Record<string, any>;
         const reasoning = message.reasoning ?? message.reasoning_content;
-        const toolCalls = normalizeToolCalls(message.tool_calls);
+        const toolCalls = normalizeToolCalls(message.tool_calls ?? message.toolCalls);
         return {
-          finishReason: normalizeFinishReason(choice.finish_reason),
+          finishReason: normalizeFinishReason(
+            choice.finish_reason ?? choice.finishReason,
+            this.config.quirks?.finishReasonMap,
+          ),
           index: choice.index as number,
           logprobs: choice.logprobs,
           message: {
             content: (message.content ?? null) as ChatMessage["content"],
             role: "assistant",
             ...(typeof reasoning === "string" ? { reasoning } : {}),
+            ...(this.metadata.name === "deepseek" && typeof reasoning === "string"
+              ? {
+                  extraContent: {
+                    deepseek: { reasoning_content: reasoning },
+                  },
+                }
+              : {}),
             ...(toolCalls === undefined ? {} : { toolCalls }),
           },
         };
@@ -356,12 +1012,27 @@ export class OpenAIProvider extends BaseProvider {
       object: "chat.completion",
       provider: this.metadata.name,
       raw: value,
-      ...(response.service_tier === undefined ? {} : { serviceTier: response.service_tier as string | null }),
-      ...(response.system_fingerprint === undefined
+      ...((response.service_tier ?? response.serviceTier) === undefined
         ? {}
-        : { systemFingerprint: response.system_fingerprint as string | null }),
+        : { serviceTier: (response.service_tier ?? response.serviceTier) as string | null }),
+      ...((response.system_fingerprint ?? response.systemFingerprint) === undefined
+        ? {}
+        : { systemFingerprint: (response.system_fingerprint ?? response.systemFingerprint) as string | null }),
       ...(usage === undefined ? {} : { usage }),
     };
+    if (this.config.quirks?.xmlReasoning === true) {
+      for (const choice of normalized.choices) {
+        if (typeof choice.message.content !== "string") continue;
+        const extracted = extractXmlReasoning(choice.message.content);
+        choice.message.content = extracted.content;
+        if (extracted.reasoning !== undefined) {
+          choice.message.reasoning = choice.message.reasoning === undefined
+            ? extracted.reasoning
+            : `${choice.message.reasoning}\n${extracted.reasoning}`;
+        }
+      }
+    }
+    return normalized;
   }
 
   protected normalizeChunk(value: unknown): ChatCompletionChunk {
@@ -376,9 +1047,9 @@ export class OpenAIProvider extends BaseProvider {
             ...(delta.content === undefined ? {} : { content: delta.content as string | null }),
             ...(delta.role === "assistant" ? { role: "assistant" as const } : {}),
             ...(typeof reasoning === "string" ? { reasoning } : {}),
-            ...(Array.isArray(delta.tool_calls)
+            ...(Array.isArray(delta.tool_calls ?? delta.toolCalls)
               ? {
-                  toolCalls: delta.tool_calls.map((toolCall: Record<string, any>) => ({
+                  toolCalls: (delta.tool_calls ?? delta.toolCalls).map((toolCall: Record<string, any>) => ({
                     index: toolCall.index as number,
                     ...(toolCall.function === undefined
                       ? {}
@@ -398,7 +1069,10 @@ export class OpenAIProvider extends BaseProvider {
                 }
               : {}),
           },
-          finishReason: normalizeFinishReason(choice.finish_reason),
+          finishReason: normalizeFinishReason(
+            choice.finish_reason ?? choice.finishReason,
+            this.config.quirks?.finishReasonMap,
+          ),
           index: choice.index as number,
           logprobs: choice.logprobs,
         };
@@ -409,10 +1083,12 @@ export class OpenAIProvider extends BaseProvider {
       object: "chat.completion.chunk",
       provider: this.metadata.name,
       raw: value,
-      ...(response.service_tier === undefined ? {} : { serviceTier: response.service_tier as string | null }),
-      ...(response.system_fingerprint === undefined
+      ...((response.service_tier ?? response.serviceTier) === undefined
         ? {}
-        : { systemFingerprint: response.system_fingerprint as string | null }),
+        : { serviceTier: (response.service_tier ?? response.serviceTier) as string | null }),
+      ...((response.system_fingerprint ?? response.systemFingerprint) === undefined
+        ? {}
+        : { systemFingerprint: (response.system_fingerprint ?? response.systemFingerprint) as string | null }),
       ...(usage === undefined ? {} : { usage }),
     };
   }
@@ -437,7 +1113,13 @@ export class AzureOpenAIProvider extends OpenAIProvider {
     super(
       {
         apiBase: endpoint,
-        capabilities: { moderation: false },
+        capabilities: {
+          ...openAICapabilities,
+          batch: false,
+          moderation: false,
+          pdfInput: false,
+          reasoning: false,
+        },
         documentationUrl: "https://learn.microsoft.com/azure/ai-foundry/openai/",
         envApiBase: "AZURE_OPENAI_ENDPOINT",
         envApiKey: "AZURE_OPENAI_API_KEY",
@@ -457,6 +1139,7 @@ export function createOpenAIProvider(options: ProviderOptions = {}): OpenAIProvi
       envApiBase: "OPENAI_BASE_URL",
       envApiKey: "OPENAI_API_KEY",
       name: "openai",
+      capabilities: openAICapabilities,
     },
     options,
   );

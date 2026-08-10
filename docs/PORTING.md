@@ -46,16 +46,23 @@ Composition keeps the public client stable even when a provider adapter has a co
 
 ## Current scope
 
-The first port concentrates on the highest-leverage path:
+The port now tracks the Python source at commit `f2b11abfb5befb7d89b723eb170e33e60d275ec9` with:
 
-- native OpenAI SDK coverage for completions, Responses, embeddings, models, images, transcription, speech, and moderation;
-- native Anthropic coverage for normalized completion, streaming, tools, reasoning, model listing, and direct Messages API access;
-- a dedicated Azure OpenAI constructor;
-- 34 configuration-driven OpenAI-compatible providers;
-- normalized metadata and error handling;
-- dual ESM/CommonJS output and strict public declarations.
+- the same 52 registered provider names and the same stateless operation set;
+- native adapters for Anthropic, Google Gen AI, Bedrock, SageMaker, Azure AI Inference, Cohere,
+  GitHub Models, Hugging Face, Meta, Mistral, Otari, Voyage, and watsonx;
+- normalized completions, Messages compatibility, streaming, tools, structured output, Responses,
+  embeddings, models, batches, reranking, images, audio, and moderation;
+- provider-specific request and response behavior for compatible providers rather than empty marker
+  classes;
+- provider tiers, prompt-cache-key policy, PDF and image capability metadata, normalized errors,
+  and dual ESM/CommonJS output.
 
-The Python project has native adapters for additional non-OpenAI-compatible APIs, batch operations, reranking, and provider-specific features. Those should be added as isolated adapters rather than by weakening the common types or pretending an incompatible API is OpenAI-compatible.
+The machine-readable source manifest in `parity/python-source.json` and `tests/parity.test.ts` keep
+provider names, operations, capability flags, and verification tiers from drifting. Two inherited
+Python batch flags are intentionally disabled for Azure and Vertex Anthropic because those SDK
+clients do not expose message batches. Voyage's inherited Messages flag is also disabled because
+that SDK provides embeddings only.
 
 ## Adding the next native adapter
 
@@ -67,6 +74,5 @@ The Python project has native adapters for additional non-OpenAI-compatible APIs
 6. Cover request conversion, response conversion, every stream event used, tool calls, and error paths with SDK-mocked unit tests.
 7. Add credential-gated integration tests before advertising live verification.
 
-Gemini is implemented as a native adapter using Google's official Gen AI SDK. Good candidates for
-subsequent native adapters are Amazon Bedrock, Cohere, Voyage, and Mistral features that are not
-exposed through its OpenAI-compatible API.
+When the Python source adds another provider or operation, update the parity manifest first. That
+makes the missing surface explicit before implementing the next adapter.

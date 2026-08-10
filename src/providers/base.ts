@@ -2,19 +2,36 @@ import { UnsupportedOperationError, normalizeProviderError } from "../errors.js"
 import type {
   ChatCompletion,
   ChatCompletionChunk,
+  Batch,
+  BatchResult,
   CompletionParams,
+  CreateBatchParams,
   EmbeddingParams,
   EmbeddingResponse,
   ImageGenerationParams,
   ImageGenerationResponse,
+  ListBatchesParams,
   Model,
+  MessageResponse,
+  MessageStreamEvent,
+  MessagesParams,
   ModerationParams,
+  ModerationResponse,
   ProviderMetadata,
+  RerankParams,
+  RerankResponse,
   ResponsesParams,
+  Response,
+  ResponseStreamEvent,
   SpeechParams,
   Transcription,
   TranscriptionParams,
 } from "../types.js";
+import {
+  completionStreamToMessageEvents,
+  completionToMessageResponse,
+  messagesToCompletionParams,
+} from "../messages-compat.js";
 import { mapAsyncIterableErrors } from "../utils.js";
 
 export abstract class BaseProvider {
@@ -24,7 +41,7 @@ export abstract class BaseProvider {
     params: CompletionParams,
   ): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion>;
 
-  responses(_params: ResponsesParams): Promise<unknown> {
+  responses(_params: ResponsesParams): Promise<AsyncIterable<ResponseStreamEvent> | Response> {
     return Promise.reject(new UnsupportedOperationError("the Responses API", this.metadata.name));
   }
 
@@ -48,12 +65,42 @@ export abstract class BaseProvider {
     return Promise.reject(new UnsupportedOperationError("text-to-speech", this.metadata.name));
   }
 
-  moderation(_params: ModerationParams): Promise<unknown> {
+  moderation(_params: ModerationParams): Promise<ModerationResponse> {
     return Promise.reject(new UnsupportedOperationError("moderation", this.metadata.name));
   }
 
-  messages(_params: Record<string, unknown>): Promise<unknown> {
-    return Promise.reject(new UnsupportedOperationError("the native Messages API", this.metadata.name));
+  createBatch(_params: CreateBatchParams): Promise<Batch> {
+    return Promise.reject(new UnsupportedOperationError("batch completions", this.metadata.name));
+  }
+
+  retrieveBatch(_batchId: string, _providerOptions?: Record<string, unknown>): Promise<Batch> {
+    return Promise.reject(new UnsupportedOperationError("batch completions", this.metadata.name));
+  }
+
+  cancelBatch(_batchId: string, _providerOptions?: Record<string, unknown>): Promise<Batch> {
+    return Promise.reject(new UnsupportedOperationError("batch completions", this.metadata.name));
+  }
+
+  listBatches(_params: ListBatchesParams = {}): Promise<Batch[]> {
+    return Promise.reject(new UnsupportedOperationError("batch completions", this.metadata.name));
+  }
+
+  retrieveBatchResults(_batchId: string, _providerOptions?: Record<string, unknown>): Promise<BatchResult> {
+    return Promise.reject(new UnsupportedOperationError("batch completions", this.metadata.name));
+  }
+
+  rerank(_params: RerankParams): Promise<RerankResponse> {
+    return Promise.reject(new UnsupportedOperationError("reranking", this.metadata.name));
+  }
+
+  async messages(params: MessagesParams): Promise<AsyncIterable<MessageStreamEvent> | MessageResponse> {
+    if (params.contextManagement !== undefined || (params.betas?.length ?? 0) > 0) {
+      throw new UnsupportedOperationError("Messages context management and beta features", this.metadata.name);
+    }
+    const result = await this.completion(messagesToCompletionParams(params));
+    return Symbol.asyncIterator in result
+      ? completionStreamToMessageEvents(result)
+      : completionToMessageResponse(result);
   }
 
   protected async execute<T>(operation: () => Promise<T>): Promise<T> {

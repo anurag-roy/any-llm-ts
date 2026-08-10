@@ -10,9 +10,9 @@ An independent TypeScript port inspired by [mozilla-ai/any-llm](https://github.c
 
 </div>
 
-`any-llm-ts` is a thin, framework-independent layer over official provider SDKs. It gives applications one API for chat completions, streaming, tools, embeddings, model discovery, the OpenAI Responses API, images, moderation, and audio without requiring a hosted proxy.
+`any-llm-ts` is a thin, framework-independent layer over official provider SDKs. It gives applications one API for chat completions, Messages, streaming, tools, structured output, embeddings, model discovery, the OpenAI Responses API, batches, reranking, images, moderation, and audio without requiring a hosted proxy.
 
-The package uses the official OpenAI, Anthropic, and Google Gen AI SDKs. OpenAI-compatible providers share a data-driven adapter, so switching providers is usually one string change.
+The package uses official provider SDKs where native translation is required. OpenAI-compatible providers share a data-driven adapter, so switching providers is usually one string change.
 
 ## Installation
 
@@ -135,14 +135,15 @@ Set `requiresApiKey: false` for a keyless local endpoint.
 
 ## Providers
 
-The port includes 38 provider configurations.
+The port registers the same 52 provider names as the tracked Python source revision.
 
-| Adapter                          | Providers                                                                                                                                                                                                                                                                                                                                                                                    |
-| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Native Anthropic translation     | `anthropic`                                                                                                                                                                                                                                                                                                                                                                                  |
-| Native Google Gen AI translation | `gemini`                                                                                                                                                                                                                                                                                                                                                                                     |
-| Official OpenAI SDK              | `openai`, `azureopenai`                                                                                                                                                                                                                                                                                                                                                                      |
-| OpenAI-compatible registry       | `atlascloud`, `cascadia`, `cerebras`, `dashscope`, `databricks`, `deepinfra`, `deepseek`, `edenai`, `fireworks`, `gmi`, `groq`, `inception`, `kenari`, `llama`, `llamacpp`, `llamafile`, `lmstudio`, `minimax`, `mistral`, `moonshot`, `nebius`, `neosantara`, `ollama`, `openrouter`, `perplexity`, `portkey`, `qiniu`, `requesty`, `sambanova`, `telnyx`, `together`, `vllm`, `xai`, `zai` |
+| Adapter | Providers |
+| --- | --- |
+| OpenAI and OpenAI-compatible | `openai`, `azureopenai`, plus the data-driven compatible-provider registry |
+| Anthropic | `anthropic`, `azureanthropic`, `vertexaianthropic` |
+| Google Gen AI | `gemini`, `vertexai` |
+| AWS | `bedrock`, `sagemaker` |
+| Other native SDKs and protocols | `azure`, `cohere`, `github`, `huggingface`, `meta`, `mistral`, `otari`, `voyage`, `watsonx` |
 
 Registry metadata is intentionally conservative. Inspect capabilities at runtime instead of assuming every provider implements every OpenAI endpoint:
 
@@ -153,7 +154,7 @@ console.log(metadata.capabilities);
 const providers = AnyLLM.getAllProviderMetadata();
 ```
 
-Provider configuration reflects API compatibility, not a claim that every provider is continuously integration-tested. Native adapters for other non-OpenAI-compatible services such as Bedrock, Cohere, and Voyage are natural follow-up work.
+Metadata also exposes the Python project's `verified`/`community` tier and prompt-cache-key policy. Provider registration reflects API compatibility, not a claim that every provider, model, region, and operation is continuously integration-tested with live credentials.
 
 ## Other operations
 
@@ -167,11 +168,18 @@ await llm.imageGeneration({ model, prompt });
 await llm.transcription({ model, file });
 await llm.speech({ model, input, voice });
 await llm.moderation({ input });
+await llm.messages({ model, maxTokens, messages });
+await llm.rerank({ model, query, documents });
+await llm.createBatch({ endpoint, inputFilePath });
+await llm.retrieveBatch(batchId);
+await llm.cancelBatch(batchId);
+await llm.listBatches();
+await llm.retrieveBatchResults(batchId);
 ```
 
 Stateless camel-cased helpers with the same names are exported from the package. An unsupported operation rejects with `UnsupportedOperationError`. Provider-specific request fields can be added through `providerOptions` and SDK constructor fields through `clientOptions`.
 
-The Anthropic client additionally exposes `messages(request)` for direct access to the native Messages API.
+`messages()` uses native Messages support where available and a normalized completion compatibility layer elsewhere.
 
 ## Errors
 

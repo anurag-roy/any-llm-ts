@@ -4,8 +4,9 @@ description: Registered providers, environment variables, and capability metadat
 full: true
 ---
 
-The registry contains native adapters for Anthropic, Gemini, OpenAI, and Azure OpenAI, plus a
-data-driven set of OpenAI-compatible providers. The table below is generated from
+The registry contains the same provider names as the tracked Python source revision. Native
+adapters handle services whose SDK or protocol needs translation, while a data-driven adapter
+handles OpenAI-compatible endpoints. The table below is generated from
 `AnyLLM.getAllProviderMetadata()` during development and checked for drift in CI.
 
 <ProviderTable />
@@ -28,21 +29,22 @@ Each `ProviderMetadata` object includes:
 - whether an API key is required
 - the provider's documentation URL
 - conservative operation and feature capabilities
+- the `verified` or `community` integration tier
+- whether `promptCacheKey` is supported, forwarded, or rejected
 
 ## Adapter categories
 
-| Adapter                          | Providers                   |
-| -------------------------------- | --------------------------- |
-| Native Anthropic translation     | `anthropic`                 |
-| Native Google Gen AI translation | `gemini`                    |
-| Official OpenAI SDK              | `openai`, `azureopenai`     |
-| OpenAI-compatible registry       | All other rows in the table |
+| Adapter | Providers |
+| --- | --- |
+| OpenAI and OpenAI-compatible | `openai`, `azureopenai`, plus compatible registry rows |
+| Anthropic | `anthropic`, `azureanthropic`, `vertexaianthropic` |
+| Google Gen AI | `gemini`, `vertexai` |
+| AWS | `bedrock`, `sagemaker` |
+| Other native integrations | `azure`, `cohere`, `github`, `huggingface`, `meta`, `mistral`, `otari`, `voyage`, `watsonx` |
 
 Provider registration indicates API compatibility. It is not a claim that every provider, model,
 region, account tier, and operation is continuously tested with live credentials.
 
-## Not yet included
-
-Native adapters for non-OpenAI-compatible services such as Bedrock, Cohere, and Voyage are not part
-of the current port. Reranking is also not implemented. Until those adapters exist, the docs do not
-present those features as available.
+The parity manifest records the Python source commit, provider names, operations, capability
+matrix, and verified set. CI compares that manifest with the runtime registry so future source
+updates produce an explicit, reviewable parity gap.

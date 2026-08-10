@@ -1,0 +1,75 @@
+---
+title: Batches and reranking
+description: Run asynchronous provider batches and rank documents by relevance.
+---
+
+## Batch requests
+
+Batch operations normalize the common lifecycle while preserving the provider response in `raw`.
+The input file format and accepted endpoint depend on the selected provider.
+
+```ts
+import {
+  createBatch,
+  retrieveBatch,
+  retrieveBatchResults,
+} from "any-llm-ts";
+
+const batch = await createBatch({
+  provider: "openai",
+  endpoint: "/v1/chat/completions",
+  inputFilePath: "./requests.jsonl",
+  completionWindow: "24h",
+});
+
+const current = await retrieveBatch({
+  provider: "openai",
+  batchId: batch.id,
+});
+
+if (current.status === "completed") {
+  const result = await retrieveBatchResults({
+    provider: "openai",
+    batchId: current.id,
+  });
+  console.log(result.output, result.errors);
+}
+```
+
+Reusable clients expose the same lifecycle:
+
+```ts
+const batch = await llm.createBatch(params);
+await llm.retrieveBatch(batch.id);
+await llm.cancelBatch(batch.id);
+await llm.listBatches();
+await llm.retrieveBatchResults(batch.id);
+```
+
+`retrieveBatchResults()` throws `BatchNotCompleteError` until output is available. Check
+`metadata.capabilities.batch` before using the operation.
+
+## Reranking
+
+Reranking scores candidate documents against a query. Cohere and Otari currently advertise the
+operation.
+
+```ts
+import { rerank } from "any-llm-ts";
+
+const result = await rerank({
+  provider: "cohere",
+  model: "rerank-v3.5",
+  query: "How do I narrow a union in TypeScript?",
+  documents: [
+    "Use a discriminant property and a switch statement.",
+    "Use npm install to add a package.",
+  ],
+  topN: 1,
+});
+
+console.log(result.results[0]?.index, result.results[0]?.relevanceScore);
+```
+
+Documents may be strings or provider-compatible records. Use `providerOptions` for reranker fields
+outside the common contract.

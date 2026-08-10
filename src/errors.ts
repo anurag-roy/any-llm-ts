@@ -1,3 +1,5 @@
+import type { ParsedChatCompletion } from "./types.js";
+
 interface AnyLLMErrorOptions {
   cause?: unknown;
   code?: string;
@@ -77,6 +79,55 @@ export class UnsupportedOperationError extends AnyLLMError {
 }
 
 export class InvalidModelSyntaxError extends AnyLLMError {}
+
+export class UnsupportedParameterError extends AnyLLMError {
+  readonly parameterName: string;
+
+  constructor(parameterName: string, provider: string, additionalMessage?: string) {
+    super(
+      `"${parameterName}" is not supported for ${provider}` +
+        (additionalMessage === undefined ? "." : `.\n${additionalMessage}`),
+      { provider },
+    );
+    this.parameterName = parameterName;
+  }
+}
+
+abstract class FinishReasonError<T> extends AnyLLMError {
+  readonly completion: ParsedChatCompletion<T>;
+
+  constructor(message: string, completion: ParsedChatCompletion<T>) {
+    super(message);
+    this.completion = completion;
+  }
+}
+
+export class LengthFinishReasonError<T = unknown> extends FinishReasonError<T> {
+  constructor(completion: ParsedChatCompletion<T>) {
+    super("Could not parse response content because the length limit was reached.", completion);
+  }
+}
+
+export class ContentFilterFinishReasonError<T = unknown> extends FinishReasonError<T> {
+  constructor(completion: ParsedChatCompletion<T>) {
+    super("Could not parse response content because the request was rejected by a content filter.", completion);
+  }
+}
+
+export class BatchNotCompleteError extends AnyLLMError {
+  readonly batchId: string;
+  readonly batchStatus: string;
+
+  constructor(batchId: string, batchStatus: string, provider?: string) {
+    super(
+      `Batch "${batchId}" is not yet complete (status: ${batchStatus}). ` +
+        "Call retrieveBatch() to check the current status.",
+      provider === undefined ? {} : { provider },
+    );
+    this.batchId = batchId;
+    this.batchStatus = batchStatus;
+  }
+}
 
 type ErrorRecord = Record<string, unknown>;
 

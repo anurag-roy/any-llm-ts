@@ -75,6 +75,15 @@ const metadata = AnyLLM.getProviderMetadata("openai");
 console.log(metadata.envApiKey);
 console.log(metadata.apiBase);
 console.log(metadata.capabilities.streaming);
+console.log(metadata.capabilities.pdfInput);
+console.log(metadata.promptCacheKeySupport);
+console.log(metadata.tier);
 ```
 
 Metadata is returned as a clone, so changing the returned object does not modify the registry.
+`tier` mirrors the Python project's credential-backed verification matrix. It describes provider
+integration coverage, not whether every model and operation is available in your account.
+
+When `promptCacheKeySupport` is `unsupported`, passing `promptCacheKey` to completions, Responses,
+or Messages fails before a network request. `supported` means the provider handles the key
+directly; `passthrough` means a router or custom compatible endpoint receives it unchanged.

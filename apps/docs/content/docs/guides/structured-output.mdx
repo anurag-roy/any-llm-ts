@@ -5,7 +5,49 @@ description: Request JSON schemas and provider reasoning through normalized comp
 
 ## Structured output
 
-Pass a provider-compatible response format through the common `responseFormat` field:
+Use `StructuredOutputFormat<T>` to pair a JSON Schema with runtime parsing. The same contract works
+with completions, Responses, and Messages:
+
+```ts
+import { type StructuredOutputFormat } from "any-llm-ts";
+
+interface Location {
+  city: string;
+}
+
+const locationFormat: StructuredOutputFormat<Location> = {
+  name: "location",
+  jsonSchema: {
+    type: "object",
+    properties: { city: { type: "string" } },
+    required: ["city"],
+    additionalProperties: false,
+  },
+  parse(value) {
+    if (typeof value !== "object" || value === null || !("city" in value)) {
+      throw new TypeError("Invalid location output");
+    }
+    return { city: String(value.city) };
+  },
+};
+
+const response = await llm.completion({
+  model: "gpt-4.1-mini",
+  messages: [{ role: "user", content: "Extract the city: I live in Kolkata." }],
+  responseFormat: locationFormat,
+});
+
+console.log(response.choices[0]?.message.parsed?.city);
+```
+
+Use `responseFormat` for completions and Responses, and `outputFormat` for Messages. Typed parsing
+is non-streaming because a complete JSON value is required. `LengthFinishReasonError` and
+`ContentFilterFinishReasonError` preserve the partial normalized completion when parsing cannot
+finish for those reasons.
+
+## Provider-compatible formats
+
+You can also pass a provider-compatible response format through the common `responseFormat` field:
 
 ```ts
 const response = await llm.completion({
@@ -38,8 +80,8 @@ schema through the native Google Gen AI SDK and requests the `application/json` 
 If Gemini reports truncation or content filtering before structured output is complete, the adapter
 rejects with `ContextLengthExceededError` or `ContentFilterError` instead of returning partial JSON.
 
-The library returns model output as text. Parse and validate it in your application with the schema
-library of your choice.
+With this lower-level form, the library returns model output as text. Parse and validate it in your
+application with the schema library of your choice.
 
 ## Reasoning effort
 

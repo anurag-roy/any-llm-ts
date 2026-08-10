@@ -2,6 +2,8 @@
 "any-llm-ts": minor
 ---
 
-Add a native Gemini adapter powered by `@google/genai`, with normalized completions, streaming,
-function and built-in tools, thinking, structured output, multimodal inputs, embeddings, model
-listing, provider metadata, and documentation.
+Reach provider and operation parity with the tracked Python any-llm source revision. This adds
+native Gemini, Vertex AI, Anthropic cloud, Bedrock, SageMaker, Azure AI Inference, Cohere, GitHub
+Models, Hugging Face, Meta, Mistral, Otari, Voyage, and watsonx adapters; Messages compatibility,
+batch and rerank operations, typed structured output, provider-specific compatible-endpoint
+behavior, provider tiers, prompt-cache policy, PDF capabilities, expanded errors, tests, and docs.

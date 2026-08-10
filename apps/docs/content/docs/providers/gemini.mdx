@@ -187,8 +187,11 @@ embedding output is not supported. Model listing consumes all pages returned by 
 
 ## Capability boundary
 
-The adapter currently advertises completions, streaming, thinking, multimodal input, embeddings,
-and model listing. The Google API also has batch functionality, but any-llm-ts does not yet expose a
-provider-neutral batch API, so `metadata.capabilities.batch` remains `false`. Image generation,
-moderation, speech, transcription, the OpenAI Responses API, and a raw native-messages method are
-also outside this adapter's current public surface.
+The adapter advertises completions, streaming, thinking, image and PDF input, embeddings, model
+listing, and batch jobs. Batch creation accepts `/v1/chat/completions` JSONL input, translates each
+record into an inline Google batch request, and normalizes inline results through the same
+completion converter.
+
+`messages()` is available through the common Messages compatibility layer. Image generation,
+moderation, speech, transcription, and the OpenAI Responses API remain outside this adapter's
+current public surface.
