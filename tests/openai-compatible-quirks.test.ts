@@ -1,7 +1,7 @@
 import type OpenAI from "openai";
 import { describe, expect, it, vi } from "vitest";
 
-import { UnsupportedParameterError } from "../src/index.js";
+import { UnsupportedParameterError, type ChatCompletionChunk } from "../src/index.js";
 import { OpenAIProvider } from "../src/providers/openai.js";
 
 function fakeClient(overrides: Record<string, unknown> = {}): OpenAI {
@@ -201,6 +201,97 @@ describe("OpenAI-compatible provider quirks", () => {
         reasoning: "secret",
       });
     }
+  });
+
+  it("preserves metadata order while an XML tag is buffered", async () => {
+    async function* stream(): AsyncIterable<Record<string, unknown>> {
+      yield {
+        choices: [{ delta: { content: "<think" }, finish_reason: null, index: 0 }],
+        created: 1,
+        id: "opening",
+        model: "model-1",
+      };
+      yield {
+        choices: [{
+          delta: { extra_content: { marker: "metadata" } },
+          finish_reason: null,
+          index: 0,
+        }],
+        created: 1,
+        id: "metadata",
+        model: "model-1",
+      };
+      yield {
+        choices: [{
+          delta: { content: ">reasoning</think>answer" },
+          finish_reason: null,
+          index: 0,
+        }],
+        created: 1,
+        id: "content",
+        model: "model-1",
+      };
+      yield {
+        choices: [{ delta: {}, finish_reason: "stop", index: 0 }],
+        created: 1,
+        id: "terminal",
+        model: "model-1",
+      };
+    }
+    const provider = new OpenAIProvider(
+      config("sambanova", { xmlReasoning: true }),
+      {},
+      fakeClient({ chat: { completions: { create: vi.fn().mockResolvedValue(stream()) } } }),
+    );
+
+    const result = await provider.completion({
+      messages: [{ content: "hello", role: "user" }],
+      model: "model-1",
+      stream: true,
+    });
+    const chunks = [];
+    for await (const chunk of result as AsyncIterable<ChatCompletionChunk>) chunks.push(chunk);
+
+    expect(chunks.map((chunk) => chunk.id)).toEqual(["metadata", "content", "terminal"]);
+    expect(chunks[0]?.choices[0]?.delta.extraContent).toEqual({ marker: "metadata" });
+    expect(chunks[1]?.choices[0]?.delta).toMatchObject({ content: "answer", reasoning: "reasoning" });
+    expect(chunks[2]?.choices[0]?.finishReason).toBe("stop");
+  });
+
+  it.each([
+    ["trailing partial <th", "trailing partial <th", ""],
+    ["<th", "<th", ""],
+    ["<think>unterminated reasoning", "", "unterminated reasoning"],
+    ["<think>reasoning</th", "", "reasoning</th"],
+  ])("flushes trailing XML state for %s", async (source, expectedContent, expectedReasoning) => {
+    async function* stream(): AsyncIterable<Record<string, unknown>> {
+      yield {
+        choices: [{ delta: { content: source, role: "assistant" }, finish_reason: null, index: 0 }],
+        created: 1,
+        id: "partial",
+        model: "model-1",
+      };
+    }
+    const provider = new OpenAIProvider(
+      config("sambanova", { xmlReasoning: true }),
+      {},
+      fakeClient({ chat: { completions: { create: vi.fn().mockResolvedValue(stream()) } } }),
+    );
+    const result = await provider.completion({
+      messages: [{ content: "hello", role: "user" }],
+      model: "model-1",
+      stream: true,
+    });
+    let content = "";
+    let reasoning = "";
+    for await (const chunk of result as AsyncIterable<ChatCompletionChunk>) {
+      content += chunk.choices[0]?.delta.content ?? "";
+      reasoning += chunk.choices[0]?.delta.reasoning ?? "";
+    }
+    expect({ content, reasoning }).toEqual({
+      content: expectedContent,
+      reasoning: expectedReasoning,
+    });
   });
 
   it("patches Llama oneOf tool properties without mutating caller input", async () => {

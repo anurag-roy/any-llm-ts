@@ -317,22 +317,49 @@ function feedXmlReasoning(
   return { content: content.join(""), reasoning: reasoning.join("") };
 }
 
+function withoutChunkUsage(chunk: ChatCompletionChunk): ChatCompletionChunk {
+  const clone = { ...chunk };
+  delete clone.usage;
+  return clone;
+}
+
 async function* normalizeXmlReasoningStream(
   stream: AsyncIterable<ChatCompletionChunk>,
 ): AsyncIterable<ChatCompletionChunk> {
   const states = new Map<number, XmlStreamState>();
+  const templates = new Map<number, {
+    choice: ChatCompletionChunk["choices"][number];
+    chunk: ChatCompletionChunk;
+    emitted: boolean;
+  }>();
   for await (const chunk of stream) {
-    const choices = chunk.choices.map((choice) => {
+    const choices = chunk.choices.flatMap((choice) => {
       const value = choice.delta.content;
-      if (typeof value !== "string" || value.length === 0) return choice;
       const state = states.get(choice.index) ?? { buffer: "", mode: "content" };
       states.set(choice.index, state);
+      if (typeof value !== "string" || value.length === 0) {
+        if (choice.finishReason === null || state.buffer.length === 0) {
+          return [choice];
+        }
+        const converted = feedXmlReasoning(state, "", true);
+        templates.delete(choice.index);
+        return [{
+          ...choice,
+          delta: {
+            ...choice.delta,
+            content: converted.content.length === 0 ? null : converted.content,
+            ...(converted.reasoning.length === 0
+              ? {}
+              : { reasoning: converted.reasoning }),
+          },
+        }];
+      }
       const converted = feedXmlReasoning(
         state,
         value,
         choice.finishReason !== null,
       );
-      return {
+      const normalized = {
         ...choice,
         delta: {
           ...choice.delta,
@@ -342,8 +369,34 @@ async function* normalizeXmlReasoningStream(
             : { reasoning: converted.reasoning }),
         },
       };
+      const emitted = converted.content.length > 0 || converted.reasoning.length > 0 || state.buffer.length === 0;
+      templates.set(choice.index, { choice: normalized, chunk, emitted });
+      return emitted || choice.finishReason !== null ? [normalized] : [];
     });
-    yield { ...chunk, choices };
+    if (choices.length > 0 || chunk.choices.length === 0) {
+      yield { ...chunk, choices };
+    }
+  }
+
+  for (const [index, state] of states) {
+    if (state.buffer.length === 0) continue;
+    const template = templates.get(index);
+    if (template === undefined) continue;
+    const converted = feedXmlReasoning(state, "", true);
+    yield {
+      ...(template.emitted ? withoutChunkUsage(template.chunk) : template.chunk),
+      choices: [{
+        ...template.choice,
+        delta: {
+          ...(template.emitted ? {} : template.choice.delta),
+          content: converted.content.length === 0 ? null : converted.content,
+          ...(converted.reasoning.length === 0
+            ? {}
+            : { reasoning: converted.reasoning }),
+        },
+        finishReason: null,
+      }],
+    };
   }
 }
 
@@ -1041,10 +1094,14 @@ export class OpenAIProvider extends BaseProvider {
     return {
       choices: (response.choices as Record<string, any>[]).map((choice) => {
         const delta = choice.delta as Record<string, any>;
+        const extraContent = delta.extra_content ?? delta.extraContent;
         const reasoning = delta.reasoning ?? delta.reasoning_content;
         return {
           delta: {
             ...(delta.content === undefined ? {} : { content: delta.content as string | null }),
+            ...(typeof extraContent === "object" && extraContent !== null
+              ? { extraContent: extraContent as Record<string, unknown> }
+              : {}),
             ...(delta.role === "assistant" ? { role: "assistant" as const } : {}),
             ...(typeof reasoning === "string" ? { reasoning } : {}),
             ...(Array.isArray(delta.tool_calls ?? delta.toolCalls)
