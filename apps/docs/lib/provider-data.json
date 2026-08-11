@@ -235,7 +235,7 @@
     "name": "cohere",
     "requiresApiKey": true,
     "promptCacheKeySupport": "unsupported",
-    "tier": "verified"
+    "tier": "community"
   },
   {
     "capabilities": {

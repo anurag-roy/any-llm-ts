@@ -1,7 +1,7 @@
 {
   "source": {
     "repository": "mozilla-ai/any-llm",
-    "commit": "bcd78c588265cd0c32d0c42b86b4cb929fcf4aa1"
+    "commit": "720b9e9183b0b4fb243ea7590413381e8dce0f53"
   },
   "providers": [
     "anthropic",
@@ -62,7 +62,6 @@
     "azureopenai",
     "bedrock",
     "cerebras",
-    "cohere",
     "deepseek",
     "fireworks",
     "gemini",
