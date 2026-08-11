@@ -226,7 +226,11 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
     envApiBase: "MINIMAX_API_BASE",
     envApiKey: "MINIMAX_API_KEY",
     name: "minimax",
-    quirks: { rejectResponseFormat: true, xmlReasoning: true },
+    quirks: {
+      filterEmptyStreamingChunks: true,
+      rejectResponseFormat: true,
+      xmlReasoning: true,
+    },
   },
   {
     apiBase: "https://api.mistral.ai/v1",

@@ -75,6 +75,11 @@ For Anthropic, `responseFormat.type` must be `json_schema`, and the schema must 
 `responseFormat.json_schema.schema`. The adapter translates it to Anthropic's structured-output
 configuration.
 
+For Anthropic Claude models on Bedrock, the adapter emulates `json_schema` output by forcing a
+private tool call and returning that tool's JSON input as normal assistant content. This works for
+direct and cross-region model IDs containing `anthropic.`. It is non-streaming and cannot be
+combined with enabled extended reasoning; omit `reasoningEffort` or use `none` or `auto`.
+
 Gemini accepts `json_schema`, `json_object`, and `text`. For `json_schema`, the adapter sends the
 schema through the native Google Gen AI SDK and requests the `application/json` response MIME type.
 If Gemini reports truncation or content filtering before structured output is complete, the adapter

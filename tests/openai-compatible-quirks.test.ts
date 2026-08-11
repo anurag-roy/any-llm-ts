@@ -258,6 +258,68 @@ describe("OpenAI-compatible provider quirks", () => {
     expect(chunks[2]?.choices[0]?.finishReason).toBe("stop");
   });
 
+  it("preserves MiniMax usage-only stream chunks while filtering unrelated empties", async () => {
+    async function* stream(): AsyncIterable<Record<string, unknown>> {
+      yield {
+        choices: [{ delta: { content: "answer" }, finish_reason: null, index: 0 }],
+        created: 1,
+        id: "content",
+        model: "MiniMax-M3",
+      };
+      yield {
+        choices: [],
+        created: 1,
+        id: "empty",
+        model: "MiniMax-M3",
+      };
+      yield {
+        choices: [],
+        created: 1,
+        id: "usage",
+        model: "MiniMax-M3",
+        usage: { completion_tokens: 2, prompt_tokens: 11, total_tokens: 13 },
+      };
+      yield {
+        choices: [{ finish_reason: "stop", index: 0 }],
+        created: 1,
+        id: "usage-without-delta",
+        model: "MiniMax-M3",
+        usage: { completion_tokens: 3, prompt_tokens: 12, total_tokens: 15 },
+      };
+    }
+    const provider = new OpenAIProvider(
+      config("minimax", {
+        filterEmptyStreamingChunks: true,
+        xmlReasoning: true,
+      }),
+      {},
+      fakeClient({ chat: { completions: { create: vi.fn().mockResolvedValue(stream()) } } }),
+    );
+
+    const result = await provider.completion({
+      messages: [{ content: "hello", role: "user" }],
+      model: "MiniMax-M3",
+      stream: true,
+    });
+    const chunks = [];
+    for await (const chunk of result as AsyncIterable<ChatCompletionChunk>) chunks.push(chunk);
+
+    expect(chunks.map((chunk) => chunk.id)).toEqual([
+      "content",
+      "usage",
+      "usage-without-delta",
+    ]);
+    expect(chunks[0]?.choices[0]?.delta.content).toBe("answer");
+    expect(chunks[1]).toMatchObject({
+      choices: [],
+      usage: { completionTokens: 2, promptTokens: 11, totalTokens: 13 },
+    });
+    expect(chunks[2]).toMatchObject({
+      choices: [],
+      usage: { completionTokens: 3, promptTokens: 12, totalTokens: 15 },
+    });
+  });
+
   it.each([
     ["trailing partial <th", "trailing partial <th", ""],
     ["<th", "<th", ""],

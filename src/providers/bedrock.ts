@@ -100,6 +100,8 @@ const reasoningBudgets = {
   xhigh: 32_768,
 } as const;
 
+const structuredOutputToolName = "any_llm_structured_output";
+
 function createClients(
   options: ProviderOptions,
   injected: BedrockProviderClients,
@@ -301,11 +303,15 @@ function convertMessages(messages: ChatMessage[]): {
   };
 }
 
-function toolConfiguration(params: CompletionParams): Record<string, unknown> | undefined {
-  if (params.tools === undefined) return undefined;
-  const tools = params.tools.flatMap((tool): Record<string, unknown>[] => {
+function configuredTools(params: CompletionParams): Record<string, unknown>[] {
+  return (params.tools ?? []).flatMap((tool): Record<string, unknown>[] => {
     if (tool.type !== "function" || !("function" in tool)) return [];
     const functionTool = tool as FunctionTool;
+    if (functionTool.function.name === structuredOutputToolName) {
+      throw invalidRequest(
+        `Tool name "${structuredOutputToolName}" is reserved for Bedrock structured output.`,
+      );
+    }
     return [
       {
         toolSpec: {
@@ -319,6 +325,78 @@ function toolConfiguration(params: CompletionParams): Record<string, unknown> | 
       },
     ];
   });
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function structuredOutputTool(responseFormat: Record<string, unknown>): Record<string, unknown> {
+  if (responseFormat.type === "json_object") {
+    throw new UnsupportedParameterError(
+      "responseFormat with type json_object",
+      "bedrock",
+      "Use a json_schema response format instead.",
+    );
+  }
+  if (responseFormat.type !== "json_schema") {
+    throw new TypeError(
+      `Unsupported Bedrock responseFormat type: ${String(responseFormat.type)}.`,
+    );
+  }
+  const schema = objectRecord(objectRecord(responseFormat.json_schema)?.schema);
+  if (schema === undefined) {
+    throw new TypeError(
+      "Bedrock responseFormat.json_schema.schema must be an object.",
+    );
+  }
+  return {
+    toolSpec: {
+      description: "Provide the response matching the required schema.",
+      inputSchema: {
+        json: schema,
+      },
+      name: structuredOutputToolName,
+    },
+  };
+}
+
+function toolConfiguration(params: CompletionParams): Record<string, unknown> | undefined {
+  const tools = configuredTools(params);
+  if (params.responseFormat !== undefined) {
+    if (!params.model.includes("anthropic.")) {
+      throw new UnsupportedParameterError(
+        "responseFormat",
+        "bedrock",
+        "Structured output is supported only for Anthropic Claude models on Bedrock.",
+      );
+    }
+    if (params.stream === true) {
+      throw new UnsupportedParameterError(
+        "responseFormat with stream",
+        "bedrock",
+        "Bedrock exposes the forced structured-output tool as streaming tool-call deltas. Use stream: false.",
+      );
+    }
+    if (
+      params.reasoningEffort !== undefined &&
+      params.reasoningEffort !== "auto" &&
+      params.reasoningEffort !== "none"
+    ) {
+      throw new UnsupportedParameterError(
+        "responseFormat with reasoningEffort",
+        "bedrock",
+        "Claude rejects forced tool use while extended thinking is enabled. Omit reasoningEffort or use none.",
+      );
+    }
+    tools.push(structuredOutputTool(params.responseFormat));
+    return {
+      toolChoice: { tool: { name: structuredOutputToolName } },
+      tools,
+    };
+  }
   if (tools.length === 0) return undefined;
   const toolChoice =
     params.toolChoice === "required"
@@ -335,13 +413,6 @@ function toolConfiguration(params: CompletionParams): Record<string, unknown> | 
 }
 
 function completionRequest(params: CompletionParams): Record<string, unknown> {
-  if (params.responseFormat !== undefined) {
-    throw new UnsupportedParameterError(
-      "responseFormat",
-      "bedrock",
-      "See Amazon Nova's structured-output documentation for model-specific prompting.",
-    );
-  }
   const converted = convertMessages(params.messages);
   const inferenceConfig = compactObject({
     maxTokens: params.maxTokens ?? params.maxCompletionTokens,
@@ -441,19 +512,29 @@ function normalizeCompletion(value: unknown, model: string): ChatCompletion {
     }
   }
   const usage = normalizedUsage(response.usage);
+  const structuredOutput =
+    response.stopReason === "tool_use" &&
+    toolCalls.length === 1 &&
+    toolCalls[0]?.function.name === structuredOutputToolName
+      ? toolCalls[0]
+      : undefined;
   return {
     choices: [
       {
-        finishReason: bedrockFinishReason(
-          response.stopReason,
-          toolCalls.length > 0,
-        ),
+        finishReason:
+          structuredOutput === undefined
+            ? bedrockFinishReason(response.stopReason, toolCalls.length > 0)
+            : "stop",
         index: 0,
         message: {
-          content: content.length === 0 ? null : content,
+          content:
+            structuredOutput?.function.arguments ??
+            (content.length === 0 ? null : content),
           role: "assistant",
           ...(reasoning.length === 0 ? {} : { reasoning }),
-          ...(toolCalls.length === 0 ? {} : { toolCalls }),
+          ...(toolCalls.length === 0 || structuredOutput !== undefined
+            ? {}
+            : { toolCalls }),
         },
       },
     ],

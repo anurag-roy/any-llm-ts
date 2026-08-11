@@ -9,7 +9,6 @@ const verifiedProviders = new Set([
   "azureopenai",
   "bedrock",
   "cerebras",
-  "cohere",
   "deepseek",
   "fireworks",
   "gemini",

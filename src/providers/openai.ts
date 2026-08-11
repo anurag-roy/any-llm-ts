@@ -87,6 +87,7 @@ interface OpenAIProviderConfig {
 
 interface OpenAIProviderQuirks {
   defaultModelOwner?: string;
+  filterEmptyStreamingChunks?: boolean;
   finishReasonMap?: Record<string, Exclude<FinishReason, null>>;
   maxCompletionTokensAsMaxTokens?: boolean;
   patchLlamaToolSchemas?: boolean;
@@ -400,6 +401,14 @@ async function* normalizeXmlReasoningStream(
   }
 }
 
+async function* filterEmptyStreamingChunks(
+  stream: AsyncIterable<ChatCompletionChunk>,
+): AsyncIterable<ChatCompletionChunk> {
+  for await (const chunk of stream) {
+    if (chunk.choices.length > 0 || chunk.usage !== undefined) yield chunk;
+  }
+}
+
 function normalizeReasoningDirective(value: unknown): Record<string, unknown> {
   if (typeof value !== "object" || value === null) return {};
   const raw = value as Record<string, unknown>;
@@ -608,9 +617,12 @@ export class OpenAIProvider extends BaseProvider {
         const chunks = mapAsyncIterable(stream as unknown as AsyncIterable<unknown>, (chunk) =>
           this.normalizeChunk(chunk),
         );
-        const normalized = this.config.quirks?.xmlReasoning === true
-          ? normalizeXmlReasoningStream(chunks)
+        const filtered = this.config.quirks?.filterEmptyStreamingChunks === true
+          ? filterEmptyStreamingChunks(chunks)
           : chunks;
+        const normalized = this.config.quirks?.xmlReasoning === true
+          ? normalizeXmlReasoningStream(filtered)
+          : filtered;
         return this.protectStream(normalized);
       }
       const response = await this.client.chat.completions.create({ ...request, stream: false } as never);
@@ -1092,11 +1104,12 @@ export class OpenAIProvider extends BaseProvider {
     const response = value as Record<string, any>;
     const usage = normalizeUsage(response.usage);
     return {
-      choices: (response.choices as Record<string, any>[]).map((choice) => {
+      choices: (Array.isArray(response.choices) ? response.choices : []).flatMap((choice) => {
+        if (typeof choice.delta !== "object" || choice.delta === null) return [];
         const delta = choice.delta as Record<string, any>;
         const extraContent = delta.extra_content ?? delta.extraContent;
         const reasoning = delta.reasoning ?? delta.reasoning_content;
-        return {
+        return [{
           delta: {
             ...(delta.content === undefined ? {} : { content: delta.content as string | null }),
             ...(typeof extraContent === "object" && extraContent !== null
@@ -1132,7 +1145,7 @@ export class OpenAIProvider extends BaseProvider {
           ),
           index: choice.index as number,
           logprobs: choice.logprobs,
-        };
+        }];
       }),
       created: Number(response.created),
       id: response.id as string,

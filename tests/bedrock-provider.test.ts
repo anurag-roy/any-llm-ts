@@ -222,6 +222,105 @@ describe("Bedrock provider", () => {
     });
   });
 
+  it.each([
+    "anthropic.claude-3-haiku-20240307-v1:0",
+    "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+  ])("emulates structured output for Claude model %s", async (model) => {
+    const send = vi.fn(async (command: unknown): Promise<unknown> => {
+      expect(command).toBeInstanceOf(ConverseCommand);
+      return {
+        output: {
+          message: {
+            content: [
+              {
+                reasoningContent: {
+                  reasoningText: { text: "The capital of France is Paris." },
+                },
+              },
+              {
+                toolUse: {
+                  input: { name: "Paris" },
+                  name: "any_llm_structured_output",
+                  toolUseId: "structured-1",
+                },
+              },
+            ],
+          },
+        },
+        stopReason: "tool_use",
+        usage: {
+          cacheReadInputTokens: 80,
+          inputTokens: 100,
+          outputTokens: 50,
+        },
+      };
+    });
+    const format = {
+      jsonSchema: {
+        properties: { name: { type: "string" } },
+        required: ["name"],
+        type: "object",
+      },
+      name: "city",
+      parse(value: unknown): { name: string } {
+        const name =
+          typeof value === "object" && value !== null
+            ? (value as Record<string, unknown>).name
+            : undefined;
+        if (typeof name !== "string") {
+          throw new TypeError("Expected a city object.");
+        }
+        return { name };
+      },
+    };
+    const result = await AnyLLM.fromProvider(provider(send)).completion({
+      messages: [{ content: "What is the capital of France?", role: "user" }],
+      model,
+      reasoningEffort: "none",
+      responseFormat: format,
+      tools: [{
+        function: {
+          name: "weather",
+          parameters: { properties: { city: { type: "string" } }, type: "object" },
+        },
+        type: "function",
+      }],
+    });
+
+    const command = send.mock.calls[0]?.[0] as ConverseCommand;
+    expect(command.input.toolConfig).toMatchObject({
+      toolChoice: { tool: { name: "any_llm_structured_output" } },
+      tools: [
+        { toolSpec: { name: "weather" } },
+        {
+          toolSpec: {
+            description: "Provide the response matching the required schema.",
+            inputSchema: { json: format.jsonSchema },
+            name: "any_llm_structured_output",
+          },
+        },
+      ],
+    });
+    expect(result).toMatchObject({
+      choices: [{
+        finishReason: "stop",
+        message: {
+          content: '{"name":"Paris"}',
+          parsed: { name: "Paris" },
+          reasoning: "The capital of France is Paris.",
+        },
+      }],
+      usage: {
+        completionTokens: 50,
+        promptTokens: 180,
+        promptTokensDetails: { cachedTokens: 80 },
+        totalTokens: 230,
+      },
+    });
+    expect(result.choices[0]?.message).not.toHaveProperty("toolCalls");
+  });
+
   it("validates provider-specific request constraints", async () => {
     const bedrock = provider();
     expect(() =>
@@ -231,6 +330,62 @@ describe("Bedrock provider", () => {
         responseFormat: { type: "json_object" },
       }),
     ).toThrow(UnsupportedParameterError);
+    expect(() =>
+      bedrock.completion({
+        messages: [{ content: "Hi", role: "user" }],
+        model: "anthropic.claude-test",
+        responseFormat: { type: "json_object" },
+      }),
+    ).toThrow(/json_schema/u);
+    expect(() =>
+      bedrock.completion({
+        messages: [{ content: "Hi", role: "user" }],
+        model: "anthropic.claude-test",
+        responseFormat: { type: "json_schema" },
+      }),
+    ).toThrow(/json_schema\.schema/u);
+    expect(() =>
+      bedrock.completion({
+        messages: [{ content: "Hi", role: "user" }],
+        model: "anthropic.claude-test",
+        responseFormat: {
+          json_schema: { schema: { type: "object" } },
+          type: "unsupported",
+        },
+      }),
+    ).toThrow(/Unsupported Bedrock responseFormat type/u);
+    expect(() =>
+      bedrock.completion({
+        messages: [{ content: "Hi", role: "user" }],
+        model: "anthropic.claude-test",
+        responseFormat: {
+          json_schema: { schema: { type: "object" } },
+          type: "json_schema",
+        },
+        stream: true,
+      }),
+    ).toThrow(/stream/u);
+    expect(() =>
+      bedrock.completion({
+        messages: [{ content: "Hi", role: "user" }],
+        model: "anthropic.claude-test",
+        reasoningEffort: "high",
+        responseFormat: {
+          json_schema: { schema: { type: "object" } },
+          type: "json_schema",
+        },
+      }),
+    ).toThrow(/reasoningEffort/u);
+    expect(() =>
+      bedrock.completion({
+        messages: [{ content: "Hi", role: "user" }],
+        model: "anthropic.claude-test",
+        tools: [{
+          function: { name: "any_llm_structured_output" },
+          type: "function",
+        }],
+      }),
+    ).toThrow(InvalidRequestError);
     expect(() =>
       bedrock.completion({
         messages: [
