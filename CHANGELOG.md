@@ -1,5 +1,12 @@
 # any-llm-ts
 
+## 0.3.0
+
+### Minor Changes
+
+- 9db11bf: Add structured output for Anthropic Claude models on AWS Bedrock, preserve MiniMax usage-only
+  stream chunks, and synchronize provider metadata with Python any-llm.
+
 ## 0.2.0
 
 ### Minor Changes
