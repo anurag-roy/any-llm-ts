@@ -34,10 +34,17 @@ llm.transcription(params)
 llm.speech(params)
 llm.moderation(params)
 llm.messages(params)
+llm.rerank(params)
+llm.createBatch(params)
+llm.retrieveBatch(batchId, providerOptions?)
+llm.cancelBatch(batchId, providerOptions?)
+llm.listBatches(params?)
+llm.retrieveBatchResults(batchId, providerOptions?)
 ```
 
-`messages()` provides direct access to the native Anthropic Messages API. Other built-in adapters
-reject it with `UnsupportedOperationError`.
+`messages()` uses native Messages support where available and translates through normalized chat
+completions for compatible providers. Operations that an adapter does not support reject with
+`UnsupportedOperationError`.
 
 ## Registry methods
 

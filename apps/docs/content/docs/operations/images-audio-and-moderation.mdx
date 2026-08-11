@@ -66,8 +66,9 @@ const result = await moderation({
 });
 ```
 
-The stateless moderation helper defaults to `openai` when `provider` is omitted. Moderation results
-are left as `unknown` so provider-specific categories and scores are preserved.
+The stateless moderation helper defaults to `openai` when `provider` is omitted. Results normalize
+the model, flagged state, category decisions, scores, and input categories while retaining the SDK
+response in `raw`.
 
 <Callout title="Capability flags are endpoint-level guidance">
   A `true` capability does not guarantee that every model offered by the provider implements the

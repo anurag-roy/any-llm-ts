@@ -4,10 +4,12 @@ import {
   type GenerateContentResponse,
   type GoogleGenAI,
 } from "@google/genai";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   AnyLLM,
+  BatchNotCompleteError,
   ContentFilterError,
   ContextLengthExceededError,
   GeminiProvider,
@@ -27,7 +29,15 @@ interface FakeModels {
   list: ReturnType<typeof vi.fn>;
 }
 
-function fakeGemini(overrides: Partial<FakeModels> = {}): {
+interface FakeBatches {
+  cancel: ReturnType<typeof vi.fn>;
+  create: ReturnType<typeof vi.fn>;
+  get: ReturnType<typeof vi.fn>;
+  list: ReturnType<typeof vi.fn>;
+}
+
+function fakeGemini(overrides: Partial<FakeModels> = {}, batchOverrides: Partial<FakeBatches> = {}): {
+  batches: FakeBatches;
   client: GoogleGenAI;
   models: FakeModels;
 } {
@@ -38,7 +48,14 @@ function fakeGemini(overrides: Partial<FakeModels> = {}): {
     list: vi.fn(),
     ...overrides,
   };
-  return { client: { models } as unknown as GoogleGenAI, models };
+  const batches: FakeBatches = {
+    cancel: vi.fn(),
+    create: vi.fn(),
+    get: vi.fn(),
+    list: vi.fn(),
+    ...batchOverrides,
+  };
+  return { batches, client: { batches, models } as unknown as GoogleGenAI, models };
 }
 
 function response(value: Record<string, unknown>): GenerateContentResponse {
@@ -796,6 +813,127 @@ describe("Gemini provider", () => {
     expect(error).toMatchObject({ provider: "gemini", retryAfter: "2" });
   });
 
+  it("supports the Gemini batch lifecycle and converts OpenAI JSONL requests", async () => {
+    const job = {
+      completionStats: { failedCount: "1", incompleteCount: "0", successfulCount: "2" },
+      createTime: "2026-01-01T00:00:00.000Z",
+      dest: { fileName: "files/output-1" },
+      displayName: "Nightly",
+      endTime: "2026-01-01T00:01:00.000Z",
+      model: "model-a",
+      name: "batches/batch-1",
+      state: "JOB_STATE_SUCCEEDED",
+    };
+    const page = {
+      async *[Symbol.asyncIterator]() {
+        yield job;
+        yield { ...job, name: "batches/batch-2" };
+      },
+    };
+    const statusPage = {
+      async *[Symbol.asyncIterator]() {
+        yield { ...job, createTime: "invalid", dest: { gcsUri: "gs://output" }, name: "failed", state: "JOB_STATE_FAILED" };
+        yield { ...job, dest: { bigqueryUri: "bq://output" }, name: "cancelling", state: "JOB_STATE_CANCELLING" };
+        yield { ...job, dest: undefined, name: "cancelled", state: "JOB_STATE_CANCELLED" };
+        yield { ...job, name: "expired", outputInfo: { gcsOutputDirectory: "gs://directory" }, state: "JOB_STATE_EXPIRED" };
+        yield { ...job, name: "queued", outputInfo: { bigqueryOutputTable: "bq://table" }, state: "JOB_STATE_QUEUED" };
+        yield { ...job, name: "pending", state: "JOB_STATE_PENDING" };
+      },
+    };
+    const sdk = fakeGemini({}, {
+      cancel: vi.fn().mockResolvedValue(undefined),
+      create: vi.fn().mockResolvedValue(job),
+      get: vi.fn().mockResolvedValue(job),
+      list: vi.fn().mockResolvedValueOnce(page).mockResolvedValueOnce(statusPage),
+    });
+    const provider = new GeminiProvider({}, sdk.client);
+    const inputFilePath = fileURLToPath(new URL("./fixtures/batch.jsonl", import.meta.url));
+
+    await expect(
+      provider.createBatch({
+        endpoint: "/v1/chat/completions",
+        inputFilePath,
+        providerOptions: { dest: "gs://bucket/output", displayName: "Nightly", model: "model-override" },
+      }),
+    ).resolves.toMatchObject({
+      completedAt: 1_767_225_660,
+      createdAt: 1_767_225_600,
+      id: "batches/batch-1",
+      metadata: { displayName: "Nightly" },
+      outputFileId: "files/output-1",
+      provider: "gemini",
+      requestCounts: { completed: 2, failed: 1, total: 3 },
+      status: "completed",
+    });
+    expect(sdk.batches.create).toHaveBeenCalledWith({
+      config: { dest: "gs://bucket/output", displayName: "Nightly" },
+      model: "model-override",
+      src: [
+        expect.objectContaining({
+          contents: [{ parts: [{ text: "Hello" }], role: "user" }],
+          metadata: { custom_id: "request-1" },
+          model: "model-override",
+        }),
+      ],
+    });
+    await expect(provider.retrieveBatch("batches/batch-1")).resolves.toMatchObject({ id: "batches/batch-1" });
+    await expect(provider.cancelBatch("batches/batch-1")).resolves.toMatchObject({ id: "batches/batch-1" });
+    await expect(provider.listBatches({ after: "next", limit: 1 })).resolves.toMatchObject([
+      { id: "batches/batch-1" },
+    ]);
+    expect(sdk.batches.cancel).toHaveBeenCalledWith({ name: "batches/batch-1" });
+    expect(sdk.batches.list).toHaveBeenCalledWith({ config: { pageSize: 1, pageToken: "next" } });
+    await expect(provider.listBatches()).resolves.toMatchObject([
+      { id: "failed", outputFileId: "gs://output", status: "failed" },
+      { id: "cancelling", outputFileId: "bq://output", status: "cancelling" },
+      { id: "cancelled", outputFileId: null, status: "cancelled" },
+      { id: "expired", outputFileId: "gs://directory", status: "expired" },
+      { id: "queued", outputFileId: "bq://table", status: "validating" },
+      { id: "pending", status: "validating" },
+    ]);
+    await expect(provider.listBatches({ limit: 0 })).resolves.toEqual([]);
+    await expect(
+      provider.createBatch({ endpoint: "/v1/embeddings", inputFilePath }),
+    ).rejects.toThrow(/only supports/u);
+  });
+
+  it("normalizes Gemini inline batch results and completion states", async () => {
+    const successfulResponse = response({
+      candidates: [{ content: { parts: [{ text: "done" }], role: "model" }, finishReason: "STOP", index: 0 }],
+      modelVersion: "model-a",
+      responseId: "response-1",
+    });
+    const completed = {
+      dest: {
+        inlinedResponses: [
+          { metadata: { custom_id: "ok" }, response: successfulResponse },
+          { error: { code: 400, message: "Bad request" }, metadata: { custom_id: "bad" } },
+          { metadata: { custom_id: "missing" } },
+        ],
+      },
+      model: "model-a",
+      name: "batches/batch-1",
+      state: "JOB_STATE_PARTIALLY_SUCCEEDED",
+    };
+    const get = vi
+      .fn()
+      .mockResolvedValueOnce(completed)
+      .mockResolvedValueOnce({ name: "batches/pending", state: "JOB_STATE_RUNNING" })
+      .mockResolvedValueOnce({ name: "batches/external", state: "JOB_STATE_SUCCEEDED" });
+    const sdk = fakeGemini({}, { get });
+    const provider = new GeminiProvider({}, sdk.client);
+
+    await expect(provider.retrieveBatchResults("batches/batch-1")).resolves.toMatchObject({
+      results: [
+        { customId: "ok", result: { choices: [{ message: { content: "done" } }], provider: "gemini" } },
+        { customId: "bad", error: { code: "400", message: "Bad request" } },
+        { customId: "missing", error: { code: "unknown", message: "Record contains neither response nor error" } },
+      ],
+    });
+    await expect(provider.retrieveBatchResults("batches/pending")).rejects.toBeInstanceOf(BatchNotCompleteError);
+    await expect(provider.retrieveBatchResults("batches/external")).rejects.toThrow(/does not contain inline results/u);
+  });
+
   it("resolves credentials, base URL metadata, registry capabilities, and exports", () => {
     expect(() => new GeminiProvider()).toThrow(MissingApiKeyError);
     process.env.GOOGLE_API_KEY = "google-key";
@@ -817,7 +955,7 @@ describe("Gemini provider", () => {
     });
     expect(AnyLLM.getSupportedProviders()).toContain("gemini");
     expect(AnyLLM.getProviderMetadata("gemini")).toMatchObject({
-      capabilities: { batch: false, embedding: true, vision: true },
+      capabilities: { batch: true, embedding: true, vision: true },
       name: "gemini",
     });
   });

@@ -1,31 +1,43 @@
+import { readFile } from "node:fs/promises";
+
 import {
   FinishReason as GeminiFinishReason,
   FunctionCallingConfigMode,
   GoogleGenAI,
+  JobState,
   type Content,
+  type BatchJob,
   type GenerateContentConfig,
   type GenerateContentParameters,
   type GenerateContentResponse,
   type GoogleGenAIOptions,
   type Part,
+  type InlinedRequest,
   type Tool as GeminiTool,
 } from "@google/genai";
 
 import {
   ContentFilterError,
   ContextLengthExceededError,
+  BatchNotCompleteError,
+  InvalidRequestError,
   MissingApiKeyError,
 } from "../errors.js";
 import type {
+  Batch,
+  BatchResult,
+  BatchStatus,
   ChatCompletion,
   ChatCompletionChunk,
   ChatMessage,
   CompletionParams,
   CompletionUsage,
+  CreateBatchParams,
   EmbeddingParams,
   EmbeddingResponse,
   FinishReason,
   FunctionTool,
+  ListBatchesParams,
   Model,
   ProviderCapabilities,
   ProviderMetadata,
@@ -40,6 +52,7 @@ import {
   unixTimestamp,
 } from "../utils.js";
 import { BaseProvider } from "./base.js";
+import { completeProviderMetadata } from "../provider-metadata.js";
 
 const INLINE_DATA_LIMIT_BYTES = 20 * 1024 * 1024;
 const SKIP_THOUGHT_SIGNATURE_VALIDATOR = "skip_thought_signature_validator";
@@ -56,19 +69,28 @@ const reasoningBudgets = {
 const geminiCapabilities: ProviderCapabilities = {
   audioSpeech: false,
   audioTranscription: false,
-  batch: false,
+  batch: true,
   completion: true,
   embedding: true,
   imageGeneration: false,
   listModels: true,
-  messages: false,
+  messages: true,
   moderation: false,
+  pdfInput: true,
   reasoning: true,
   rerank: false,
   responses: false,
   streaming: true,
   vision: true,
 };
+
+export interface GeminiProviderConfig {
+  documentationUrl?: string;
+  envApiBase?: string;
+  envApiKey?: string;
+  name?: string;
+  requiresApiKey?: boolean;
+}
 
 interface ConvertedMessages {
   contents: Content[];
@@ -596,7 +618,8 @@ function completionParts(
 
 function assertStructuredOutputCompleted(
   params: CompletionParams,
-  result: ChatCompletion
+  result: ChatCompletion,
+  provider: string,
 ): void {
   if (
     params.responseFormat === undefined ||
@@ -608,7 +631,7 @@ function assertStructuredOutputCompleted(
     throw new ContextLengthExceededError(
       "Gemini truncated the structured output before it completed.",
       {
-        provider: "gemini",
+        provider,
       }
     );
   }
@@ -616,31 +639,103 @@ function assertStructuredOutputCompleted(
     throw new ContentFilterError(
       "Gemini filtered the structured output before it completed.",
       {
-        provider: "gemini",
+        provider,
       }
     );
   }
 }
 
+function geminiBatchStatus(state: unknown): BatchStatus {
+  if (state === "JOB_STATE_SUCCEEDED" || state === "JOB_STATE_PARTIALLY_SUCCEEDED") return "completed";
+  if (state === "JOB_STATE_FAILED") return "failed";
+  if (state === "JOB_STATE_CANCELLING") return "cancelling";
+  if (state === "JOB_STATE_CANCELLED") return "cancelled";
+  if (state === "JOB_STATE_EXPIRED") return "expired";
+  if (state === "JOB_STATE_QUEUED" || state === "JOB_STATE_PENDING") return "validating";
+  return "in_progress";
+}
+
+function geminiBatchTimestamp(value: string | undefined): number {
+  if (value === undefined) return 0;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? 0 : Math.floor(parsed / 1_000);
+}
+
+function normalizeGeminiBatch(job: BatchJob, provider: string): Batch {
+  const successful = Number(job.completionStats?.successfulCount ?? 0);
+  const failed = Number(job.completionStats?.failedCount ?? 0);
+  const incomplete = Number(job.completionStats?.incompleteCount ?? 0);
+  const outputFileId =
+    job.outputInfo?.gcsOutputDirectory ??
+    job.outputInfo?.bigqueryOutputTable ??
+    job.dest?.gcsUri ??
+    job.dest?.bigqueryUri ??
+    job.dest?.fileName;
+  const completedAt = geminiBatchTimestamp(job.endTime);
+  return {
+    completionWindow: "24h",
+    createdAt: geminiBatchTimestamp(job.createTime),
+    endpoint: "/v1/chat/completions",
+    id: job.name ?? "",
+    object: "batch",
+    provider,
+    status: geminiBatchStatus(job.state),
+    raw: job,
+    ...(completedAt === 0 ? {} : { completedAt }),
+    ...(job.displayName === undefined ? {} : { metadata: { displayName: job.displayName } }),
+    ...(job.model === undefined ? {} : { model: job.model }),
+    ...(outputFileId === undefined ? { outputFileId: null } : { outputFileId }),
+    requestCounts: { completed: successful, failed, total: successful + failed + incomplete },
+  };
+}
+
+function inlinedBatchRequest(entry: Record<string, unknown>): InlinedRequest {
+  const body = (entry.body ?? {}) as Record<string, unknown>;
+  const messages = Array.isArray(body.messages) ? (body.messages as ChatMessage[]) : [];
+  const converted = convertMessages(messages);
+  const stop = body.stop;
+  const config = compactObject({
+    maxOutputTokens: body.max_tokens,
+    stopSequences: typeof stop === "string" ? [stop] : stop,
+    systemInstruction: converted.systemInstruction,
+    temperature: body.temperature,
+    topP: body.top_p,
+  }) as GenerateContentConfig;
+  return {
+    contents: converted.contents,
+    model: typeof body.model === "string" ? body.model : "",
+    ...(Object.keys(config).length === 0 ? {} : { config }),
+    ...(typeof entry.custom_id === "string" ? { metadata: { custom_id: entry.custom_id } } : {}),
+  };
+}
+
 export class GeminiProvider extends BaseProvider {
   readonly metadata: ProviderMetadata;
   private readonly client: GoogleGenAI;
+  private readonly providerName: string;
 
-  constructor(options: ProviderOptions = {}, client?: GoogleGenAI) {
+  constructor(
+    options: ProviderOptions = {},
+    client?: GoogleGenAI,
+    config: GeminiProviderConfig = {},
+  ) {
     super();
+    this.providerName = config.name ?? "gemini";
     const apiBase =
-      options.apiBase ?? getEnvironmentVariable("GOOGLE_GEMINI_BASE_URL");
+      options.apiBase ??
+      getEnvironmentVariable(config.envApiBase ?? "GOOGLE_GEMINI_BASE_URL");
     this.client =
       client ?? new GoogleGenAI(mergeClientOptions(options, apiBase));
-    this.metadata = {
+    this.metadata = completeProviderMetadata({
       capabilities: { ...geminiCapabilities },
-      documentationUrl: "https://ai.google.dev/gemini-api/docs",
-      envApiBase: "GOOGLE_GEMINI_BASE_URL",
-      envApiKey: "GEMINI_API_KEY or GOOGLE_API_KEY",
-      name: "gemini",
-      requiresApiKey: true,
+      documentationUrl:
+        config.documentationUrl ?? "https://ai.google.dev/gemini-api/docs",
+      envApiBase: config.envApiBase ?? "GOOGLE_GEMINI_BASE_URL",
+      envApiKey: config.envApiKey ?? "GEMINI_API_KEY or GOOGLE_API_KEY",
+      name: this.providerName,
+      requiresApiKey: config.requiresApiKey ?? true,
       ...(apiBase === undefined ? {} : { apiBase }),
-    };
+    });
   }
 
   override completion(
@@ -667,7 +762,7 @@ export class GeminiProvider extends BaseProvider {
       }
       const response = await this.client.models.generateContent(request);
       const result = this.normalizeCompletion(response, params.model);
-      assertStructuredOutputCompleted(params, result);
+      assertStructuredOutputCompleted(params, result, this.providerName);
       return result;
     });
   }
@@ -716,7 +811,7 @@ export class GeminiProvider extends BaseProvider {
         ),
         model: params.model,
         object: "list",
-        provider: "gemini",
+        provider: this.providerName,
         raw: response,
         usage: { promptTokens: 0, totalTokens: 0 },
       };
@@ -739,6 +834,106 @@ export class GeminiProvider extends BaseProvider {
         });
       }
       return models;
+    });
+  }
+
+  override createBatch(params: CreateBatchParams): Promise<Batch> {
+    if (params.endpoint !== "/v1/chat/completions") {
+      return Promise.reject(
+        new InvalidRequestError(
+          `Google batch API only supports /v1/chat/completions, received "${params.endpoint}".`,
+          { provider: this.providerName },
+        ),
+      );
+    }
+    return this.execute(async () => {
+      const options = params.providerOptions ?? {};
+      const modelOverride = typeof options.model === "string" ? options.model : undefined;
+      const requests: InlinedRequest[] = [];
+      for (const line of (await readFile(params.inputFilePath, "utf8")).split("\n")) {
+        if (line.trim().length === 0) continue;
+        const request = inlinedBatchRequest(JSON.parse(line) as Record<string, unknown>);
+        requests.push(modelOverride === undefined ? request : { ...request, model: modelOverride });
+      }
+      const model = modelOverride ?? requests.find((request) => request.model !== undefined)?.model;
+      if (model === undefined || model.length === 0) {
+        throw new TypeError("No model was provided in providerOptions or the JSONL request bodies.");
+      }
+      const config = compactObject({
+        dest: options.dest,
+        displayName: options.displayName,
+      });
+      const response = await this.client.batches.create({
+        model,
+        src: requests,
+        ...(Object.keys(config).length === 0 ? {} : { config }),
+      });
+      return normalizeGeminiBatch(response, this.providerName);
+    });
+  }
+
+  override retrieveBatch(batchId: string, providerOptions: Record<string, unknown> = {}): Promise<Batch> {
+    return this.execute(async () => {
+      const response = await this.client.batches.get({ name: batchId, ...providerOptions });
+      return normalizeGeminiBatch(response, this.providerName);
+    });
+  }
+
+  override cancelBatch(batchId: string, providerOptions: Record<string, unknown> = {}): Promise<Batch> {
+    return this.execute(async () => {
+      await this.client.batches.cancel({ name: batchId, ...providerOptions });
+      const response = await this.client.batches.get({ name: batchId });
+      return normalizeGeminiBatch(response, this.providerName);
+    });
+  }
+
+  override listBatches(params: ListBatchesParams = {}): Promise<Batch[]> {
+    if (params.limit !== undefined && params.limit <= 0) return Promise.resolve([]);
+    return this.execute(async () => {
+      const page = await this.client.batches.list({
+        config: compactObject({
+          pageSize: params.limit,
+          pageToken: params.after,
+          ...params.providerOptions,
+        }),
+      });
+      const batches: Batch[] = [];
+      for await (const job of page) {
+        batches.push(normalizeGeminiBatch(job, this.providerName));
+        if (params.limit !== undefined && batches.length >= params.limit) break;
+      }
+      return batches;
+    });
+  }
+
+  override retrieveBatchResults(
+    batchId: string,
+    providerOptions: Record<string, unknown> = {},
+  ): Promise<BatchResult> {
+    return this.execute(async () => {
+      const job = await this.client.batches.get({ name: batchId, ...providerOptions });
+      if (job.state !== JobState.JOB_STATE_SUCCEEDED && job.state !== JobState.JOB_STATE_PARTIALLY_SUCCEEDED) {
+        throw new BatchNotCompleteError(batchId, geminiBatchStatus(job.state), this.providerName);
+      }
+      if (job.dest?.inlinedResponses === undefined) {
+        throw new TypeError(
+          `Batch "${batchId}" does not contain inline results. Read the provider output from its configured destination.`,
+        );
+      }
+      const results: BatchResult["results"] = job.dest.inlinedResponses.map((entry) => {
+        const customId = entry.metadata?.custom_id ?? "";
+        if (entry.response !== undefined) {
+          return { customId, result: this.normalizeCompletion(entry.response, job.model ?? "") };
+        }
+        return {
+          customId,
+          error: {
+            code: entry.error?.code === undefined ? "unknown" : String(entry.error.code),
+            message: entry.error?.message ?? "Record contains neither response nor error",
+          },
+        };
+      });
+      return { results };
     });
   }
 
@@ -827,7 +1022,7 @@ export class GeminiProvider extends BaseProvider {
       id: response.responseId ?? "gemini-response",
       model: response.modelVersion ?? requestedModel,
       object: "chat.completion",
-      provider: "gemini",
+      provider: this.providerName,
       raw: response,
       ...(usage === undefined ? {} : { usage }),
     };
@@ -840,7 +1035,7 @@ export class GeminiProvider extends BaseProvider {
       created: unixTimestamp(),
       emittedRoles: new Set(),
       id: "gemini-stream",
-      model: "gemini",
+      model: this.providerName,
       nextToolIndices: new Map(),
     };
 
@@ -933,7 +1128,7 @@ export class GeminiProvider extends BaseProvider {
         id: state.id,
         model: state.model,
         object: "chat.completion.chunk",
-        provider: "gemini",
+        provider: this.providerName,
         raw: response,
         ...(usage === undefined ? {} : { usage }),
       };

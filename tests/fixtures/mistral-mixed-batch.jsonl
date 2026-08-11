@@ -1,0 +1,2 @@
+{"custom_id":"request-1","body":{"model":"model-a","messages":[{"role":"user","content":"Hello"}]}}
+{"custom_id":"request-2","body":{"model":"model-b","messages":[{"role":"user","content":"World"}]}}

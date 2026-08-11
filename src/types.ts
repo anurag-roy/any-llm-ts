@@ -1,3 +1,11 @@
+import type {
+  ParsedResponse as OpenAIParsedResponse,
+  Response as OpenAIResponse,
+  ResponseInput as OpenAIResponseInput,
+  ResponseOutputMessage as OpenAIResponseOutputMessage,
+  ResponseStreamEvent as OpenAIResponseStreamEvent,
+} from "openai/resources/responses/responses";
+
 export type JsonPrimitive = boolean | number | string | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
@@ -84,6 +92,7 @@ export interface CompletionParams {
   n?: number;
   parallelToolCalls?: boolean;
   presencePenalty?: number;
+  promptCacheKey?: string;
   providerOptions?: Record<string, unknown>;
   reasoningEffort?: ReasoningEffort;
   responseFormat?: Record<string, unknown>;
@@ -135,6 +144,31 @@ export interface ChatCompletion {
   usage?: CompletionUsage;
   raw?: unknown;
 }
+
+export interface StructuredOutputFormat<T> {
+  jsonSchema: Record<string, unknown>;
+  name: string;
+  parse: (value: unknown) => T;
+  strict?: boolean;
+}
+
+export interface ParsedChatCompletionMessage<T> extends ChatMessage {
+  role: "assistant";
+  parsed: T | null;
+}
+
+export interface ParsedChatCompletionChoice<T> extends Omit<ChatCompletionChoice, "message"> {
+  message: ParsedChatCompletionMessage<T>;
+}
+
+export interface ParsedChatCompletion<T> extends Omit<ChatCompletion, "choices"> {
+  choices: ParsedChatCompletionChoice<T>[];
+}
+
+export type StructuredCompletionParams<T> = Omit<CompletionParams, "responseFormat" | "stream"> & {
+  responseFormat: StructuredOutputFormat<T>;
+  stream?: false | undefined;
+};
 
 export interface ToolCallDelta {
   function?: Partial<FunctionCall>;
@@ -208,12 +242,51 @@ export interface Model {
 }
 
 export interface ResponsesParams {
-  input: unknown;
+  input: ResponseInput;
   model: string;
+  background?: boolean;
+  contextManagement?: Record<string, unknown>[];
+  conversation?: Record<string, unknown> | string;
+  frequencyPenalty?: number;
+  include?: string[];
+  instructions?: string;
+  maxOutputTokens?: number;
+  maxToolCalls?: number;
+  metadata?: Record<string, string>;
+  parallelToolCalls?: boolean;
+  presencePenalty?: number;
+  previousResponseId?: string;
+  promptCacheKey?: string;
+  promptCacheRetention?: string;
   providerOptions?: Record<string, unknown>;
+  reasoning?: Record<string, unknown>;
+  responseFormat?: Record<string, unknown>;
+  safetyIdentifier?: string;
+  serviceTier?: string;
+  store?: boolean;
   stream?: boolean;
-  [key: string]: unknown;
+  streamOptions?: Record<string, unknown>;
+  temperature?: number;
+  text?: Record<string, unknown>;
+  toolChoice?: Record<string, unknown> | string;
+  tools?: Record<string, unknown>[];
+  topLogprobs?: number;
+  topP?: number;
+  truncation?: string;
+  user?: string;
 }
+
+export type Response = OpenAIResponse;
+export type ParsedResponse<T> = OpenAIParsedResponse<T>;
+export type ResponseInputItem = OpenAIResponseInput;
+export type ResponseOutputMessage = OpenAIResponseOutputMessage;
+export type ResponseStreamEvent = OpenAIResponseStreamEvent;
+export type ResponseInput = string | Record<string, unknown>[] | ResponseInputItem;
+
+export type StructuredResponsesParams<T> = Omit<ResponsesParams, "responseFormat" | "stream"> & {
+  responseFormat: StructuredOutputFormat<T>;
+  stream?: false | undefined;
+};
 
 export interface ImageGenerationParams {
   model: string;
@@ -223,7 +296,10 @@ export interface ImageGenerationParams {
   outputFormat?: "jpeg" | "png" | "webp";
   providerOptions?: Record<string, unknown>;
   quality?: string;
+  responseFormat?: "b64_json" | "url";
   size?: string;
+  style?: string;
+  user?: string;
 }
 
 export interface ImageGenerationResponse {
@@ -243,8 +319,9 @@ export interface TranscriptionParams {
   language?: string;
   prompt?: string;
   providerOptions?: Record<string, unknown>;
-  responseFormat?: string;
+  responseFormat?: "json" | "srt" | "text" | "verbose_json" | "vtt";
   temperature?: number;
+  timestampGranularities?: ("segment" | "word")[];
 }
 
 export interface Transcription {
@@ -259,15 +336,318 @@ export interface SpeechParams {
   voice: string;
   instructions?: string;
   providerOptions?: Record<string, unknown>;
-  responseFormat?: string;
+  responseFormat?: "aac" | "flac" | "mp3" | "opus" | "pcm" | "wav";
   speed?: number;
 }
 
+export interface ModerationInputPart {
+  type: string;
+  [key: string]: unknown;
+}
+
 export interface ModerationParams {
-  input: string | string[];
+  input: ModerationInputPart[] | string | string[];
   model?: string;
+  includeRaw?: boolean;
   providerOptions?: Record<string, unknown>;
 }
+
+export interface ModerationResult {
+  categories: Record<string, boolean>;
+  categoryScores: Record<string, number>;
+  flagged: boolean;
+  categoryAppliedInputTypes?: Record<string, string[]>;
+  providerRaw?: Record<string, unknown>;
+}
+
+export interface ModerationResponse {
+  id: string;
+  model: string;
+  results: ModerationResult[];
+}
+
+export type BatchStatus =
+  | "cancelled"
+  | "cancelling"
+  | "completed"
+  | "expired"
+  | "failed"
+  | "finalizing"
+  | "in_progress"
+  | "validating";
+
+export interface BatchRequestCounts {
+  completed: number;
+  failed: number;
+  total: number;
+}
+
+export interface Batch {
+  completionWindow: string;
+  createdAt: number;
+  endpoint: string;
+  id: string;
+  object: "batch";
+  provider: string;
+  status: BatchStatus;
+  cancelledAt?: number;
+  cancellingAt?: number;
+  completedAt?: number;
+  errorFileId?: string | null;
+  errors?: unknown;
+  expiredAt?: number;
+  expiresAt?: number;
+  failedAt?: number;
+  finalizingAt?: number;
+  inProgressAt?: number;
+  inputFileId?: string;
+  metadata?: Record<string, string> | null;
+  model?: string;
+  outputFileId?: string | null;
+  requestCounts?: BatchRequestCounts;
+  usage?: Record<string, unknown>;
+  raw?: unknown;
+}
+
+export interface CreateBatchParams {
+  endpoint: string;
+  inputFilePath: string;
+  completionWindow?: string;
+  metadata?: Record<string, string>;
+  providerOptions?: Record<string, unknown>;
+}
+
+export interface ListBatchesParams {
+  after?: string;
+  limit?: number;
+  providerOptions?: Record<string, unknown>;
+}
+
+export interface BatchResultError {
+  code: string;
+  message: string;
+}
+
+export interface BatchResultItem {
+  customId: string;
+  error?: BatchResultError;
+  result?: ChatCompletion;
+}
+
+export interface BatchResult {
+  results: BatchResultItem[];
+}
+
+export interface RerankParams {
+  documents: string[];
+  model: string;
+  query: string;
+  maxTokensPerDoc?: number;
+  providerOptions?: Record<string, unknown>;
+  returnDocuments?: boolean;
+  topN?: number;
+}
+
+export interface RerankResult {
+  index: number;
+  relevanceScore: number;
+}
+
+export interface RerankMeta {
+  billedUnits?: Record<string, number>;
+  tokens?: Record<string, number>;
+}
+
+export interface RerankUsage {
+  totalTokens?: number;
+}
+
+export interface RerankResponse {
+  results: RerankResult[];
+  id?: string;
+  meta?: RerankMeta;
+  usage?: RerankUsage;
+  raw?: unknown;
+}
+
+export interface MessagesTextBlock {
+  text: string;
+  type: "text";
+  cacheControl?: Record<string, unknown>;
+}
+
+export interface MessagesThinkingBlock {
+  thinking: string;
+  type: "thinking";
+  signature?: string;
+}
+
+export interface MessagesToolUseBlock {
+  id: string;
+  input: unknown;
+  name: string;
+  type: "tool_use";
+}
+
+export interface MessagesToolResultBlock {
+  toolUseId: string;
+  type: "tool_result";
+  content?: string | MessagesTextBlock[];
+  isError?: boolean;
+}
+
+export interface MessagesImageBlock {
+  source: {
+    type: "base64" | "url";
+    data?: string;
+    mediaType?: string;
+    url?: string;
+  };
+  type: "image";
+}
+
+export type MessagesInputContentBlock =
+  | MessagesImageBlock
+  | MessagesTextBlock
+  | MessagesThinkingBlock
+  | MessagesToolResultBlock
+  | MessagesToolUseBlock
+  | { type: string; [key: string]: unknown };
+
+export interface MessagesInputMessage {
+  content: MessagesInputContentBlock[] | string;
+  role: "assistant" | "user";
+}
+
+export interface MessagesTool {
+  inputSchema: Record<string, unknown>;
+  name: string;
+  description?: string;
+  cacheControl?: Record<string, unknown>;
+}
+
+export interface MessagesParams {
+  maxTokens: number;
+  messages: MessagesInputMessage[];
+  model: string;
+  betas?: string[];
+  cacheControl?: Record<string, unknown>;
+  contextManagement?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  outputFormat?: Record<string, unknown>;
+  promptCacheKey?: string;
+  providerOptions?: Record<string, unknown>;
+  stopSequences?: string[];
+  stream?: boolean;
+  system?: MessagesTextBlock[] | string;
+  temperature?: number;
+  thinking?: Record<string, unknown>;
+  toolChoice?: Record<string, unknown>;
+  tools?: MessagesTool[];
+  topK?: number;
+  topP?: number;
+}
+
+export type MessageStopReason =
+  | "compaction"
+  | "end_turn"
+  | "max_tokens"
+  | "model_context_window_exceeded"
+  | "pause_turn"
+  | "refusal"
+  | "stop_sequence"
+  | "tool_use";
+
+export type MessageContentBlock =
+  | MessagesTextBlock
+  | MessagesThinkingBlock
+  | MessagesToolUseBlock
+  | { type: string; [key: string]: unknown };
+
+export interface MessageUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationInputTokens?: number;
+  cacheReadInputTokens?: number;
+}
+
+export interface MessageResponse {
+  content: MessageContentBlock[];
+  id: string;
+  model: string;
+  role: "assistant";
+  stopReason: MessageStopReason | null;
+  type: "message";
+  usage: MessageUsage;
+  raw?: unknown;
+}
+
+export interface ParsedMessageTextBlock<T> extends MessagesTextBlock {
+  parsedOutput: T | null;
+}
+
+export interface ParsedMessageResponse<T> extends Omit<MessageResponse, "content"> {
+  content: (Exclude<MessageContentBlock, MessagesTextBlock> | ParsedMessageTextBlock<T>)[];
+}
+
+export type StructuredMessagesParams<T> = Omit<MessagesParams, "outputFormat" | "stream"> & {
+  outputFormat: StructuredOutputFormat<T>;
+  stream?: false | undefined;
+};
+
+export interface MessageStartEvent {
+  message: MessageResponse;
+  type: "message_start";
+}
+
+export interface ContentBlockStartEvent {
+  contentBlock: MessageContentBlock;
+  index: number;
+  type: "content_block_start";
+}
+
+export interface ContentBlockDeltaEvent {
+  delta:
+    | { partialJson: string; type: "input_json_delta" }
+    | { text: string; type: "text_delta" }
+    | { thinking: string; type: "thinking_delta" }
+    | { signature: string; type: "signature_delta" }
+    | { type: string; [key: string]: unknown };
+  index: number;
+  type: "content_block_delta";
+}
+
+export interface ContentBlockStopEvent {
+  index: number;
+  type: "content_block_stop";
+  contentBlock?: MessageContentBlock;
+}
+
+export interface MessageDeltaEvent {
+  delta: {
+    stopReason: MessageStopReason | null;
+    stopSequence?: string | null;
+  };
+  type: "message_delta";
+  usage: MessageUsage;
+}
+
+export interface MessageStopEvent {
+  type: "message_stop";
+  message?: MessageResponse;
+}
+
+export type MessageStreamEvent =
+  | ContentBlockDeltaEvent
+  | ContentBlockStartEvent
+  | ContentBlockStopEvent
+  | MessageDeltaEvent
+  | MessageStartEvent
+  | MessageStopEvent;
+
+export type MessageResult<T extends boolean | undefined> = T extends true
+  ? AsyncIterable<MessageStreamEvent>
+  : MessageResponse;
 
 export interface ProviderCapabilities {
   audioSpeech: boolean;
@@ -279,12 +659,16 @@ export interface ProviderCapabilities {
   listModels: boolean;
   messages: boolean;
   moderation: boolean;
+  pdfInput: boolean;
   reasoning: boolean;
   rerank: boolean;
   responses: boolean;
   streaming: boolean;
   vision: boolean;
 }
+
+export type PromptCacheKeySupport = "passthrough" | "supported" | "unsupported";
+export type ProviderTier = "community" | "verified";
 
 export interface ProviderMetadata {
   apiBase?: string;
@@ -293,7 +677,9 @@ export interface ProviderMetadata {
   envApiBase?: string;
   envApiKey?: string;
   name: string;
+  promptCacheKeySupport: PromptCacheKeySupport;
   requiresApiKey: boolean;
+  tier: ProviderTier;
 }
 
 export interface ProviderOptions {
@@ -313,4 +699,4 @@ export interface OpenAICompatibleOptions extends ProviderOptions {
 
 export type AsyncResult<T> = Promise<AsyncIterable<T>>;
 export type CompletionResult<T extends boolean | undefined> = T extends true ? AsyncIterable<ChatCompletionChunk> : ChatCompletion;
-export type ResponseResult<T extends boolean | undefined> = T extends true ? AsyncIterable<unknown> : unknown;
+export type ResponseResult<T extends boolean | undefined> = T extends true ? AsyncIterable<ResponseStreamEvent> : Response;

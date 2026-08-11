@@ -58,9 +58,5 @@ const models = await llm.listModels();
 ```
 
 Some providers expose compatible inference endpoints but no model-list endpoint. Check
-`metadata.capabilities.listModels` before relying on discovery.
-
-<Callout title="No reranking API yet">
-  The Python source project includes reranking integrations. This TypeScript port does not expose a
-  rerank operation yet, so it is deliberately absent from the active API documentation.
-</Callout>
+`metadata.capabilities.listModels` before relying on discovery. See [batches and
+reranking](./batches-and-reranking.mdx) for relevance scoring APIs.

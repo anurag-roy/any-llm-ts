@@ -21,7 +21,9 @@ import {
 const metadata: ProviderMetadata = {
   name: "company",
   documentationUrl: "https://developers.example.com/llm",
+  promptCacheKeySupport: "unsupported",
   requiresApiKey: true,
+  tier: "community",
   envApiKey: "COMPANY_LLM_API_KEY",
   capabilities: {
     completion: true,
@@ -32,6 +34,7 @@ const metadata: ProviderMetadata = {
     vision: false,
     reasoning: false,
     moderation: false,
+    pdfInput: false,
     imageGeneration: false,
     audioSpeech: false,
     audioTranscription: false,

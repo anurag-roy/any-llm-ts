@@ -1,4 +1,11 @@
 {
   "title": "Operations",
-  "pages": ["completions", "embeddings-and-models", "responses", "images-audio-and-moderation"]
+  "pages": [
+    "completions",
+    "messages",
+    "embeddings-and-models",
+    "responses",
+    "batches-and-reranking",
+    "images-audio-and-moderation"
+  ]
 }

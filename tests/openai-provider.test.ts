@@ -1,12 +1,19 @@
 import type OpenAI from "openai";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { MissingApiKeyError, ProviderError } from "../src/index.js";
+import {
+  BatchNotCompleteError,
+  MissingApiKeyError,
+  ProviderError,
+  UnsupportedOperationError,
+} from "../src/index.js";
 import { AzureOpenAIProvider, OpenAIProvider } from "../src/providers/openai.js";
 import type { ChatCompletionChunk } from "../src/types.js";
 
 const config = {
   apiBase: "https://provider.example/v1",
+  capabilities: { batch: true },
   documentationUrl: "https://provider.example/docs",
   envApiBase: "TEST_API_BASE",
   envApiKey: "TEST_API_KEY",
@@ -19,8 +26,10 @@ function fakeClient(overrides: Record<string, unknown> = {}): OpenAI {
       speech: { create: vi.fn() },
       transcriptions: { create: vi.fn() },
     },
+    batches: { cancel: vi.fn(), create: vi.fn(), list: vi.fn(), retrieve: vi.fn() },
     chat: { completions: { create: vi.fn() } },
     embeddings: { create: vi.fn() },
+    files: { content: vi.fn(), create: vi.fn() },
     images: { generate: vi.fn() },
     models: { list: vi.fn() },
     moderations: { create: vi.fn() },
@@ -206,7 +215,23 @@ describe("OpenAI-compatible provider", () => {
     }
     const create = vi.fn().mockResolvedValueOnce({ id: "response-1" }).mockResolvedValueOnce(events());
     const provider = new OpenAIProvider(config, {}, fakeClient({ responses: { create } }));
-    await expect(provider.responses({ input: "hello", model: "model-a" })).resolves.toEqual({ id: "response-1" });
+    await expect(
+      provider.responses({
+        input: "hello",
+        maxOutputTokens: 123,
+        model: "model-a",
+        previousResponseId: "response-0",
+        responseFormat: { name: "answer", schema: { type: "object" }, type: "json_schema" },
+        topP: 0.8,
+      }),
+    ).resolves.toEqual({ id: "response-1" });
+    expect(create).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      max_output_tokens: 123,
+      previous_response_id: "response-0",
+      stream: false,
+      text: { format: { name: "answer", schema: { type: "object" }, type: "json_schema" } },
+      top_p: 0.8,
+    }));
     const stream = await provider.responses({ input: "hello", model: "model-a", stream: true });
     const values = [];
     for await (const event of stream as AsyncIterable<unknown>) values.push(event);
@@ -247,7 +272,18 @@ describe("OpenAI-compatible provider", () => {
     });
     const transcription = vi.fn().mockResolvedValue({ text: "transcribed" });
     const speech = vi.fn().mockResolvedValue(new Response(new Uint8Array([1, 2, 3])));
-    const moderation = vi.fn().mockResolvedValue({ id: "mod-1", results: [] });
+    const moderation = vi.fn().mockResolvedValue({
+      id: "mod-1",
+      model: "omni-moderation-latest",
+      results: [
+        {
+          categories: { harassment: false, unknown: null },
+          category_applied_input_types: { harassment: ["text"], unknown: null },
+          category_scores: { harassment: 0.01, unknown: null },
+          flagged: false,
+        },
+      ],
+    });
     const provider = new OpenAIProvider(
       config,
       {},
@@ -258,7 +294,13 @@ describe("OpenAI-compatible provider", () => {
       }),
     );
 
-    await expect(provider.imageGeneration({ model: "image-a", prompt: "cat" })).resolves.toMatchObject({
+    await expect(provider.imageGeneration({
+      model: "image-a",
+      prompt: "cat",
+      responseFormat: "b64_json",
+      style: "vivid",
+      user: "user-1",
+    })).resolves.toMatchObject({
       data: [{ b64Json: "abc", revisedPrompt: "better" }],
       provider: "test-openai",
     });
@@ -269,7 +311,24 @@ describe("OpenAI-compatible provider", () => {
     await expect(provider.speech({ input: "hello", model: "tts", voice: "alloy" })).resolves.toEqual(
       new Uint8Array([1, 2, 3]),
     );
-    await expect(provider.moderation({ input: "hello" })).resolves.toEqual({ id: "mod-1", results: [] });
+    expect(image).toHaveBeenCalledWith(expect.objectContaining({
+      response_format: "b64_json",
+      style: "vivid",
+      user: "user-1",
+    }));
+    await expect(provider.moderation({ includeRaw: true, input: "hello" })).resolves.toMatchObject({
+      id: "mod-1",
+      model: "omni-moderation-latest",
+      results: [
+        {
+          categories: { harassment: false },
+          categoryAppliedInputTypes: { harassment: ["text"] },
+          categoryScores: { harassment: 0.01 },
+          flagged: false,
+          providerRaw: { flagged: false },
+        },
+      ],
+    });
   });
 
   it("accepts plain-text transcription responses", async () => {
@@ -279,6 +338,131 @@ describe("OpenAI-compatible provider", () => {
       fakeClient({ audio: { speech: { create: vi.fn() }, transcriptions: { create: vi.fn().mockResolvedValue("ok") } } }),
     );
     await expect(provider.transcription({ file: new Blob(), model: "whisper" })).resolves.toMatchObject({ text: "ok" });
+  });
+
+  it("supports the OpenAI batch lifecycle and normalizes batch objects", async () => {
+    const rawBatch = {
+      cancelled_at: 90,
+      cancelling_at: 89,
+      completed_at: 110,
+      completion_window: "24h",
+      created_at: 100,
+      endpoint: "/v1/chat/completions",
+      error_file_id: "file-errors",
+      errors: { data: [{ code: "warning" }] },
+      expired_at: 120,
+      expires_at: 130,
+      failed_at: 115,
+      finalizing_at: 109,
+      id: "batch-1",
+      in_progress_at: 101,
+      input_file_id: "file-input",
+      metadata: { project: "test" },
+      model: "model-a",
+      object: "batch",
+      output_file_id: null,
+      request_counts: { completed: 1, failed: 0, total: 1 },
+      status: "completed",
+      usage: { input_tokens: 10 },
+    };
+    const files = { content: vi.fn(), create: vi.fn().mockResolvedValue({ id: "file-input" }) };
+    const batches = {
+      cancel: vi.fn().mockResolvedValue({ ...rawBatch, status: "cancelling" }),
+      create: vi.fn().mockResolvedValue(rawBatch),
+      list: vi.fn().mockResolvedValue({ data: [rawBatch, { status: "unexpected" }] }),
+      retrieve: vi.fn().mockResolvedValue(rawBatch),
+    };
+    const provider = new OpenAIProvider(config, {}, fakeClient({ batches, files }));
+    const inputFilePath = fileURLToPath(new URL("./fixtures/batch.jsonl", import.meta.url));
+
+    await expect(
+      provider.createBatch({
+        completionWindow: "24h",
+        endpoint: "/v1/chat/completions",
+        inputFilePath,
+        metadata: { project: "test" },
+        providerOptions: { extra: true },
+      }),
+    ).resolves.toMatchObject({
+      completionWindow: "24h",
+      createdAt: 100,
+      id: "batch-1",
+      provider: "test-openai",
+      requestCounts: { completed: 1, failed: 0, total: 1 },
+      status: "completed",
+    });
+    expect(files.create).toHaveBeenCalledWith(expect.objectContaining({ purpose: "batch" }));
+    expect(batches.create).toHaveBeenCalledWith(expect.objectContaining({
+      endpoint: "/v1/chat/completions",
+      extra: true,
+      input_file_id: "file-input",
+    }));
+    await expect(provider.retrieveBatch("batch-1", { request: true })).resolves.toMatchObject({ id: "batch-1" });
+    await expect(provider.cancelBatch("batch-1")).resolves.toMatchObject({ status: "cancelling" });
+    await expect(provider.listBatches({ after: "batch-0", limit: 5 })).resolves.toMatchObject([
+      { id: "batch-1" },
+      {
+        completionWindow: "24h",
+        createdAt: 0,
+        endpoint: "/v1/chat/completions",
+        id: "",
+        status: "in_progress",
+      },
+    ]);
+    expect(batches.retrieve).toHaveBeenCalledWith("batch-1", { request: true });
+    expect(batches.list).toHaveBeenCalledWith({ after: "batch-0", limit: 5 });
+  });
+
+  it("blocks batch calls for OpenAI-compatible providers without batch support", async () => {
+    const provider = new OpenAIProvider(
+      { ...config, capabilities: { batch: false } },
+      {},
+      fakeClient(),
+    );
+    await expect(
+      provider.createBatch({ endpoint: "/v1/chat/completions", inputFilePath: "input.jsonl" }),
+    ).rejects.toBeInstanceOf(UnsupportedOperationError);
+    await expect(provider.retrieveBatch("batch-1")).rejects.toBeInstanceOf(UnsupportedOperationError);
+    await expect(provider.cancelBatch("batch-1")).rejects.toBeInstanceOf(UnsupportedOperationError);
+    await expect(provider.listBatches()).rejects.toBeInstanceOf(UnsupportedOperationError);
+    await expect(provider.retrieveBatchResults("batch-1")).rejects.toBeInstanceOf(UnsupportedOperationError);
+  });
+
+  it("retrieves normalized OpenAI batch results and reports incomplete batches", async () => {
+    const output = [
+      JSON.stringify({
+        custom_id: "ok",
+        response: { body: completionResponse(), status_code: 200 },
+      }),
+      JSON.stringify({ custom_id: "bad", error: { code: "invalid", message: "Bad request" } }),
+      JSON.stringify({ custom_id: "unexpected" }),
+      "",
+    ].join("\n");
+    const content = vi.fn().mockResolvedValue(new Response(output));
+    const retrieve = vi
+      .fn()
+      .mockResolvedValueOnce({ output_file_id: "output-1", status: "completed" })
+      .mockResolvedValueOnce({ status: "in_progress" })
+      .mockResolvedValueOnce({ status: "completed" });
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({
+        batches: { cancel: vi.fn(), create: vi.fn(), list: vi.fn(), retrieve },
+        files: { content, create: vi.fn() },
+      }),
+    );
+
+    await expect(provider.retrieveBatchResults("batch-1")).resolves.toMatchObject({
+      results: [
+        { customId: "ok", result: { id: "chat-1", provider: "test-openai" } },
+        { customId: "bad", error: { code: "invalid", message: "Bad request" } },
+        { customId: "unexpected", error: { code: "unknown", message: "Unexpected response format" } },
+      ],
+    });
+    await expect(provider.retrieveBatchResults("batch-2")).rejects.toBeInstanceOf(BatchNotCompleteError);
+    await expect(provider.retrieveBatchResults("batch-3")).resolves.toEqual({ results: [] });
+    expect(content).toHaveBeenCalledWith("output-1");
   });
 
   it("normalizes request failures", async () => {

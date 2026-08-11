@@ -1,19 +1,38 @@
 import { AnyLLM } from "./any-llm.js";
 import type {
+  Batch,
+  BatchResult,
   ChatCompletion,
   ChatCompletionChunk,
   CompletionResult,
+  CreateBatchParams,
   DirectCompletionParams,
   EmbeddingParams,
   EmbeddingResponse,
   ImageGenerationParams,
   ImageGenerationResponse,
+  ListBatchesParams,
   Model,
+  MessageResponse,
+  MessageResult,
+  MessageStreamEvent,
+  MessagesParams,
   ModerationParams,
+  ModerationResponse,
+  ParsedChatCompletion,
+  ParsedMessageResponse,
+  ParsedResponse,
   ProviderOptions,
+  RerankParams,
+  RerankResponse,
   ResponseResult,
+  Response,
+  ResponseStreamEvent,
   ResponsesParams,
   SpeechParams,
+  StructuredCompletionParams,
+  StructuredMessagesParams,
+  StructuredResponsesParams,
   Transcription,
   TranscriptionParams,
 } from "./types.js";
@@ -21,6 +40,10 @@ import type {
 export interface DirectProviderOptions extends ProviderOptions {
   provider?: string;
 }
+
+export type DirectStructuredCompletionParams<T> = StructuredCompletionParams<T> & DirectProviderOptions;
+export type DirectStructuredMessagesParams<T> = StructuredMessagesParams<T> & DirectProviderOptions;
+export type DirectStructuredResponsesParams<T> = StructuredResponsesParams<T> & DirectProviderOptions;
 
 function resolveTarget(model: string, provider: string | undefined): { model: string; provider: string } {
   return provider === undefined ? AnyLLM.splitModelProvider(model) : { model, provider };
@@ -46,36 +69,59 @@ function directOptions(
   };
 }
 
+export function completion<T>(params: DirectStructuredCompletionParams<T>): Promise<ParsedChatCompletion<T>>;
 export function completion(params: DirectCompletionParams & { stream: true }): Promise<AsyncIterable<ChatCompletionChunk>>;
 export function completion(params: DirectCompletionParams & { stream?: false | undefined }): Promise<ChatCompletion>;
 export function completion<TStream extends boolean | undefined>(
   params: DirectCompletionParams & { stream?: TStream },
 ): Promise<CompletionResult<TStream>>;
 export async function completion(
-  params: DirectCompletionParams,
-): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion> {
+  params: DirectCompletionParams | DirectStructuredCompletionParams<unknown>,
+): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion | ParsedChatCompletion<unknown>> {
   const { apiBase, apiKey, clientOptions, provider, ...request } = params;
   const target = resolveTarget(request.model, provider);
   return client(target.provider, directOptions(apiBase, apiKey, clientOptions)).completion({
     ...request,
     model: target.model,
-  });
+  } as never) as Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion | ParsedChatCompletion<unknown>>;
 }
 
 export interface DirectResponsesParams extends ResponsesParams, DirectProviderOptions {}
 
-export function responses(params: DirectResponsesParams & { stream: true }): Promise<AsyncIterable<unknown>>;
-export function responses(params: DirectResponsesParams & { stream?: false | undefined }): Promise<unknown>;
+export function responses<T>(params: DirectStructuredResponsesParams<T>): Promise<ParsedResponse<T>>;
+export function responses(params: DirectResponsesParams & { stream: true }): Promise<AsyncIterable<ResponseStreamEvent>>;
+export function responses(params: DirectResponsesParams & { stream?: false | undefined }): Promise<Response>;
 export function responses<TStream extends boolean | undefined>(
   params: DirectResponsesParams & { stream?: TStream },
 ): Promise<ResponseResult<TStream>>;
-export async function responses(params: DirectResponsesParams): Promise<unknown> {
+export async function responses(
+  params: DirectResponsesParams | DirectStructuredResponsesParams<unknown>,
+): Promise<AsyncIterable<ResponseStreamEvent> | ParsedResponse<unknown> | Response> {
   const { apiBase, apiKey, clientOptions, provider, ...request } = params;
   const target = resolveTarget(request.model, provider);
   return client(target.provider, directOptions(apiBase, apiKey, clientOptions)).responses({
     ...request,
     model: target.model,
-  });
+  } as never) as Promise<AsyncIterable<ResponseStreamEvent> | ParsedResponse<unknown> | Response>;
+}
+
+export interface DirectMessagesParams extends MessagesParams, DirectProviderOptions {}
+
+export function messages<T>(params: DirectStructuredMessagesParams<T>): Promise<ParsedMessageResponse<T>>;
+export function messages(params: DirectMessagesParams & { stream: true }): Promise<AsyncIterable<MessageStreamEvent>>;
+export function messages(params: DirectMessagesParams & { stream?: false | undefined }): Promise<MessageResponse>;
+export function messages<TStream extends boolean | undefined>(
+  params: DirectMessagesParams & { stream?: TStream },
+): Promise<MessageResult<TStream>>;
+export async function messages(
+  params: DirectMessagesParams | DirectStructuredMessagesParams<unknown>,
+): Promise<AsyncIterable<MessageStreamEvent> | MessageResponse | ParsedMessageResponse<unknown>> {
+  const { apiBase, apiKey, clientOptions, provider, ...request } = params;
+  const target = resolveTarget(request.model, provider);
+  return client(target.provider, directOptions(apiBase, apiKey, clientOptions)).messages({
+    ...request,
+    model: target.model,
+  } as never) as Promise<AsyncIterable<MessageStreamEvent> | MessageResponse | ParsedMessageResponse<unknown>>;
 }
 
 export interface DirectEmbeddingParams extends EmbeddingParams, DirectProviderOptions {}
@@ -124,7 +170,7 @@ export async function speech(params: DirectSpeechParams): Promise<Uint8Array> {
 
 export interface DirectModerationParams extends ModerationParams, DirectProviderOptions {}
 
-export function moderation(params: DirectModerationParams): Promise<unknown> {
+export function moderation(params: DirectModerationParams): Promise<ModerationResponse> {
   const { apiBase, apiKey, clientOptions, provider = "openai", ...request } = params;
   return client(provider, directOptions(apiBase, apiKey, clientOptions)).moderation(request);
 }
@@ -132,4 +178,57 @@ export function moderation(params: DirectModerationParams): Promise<unknown> {
 export function listModels(params: DirectProviderOptions & { provider: string }): Promise<Model[]> {
   const { apiBase, apiKey, clientOptions, provider } = params;
   return client(provider, directOptions(apiBase, apiKey, clientOptions)).listModels();
+}
+
+export interface DirectCreateBatchParams extends CreateBatchParams, DirectProviderOptions {
+  provider: string;
+}
+
+export function createBatch(params: DirectCreateBatchParams): Promise<Batch> {
+  const { apiBase, apiKey, clientOptions, provider, ...request } = params;
+  return client(provider, directOptions(apiBase, apiKey, clientOptions)).createBatch(request);
+}
+
+export interface DirectBatchParams extends DirectProviderOptions {
+  batchId: string;
+  provider: string;
+  providerOptions?: Record<string, unknown>;
+}
+
+export function retrieveBatch(params: DirectBatchParams): Promise<Batch> {
+  const { apiBase, apiKey, batchId, clientOptions, provider, providerOptions } = params;
+  return client(provider, directOptions(apiBase, apiKey, clientOptions)).retrieveBatch(batchId, providerOptions);
+}
+
+export function cancelBatch(params: DirectBatchParams): Promise<Batch> {
+  const { apiBase, apiKey, batchId, clientOptions, provider, providerOptions } = params;
+  return client(provider, directOptions(apiBase, apiKey, clientOptions)).cancelBatch(batchId, providerOptions);
+}
+
+export interface DirectListBatchesParams extends ListBatchesParams, DirectProviderOptions {
+  provider: string;
+}
+
+export function listBatches(params: DirectListBatchesParams): Promise<Batch[]> {
+  const { apiBase, apiKey, clientOptions, provider, ...request } = params;
+  return client(provider, directOptions(apiBase, apiKey, clientOptions)).listBatches(request);
+}
+
+export function retrieveBatchResults(params: DirectBatchParams): Promise<BatchResult> {
+  const { apiBase, apiKey, batchId, clientOptions, provider, providerOptions } = params;
+  return client(provider, directOptions(apiBase, apiKey, clientOptions)).retrieveBatchResults(
+    batchId,
+    providerOptions,
+  );
+}
+
+export interface DirectRerankParams extends RerankParams, DirectProviderOptions {}
+
+export function rerank(params: DirectRerankParams): Promise<RerankResponse> {
+  const { apiBase, apiKey, clientOptions, provider, ...request } = params;
+  const target = resolveTarget(request.model, provider);
+  return client(target.provider, directOptions(apiBase, apiKey, clientOptions)).rerank({
+    ...request,
+    model: target.model,
+  });
 }
