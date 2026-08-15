@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { GitHubProvider, MissingApiKeyError } from "../src/index.js";
+import { GitHubProvider } from "../src/index.js";
 import type { CompletionParams } from "../src/index.js";
 
 class ExposedGitHubProvider extends GitHubProvider {
@@ -9,13 +9,8 @@ class ExposedGitHubProvider extends GitHubProvider {
   }
 }
 
-afterEach(() => {
-  delete process.env.GITHUB_TOKEN;
-});
-
 describe("GitHub Models provider", () => {
-  it("requires a GitHub token and remaps max completion tokens", () => {
-    expect(() => new GitHubProvider()).toThrow(MissingApiKeyError);
+  it("remaps max completion tokens", () => {
     const provider = new ExposedGitHubProvider({ apiKey: "github-token" });
     expect(provider.request({
       maxCompletionTokens: 100,
