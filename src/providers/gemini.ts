@@ -467,7 +467,7 @@ function convertFunctionTools(
     if (Object.keys(nativeTool).length === 0) {
       throw new InvalidRequestError(`Unsupported Gemini tool: ${JSON.stringify(tool)}`, { provider });
     }
-    converted.push(nativeTool as GeminiTool);
+    converted.push(nativeTool);
   }
   return converted.length === 0 ? undefined : converted;
 }

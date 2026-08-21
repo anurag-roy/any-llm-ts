@@ -497,18 +497,20 @@ function togetherResponseFormat(
   let jsonSchema = { ...definition };
   if (!("schema" in jsonSchema)) {
     const metadata: Record<string, unknown> = {};
+    const bareSchema = Object.fromEntries(
+      Object.entries(jsonSchema).filter(
+        ([key]) => key !== "name" && key !== "description" && key !== "strict",
+      ),
+    );
     for (const key of ["name", "description", "strict"] as const) {
       if (format[key] !== undefined) metadata[key] = format[key];
-      if (jsonSchema[key] !== undefined) {
-        metadata[key] = jsonSchema[key];
-        delete jsonSchema[key];
-      }
+      if (jsonSchema[key] !== undefined) metadata[key] = jsonSchema[key];
     }
     const topLevelSchema = format.schema;
     jsonSchema = {
       ...metadata,
-      schema: Object.keys(jsonSchema).length > 0
-        ? jsonSchema
+      schema: Object.keys(bareSchema).length > 0
+        ? bareSchema
         : typeof topLevelSchema === "object" && topLevelSchema !== null
           ? topLevelSchema
           : {},

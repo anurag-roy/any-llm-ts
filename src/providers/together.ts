@@ -1,7 +1,8 @@
 import { basename } from "node:path";
 import { readFile } from "node:fs/promises";
 
-import OpenAI, { toFile } from "openai";
+import type OpenAI from "openai";
+import { toFile } from "openai";
 
 import {
   BatchNotCompleteError,
@@ -86,7 +87,7 @@ async function contentText(value: unknown): Promise<string> {
     const bytes = await content.read() as Uint8Array | string;
     return typeof bytes === "string" ? bytes : new TextDecoder().decode(bytes);
   }
-  return String(value ?? "");
+  return JSON.stringify(value ?? "") ?? "";
 }
 
 /** Together AI adapter with its native batch lifecycle and OpenAI-compatible chat/embedding APIs. */
@@ -169,7 +170,7 @@ export class TogetherProvider extends OpenAIProvider {
       ));
     }
     return this.execute(async () => {
-      const response = await this.client.batches.list(params.providerOptions as never) as unknown;
+      const response = await this.client.batches.list(params.providerOptions);
       const raw = record(response);
       const jobs = Array.isArray(response) ? response : Array.isArray(raw.data) ? raw.data : [];
       const batches = jobs.map(normalizeTogetherBatch);

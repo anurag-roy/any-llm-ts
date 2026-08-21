@@ -156,7 +156,7 @@ class AzureRestInferenceClient implements AzureInferenceClientLike {
   }
 
   async modelInfo(params: Record<string, unknown> = {}): Promise<unknown> {
-    const response = await this.client.path("/info").get(params as never);
+    const response = await this.client.path("/info").get(params);
     if (isUnexpected(response)) {
       throw errorFromResponse(response.body, response.status);
     }
