@@ -1,7 +1,7 @@
 import { InferenceClient } from "@huggingface/inference";
 import OpenAI from "openai";
 
-import { MissingApiKeyError } from "../errors.js";
+import { MissingApiKeyError, UnsupportedParameterError } from "../errors.js";
 import type {
   ChatCompletion,
   ChatCompletionChunk,
@@ -106,6 +106,9 @@ export class HuggingFaceProvider extends OpenAIProvider {
   }
 
   override completion(params: CompletionParams): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion> {
+    if (params.timeout !== undefined) {
+      return Promise.reject(new UnsupportedParameterError("timeout", "huggingface"));
+    }
     const request = this.completionRequest(params);
     delete request.parallel_tool_calls;
     if ("max_completion_tokens" in request) {

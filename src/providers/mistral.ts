@@ -105,6 +105,7 @@ export class MistralProvider extends OpenAIProvider {
         envApiBase: "MISTRAL_API_BASE",
         envApiKey: "MISTRAL_API_KEY",
         name: "mistral",
+        quirks: { trimReasoningAtResponseTag: true },
       },
       options,
     );

@@ -70,6 +70,10 @@ function completionResponse(): Record<string, unknown> {
       completion_tokens_details: { reasoning_tokens: 2 },
       prompt_tokens: 7,
       prompt_tokens_details: { cached_tokens: 3 },
+      queue_time: 0.1,
+      prompt_time: 0.2,
+      completion_time: 0.3,
+      total_time: 0.6,
       total_tokens: 12,
     },
   };
@@ -106,6 +110,7 @@ describe("OpenAI-compatible provider", () => {
       model: "model-a",
       providerOptions: { metadata: { trace: "one" } },
       reasoningEffort: "high",
+      serviceTier: "priority",
       temperature: 0.4,
       tools: [
         {
@@ -121,6 +126,7 @@ describe("OpenAI-compatible provider", () => {
         max_completion_tokens: 200,
         metadata: { trace: "one" },
         reasoning_effort: "high",
+        service_tier: "priority",
         stream: false,
         temperature: 0.4,
       }),
@@ -141,8 +147,30 @@ describe("OpenAI-compatible provider", () => {
       provider: "test-openai",
       serviceTier: "default",
       systemFingerprint: "fp-1",
-      usage: { completionTokens: 5, promptTokens: 7, totalTokens: 12 },
+      usage: {
+        completionTime: 0.3,
+        completionTokens: 5,
+        promptTime: 0.2,
+        promptTokens: 7,
+        queueTime: 0.1,
+        totalTime: 0.6,
+        totalTokens: 12,
+      },
     });
+  });
+
+  it("maps per-request timeout seconds to OpenAI request milliseconds", async () => {
+    const create = vi.fn().mockResolvedValue(completionResponse());
+    const provider = new OpenAIProvider(config, {}, fakeClient({ chat: { completions: { create } } }));
+    await provider.completion({
+      messages: [{ content: "hello", role: "user" }],
+      model: "model-a",
+      timeout: 1.25,
+    });
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "model-a", stream: false }),
+      { timeout: 1_250 },
+    );
   });
 
   it("normalizes completion streams and protects iteration errors", async () => {
@@ -222,6 +250,10 @@ describe("OpenAI-compatible provider", () => {
         model: "model-a",
         previousResponseId: "response-0",
         responseFormat: { name: "answer", schema: { type: "object" }, type: "json_schema" },
+        tools: [{
+          function: { description: "Get weather", name: "weather", parameters: { type: "object" } },
+          type: "function",
+        }],
         topP: 0.8,
       }),
     ).resolves.toEqual({ id: "response-1" });
@@ -230,6 +262,7 @@ describe("OpenAI-compatible provider", () => {
       previous_response_id: "response-0",
       stream: false,
       text: { format: { name: "answer", schema: { type: "object" }, type: "json_schema" } },
+      tools: [{ description: "Get weather", name: "weather", parameters: { type: "object" }, type: "function" }],
       top_p: 0.8,
     }));
     const stream = await provider.responses({ input: "hello", model: "model-a", stream: true });

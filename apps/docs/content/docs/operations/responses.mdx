@@ -12,8 +12,13 @@ const response = await responses({
   provider: "openai",
   model: "gpt-4.1-mini",
   input: "Explain event loops in one paragraph.",
+  timeout: 30,
 });
 ```
+
+`timeout` is expressed in seconds. Function tools may use either the native Responses shape or the
+chat-completions `{ type: "function", function: ... }` shape; the latter is flattened before the
+request is sent.
 
 The reusable client exposes the same operation:
 

@@ -291,6 +291,9 @@ export class SageMakerProvider extends BaseProvider {
   override async completion(
     params: CompletionParams,
   ): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion> {
+    if (params.timeout !== undefined) {
+      throw new UnsupportedParameterError("timeout", "sagemaker");
+    }
     if (params.responseFormat !== undefined) {
       throw new UnsupportedParameterError("responseFormat", "sagemaker");
     }

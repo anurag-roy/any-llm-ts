@@ -14,6 +14,7 @@ import { GeminiProvider } from "./gemini.js";
 import { GitHubProvider } from "./github.js";
 import { HuggingFaceProvider } from "./huggingface.js";
 import { MistralProvider } from "./mistral.js";
+import { TogetherProvider } from "./together.js";
 import { MetaProvider } from "./meta.js";
 import { OtariProvider } from "./otari.js";
 import { SageMakerProvider } from "./sagemaker.js";
@@ -233,14 +234,6 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
     },
   },
   {
-    apiBase: "https://api.mistral.ai/v1",
-    capabilities: capabilities({ batch: true, embedding: true, moderation: true, reasoning: true }),
-    documentationUrl: "https://docs.mistral.ai/api/",
-    envApiBase: "MISTRAL_API_BASE",
-    envApiKey: "MISTRAL_API_KEY",
-    name: "mistral",
-  },
-  {
     apiBase: "https://api.moonshot.ai/v1",
     capabilities: capabilities({ moderation: true, reasoning: true }),
     documentationUrl: "https://platform.moonshot.ai/docs/api/chat",
@@ -291,7 +284,7 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
   },
   {
     apiBase: "https://openrouter.ai/api/v1",
-    capabilities: capabilities({ embedding: true, pdfInput: true, reasoning: true, vision: true }),
+    capabilities: capabilities({ embedding: true, pdfInput: true, reasoning: true, responses: true, vision: true }),
     documentationUrl: "https://openrouter.ai/docs/api-reference/overview",
     envApiBase: "OPENROUTER_API_BASE",
     envApiKey: "OPENROUTER_API_KEY",
@@ -300,6 +293,14 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
       defaultModelOwner: "openrouter",
       reasoningDirective: "openrouter",
     },
+  },
+  {
+    apiBase: "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
+    capabilities: capabilities({ reasoning: false, vision: false }),
+    documentationUrl: "https://docs.ovhcloud.com/en/guides/public-cloud/ai-machine-learning/ai-endpoints-getting-started",
+    envApiBase: "OVHCLOUD_API_BASE",
+    envApiKey: "OVHCLOUD_API_KEY",
+    name: "ovhcloud",
   },
   {
     apiBase: "https://api.perplexity.ai",
@@ -354,15 +355,6 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
     envApiBase: "TELNYX_API_BASE",
     envApiKey: "TELNYX_API_KEY",
     name: "telnyx",
-  },
-  {
-    apiBase: "https://api.together.xyz/v1",
-    capabilities: capabilities({ reasoning: true, vision: true }),
-    documentationUrl: "https://docs.together.ai/reference/chat-completions-1",
-    envApiBase: "TOGETHER_API_BASE",
-    envApiKey: "TOGETHER_API_KEY",
-    name: "together",
-    quirks: { responseFormatMode: "together" },
   },
   {
     apiBase: "http://localhost:8000/v1",
@@ -583,6 +575,19 @@ addBuiltIn("mistral", {
   },
 });
 
+addBuiltIn("together", {
+  create: (options) => new TogetherProvider(options),
+  metadata: {
+    apiBase: "https://api.together.xyz/v1",
+    capabilities: capabilities({ batch: true, embedding: true, reasoning: true, vision: true }),
+    documentationUrl: "https://docs.together.ai/reference/",
+    envApiBase: "TOGETHER_API_BASE",
+    envApiKey: "TOGETHER_API_KEY",
+    name: "together",
+    requiresApiKey: true,
+  },
+});
+
 addBuiltIn("cohere", {
   create: (options) => new CohereProvider(options),
   metadata: {
@@ -705,7 +710,7 @@ addBuiltIn("azureopenai", {
 addBuiltIn("azure", {
   create: (options) => new AzureProvider(options),
   metadata: {
-    capabilities: capabilities({ embedding: true, listModels: false, vision: false }),
+    capabilities: capabilities({ embedding: true, listModels: true, vision: false }),
     documentationUrl: "https://learn.microsoft.com/azure/foundry/foundry-models/concepts/models-sold-directly-by-azure",
     envApiBase: "AZURE_AI_CHAT_ENDPOINT",
     envApiKey: "AZURE_API_KEY",

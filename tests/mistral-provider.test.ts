@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 
 import { AnyLLM, BatchNotCompleteError, MistralProvider } from "../src/index.js";
+import { createProvider } from "../src/providers/registry.js";
 
 function batch(overrides: Record<string, unknown> = {}) {
   return {
@@ -111,6 +112,7 @@ describe("Mistral provider batches", () => {
     expect(jobs.list).toHaveBeenCalledWith({ page: 2, pageSize: 10 });
     await expect(provider.listBatches({ after: "cursor" })).rejects.toThrow(/page-based/u);
     expect(AnyLLM.create("mistral", { apiKey: "secret" })).toBeInstanceOf(AnyLLM);
+    expect(createProvider("mistral", { apiKey: "secret" })).toBeInstanceOf(MistralProvider);
     expect(
       new MistralProvider({ apiBase: "https://mistral.example/v1", apiKey: "secret" }),
     ).toBeInstanceOf(MistralProvider);

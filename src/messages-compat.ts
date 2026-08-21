@@ -178,6 +178,7 @@ export function messagesToCompletionParams(params: MessagesParams): CompletionPa
     ...(params.stream === undefined ? {} : { stream: params.stream }),
     ...(params.stream === true ? { streamOptions: { include_usage: true } } : {}),
     ...(params.temperature === undefined ? {} : { temperature: params.temperature }),
+    ...(params.timeout === undefined ? {} : { timeout: params.timeout }),
     ...(params.toolChoice === undefined ? {} : { toolChoice: toolChoice(params.toolChoice) }),
     ...(params.tools === undefined
       ? {}
@@ -192,6 +193,7 @@ export function messagesToCompletionParams(params: MessagesParams): CompletionPa
           })),
         }),
     ...(params.topP === undefined ? {} : { topP: params.topP }),
+    ...(params.serviceTier === undefined ? {} : { serviceTier: params.serviceTier }),
     ...(params.promptCacheKey === undefined ? {} : { promptCacheKey: params.promptCacheKey }),
     ...(params.providerOptions === undefined ? {} : { providerOptions: params.providerOptions }),
   };
@@ -272,12 +274,17 @@ interface StreamState {
   outputTokens: number;
   started: boolean;
   stopReason: MessageStopReason | null;
+  toolBlockIndexes: Map<number, number>;
 }
 
 function closeBlock(state: StreamState): ContentBlockStopEvent[] {
   if (state.blockType === undefined) return [];
+  const indexes = state.toolBlockIndexes.size === 0
+    ? [state.blockIndex]
+    : [...state.toolBlockIndexes.values()].sort((left, right) => left - right);
+  state.toolBlockIndexes.clear();
   delete state.blockType;
-  return [{ index: state.blockIndex, type: "content_block_stop" }];
+  return indexes.map((index) => ({ index, type: "content_block_stop" }));
 }
 
 function openBlock(
@@ -295,18 +302,26 @@ function openBlock(
 
 function toolDeltaEvents(state: StreamState, call: ToolCallDelta): MessageStreamEvent[] {
   const events: MessageStreamEvent[] = [];
-  if (call.id !== undefined) {
-    events.push(...openBlock(state, "tool_use", {
+  if (call.id !== undefined && !state.toolBlockIndexes.has(call.index)) {
+    if (state.blockType !== "tool_use") events.push(...closeBlock(state));
+    state.blockIndex += 1;
+    state.blockType = "tool_use";
+    state.toolBlockIndexes.set(call.index, state.blockIndex);
+    events.push({
+      contentBlock: {
       id: call.id,
       input: {},
       name: call.function?.name ?? "",
       type: "tool_use",
-    }));
+      },
+      index: state.blockIndex,
+      type: "content_block_start",
+    });
   }
   if (call.function?.arguments !== undefined && call.function.arguments.length > 0) {
     events.push({
       delta: { partialJson: call.function.arguments, type: "input_json_delta" },
-      index: state.blockIndex,
+      index: state.toolBlockIndexes.get(call.index) ?? state.blockIndex,
       type: "content_block_delta",
     });
   }
@@ -382,6 +397,7 @@ export async function* completionStreamToMessageEvents(
     outputTokens: 0,
     started: false,
     stopReason: null,
+    toolBlockIndexes: new Map(),
   };
   try {
     for await (const chunk of stream) {

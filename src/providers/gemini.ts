@@ -49,6 +49,7 @@ import type {
 import {
   compactObject,
   getEnvironmentVariable,
+  timeoutMilliseconds,
   unixTimestamp,
 } from "../utils.js";
 import { BaseProvider } from "./base.js";
@@ -347,12 +348,14 @@ function assistantParts(
     parts.push({
       text: message.reasoning,
       thought: true,
-      ...(messageSignature === undefined
-        ? {}
-        : { thoughtSignature: messageSignature }),
     });
   }
-  parts.push(...contentParts(message.content));
+  const content = contentParts(message.content);
+  if (messageSignature !== undefined) {
+    const signedPart = [...content].reverse().find((part) => part.text !== undefined);
+    if (signedPart !== undefined) signedPart.thoughtSignature = messageSignature;
+  }
+  parts.push(...content);
 
   for (const [index, toolCall] of (message.toolCalls ?? []).entries()) {
     namesById.set(toolCall.id, toolCall.function.name);
@@ -407,7 +410,8 @@ function convertMessages(messages: ChatMessage[]): ConvertedMessages {
 }
 
 function convertFunctionTools(
-  tools: Tool[] | undefined
+  tools: Tool[] | undefined,
+  provider: string,
 ): GeminiTool[] | undefined {
   if (tools === undefined) return undefined;
   const declarations = tools.flatMap(
@@ -432,9 +436,38 @@ function convertFunctionTools(
     declarations.length === 0 ? [] : [{ functionDeclarations: declarations }];
 
   for (const tool of tools) {
-    if (tool.type === "google_search") converted.push({ googleSearch: {} });
-    if (tool.type === "code_execution") converted.push({ codeExecution: {} });
-    if (tool.type === "url_context") converted.push({ urlContext: {} });
+    if (tool.type === "function") continue;
+    const nativeAliases: Record<string, string> = {
+      code_execution: "codeExecution",
+      computer_use: "computerUse",
+      enterprise_web_search: "enterpriseWebSearch",
+      google_search: "googleSearch",
+      google_search_retrieval: "googleSearchRetrieval",
+      url_context: "urlContext",
+    };
+    const nativeTool: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(tool)) {
+      if (key === "type" && typeof value === "string" && nativeAliases[value] !== undefined) {
+        nativeTool[nativeAliases[value]] = {};
+        continue;
+      }
+      const nativeKey = nativeAliases[key] ?? key;
+      if (
+        nativeKey === "codeExecution" ||
+        nativeKey === "computerUse" ||
+        nativeKey === "enterpriseWebSearch" ||
+        nativeKey === "googleSearch" ||
+        nativeKey === "googleSearchRetrieval" ||
+        nativeKey === "retrieval" ||
+        nativeKey === "urlContext"
+      ) {
+        nativeTool[nativeKey] = value;
+      }
+    }
+    if (Object.keys(nativeTool).length === 0) {
+      throw new InvalidRequestError(`Unsupported Gemini tool: ${JSON.stringify(tool)}`, { provider });
+    }
+    converted.push(nativeTool as GeminiTool);
   }
   return converted.length === 0 ? undefined : converted;
 }
@@ -494,11 +527,30 @@ function structuredOutput(
   return { responseJsonSchema: schema, responseMimeType: "application/json" };
 }
 
+function usesThinkingLevel(model: string): boolean {
+  const match = /(?:^|\/)gemini-(\d+)(?:\.(\d+))?/iu.exec(model);
+  if (match?.[1] === undefined) return false;
+  const version = [Number(match[1]), Number(match[2] ?? 0)] as const;
+  return version[0] > 3 || (version[0] === 3 && version[1] >= 5);
+}
+
 function thinkingConfiguration(
-  value: CompletionParams["reasoningEffort"]
+  value: CompletionParams["reasoningEffort"],
+  model: string,
 ): GenerateContentConfig["thinkingConfig"] {
   if (value === undefined || value === "auto") return undefined;
   if (value === "none") return { includeThoughts: false };
+  if (usesThinkingLevel(model)) {
+    const levels = {
+      high: "HIGH",
+      low: "LOW",
+      max: "HIGH",
+      medium: "MEDIUM",
+      minimal: "MINIMAL",
+      xhigh: "HIGH",
+    } as const;
+    return { includeThoughts: true, thinkingLevel: levels[value] } as GenerateContentConfig["thinkingConfig"];
+  }
   return { includeThoughts: true, thinkingBudget: reasoningBudgets[value] };
 }
 
@@ -535,7 +587,7 @@ function normalizeUsage(
 ): CompletionUsage | undefined {
   if (value === undefined) return undefined;
   const promptTokens = value.promptTokenCount ?? 0;
-  const completionTokens = value.candidatesTokenCount ?? 0;
+  const completionTokens = (value.candidatesTokenCount ?? 0) + (value.thoughtsTokenCount ?? 0);
   const totalTokens = value.totalTokenCount ?? promptTokens + completionTokens;
   const promptTokensDetails =
     value.cachedContentTokenCount === undefined
@@ -579,7 +631,6 @@ function completionParts(
   for (const part of parts ?? []) {
     if (part.thought === true) {
       reasoning += part.text ?? "";
-      messageSignature ??= part.thoughtSignature;
       continue;
     }
     if (part.functionCall !== undefined) {
@@ -600,6 +651,7 @@ function completionParts(
       continue;
     }
     if (typeof part.text === "string") content += part.text;
+    messageSignature = part.thoughtSignature ?? messageSignature;
   }
 
   return {
@@ -941,9 +993,9 @@ export class GeminiProvider extends BaseProvider {
     params: CompletionParams
   ): GenerateContentParameters {
     const converted = convertMessages(params.messages);
-    const tools = convertFunctionTools(params.tools);
+    const tools = convertFunctionTools(params.tools, this.providerName);
     const toolConfig = convertToolChoice(params.toolChoice);
-    const thinkingConfig = thinkingConfiguration(params.reasoningEffort);
+    const thinkingConfig = thinkingConfiguration(params.reasoningEffort, params.model);
     const output = structuredOutput(params.responseFormat);
     const config = compactObject({
       candidateCount: params.n,
@@ -953,6 +1005,7 @@ export class GeminiProvider extends BaseProvider {
       presencePenalty: params.presencePenalty,
       responseLogprobs: params.logprobs,
       seed: params.seed,
+      serviceTier: params.serviceTier,
       stopSequences:
         typeof params.stop === "string" ? [params.stop] : params.stop,
       systemInstruction: converted.systemInstruction,
@@ -964,6 +1017,15 @@ export class GeminiProvider extends BaseProvider {
       ...output,
       ...params.providerOptions,
     }) as GenerateContentConfig;
+    const timeout = timeoutMilliseconds(params.timeout);
+    if (timeout !== undefined) {
+      const configRecord = config as unknown as Record<string, unknown>;
+      const existing = asRecord(configRecord.httpOptions);
+      configRecord.httpOptions = {
+        ...existing,
+        timeout: existing?.timeout ?? timeout,
+      };
+    }
 
     return { config, contents: converted.contents, model: params.model };
   }
@@ -1063,7 +1125,6 @@ export class GeminiProvider extends BaseProvider {
         for (const part of candidate.content?.parts ?? []) {
           if (part.thought === true) {
             reasoning += part.text ?? "";
-            messageSignature ??= part.thoughtSignature;
             continue;
           }
           if (part.functionCall !== undefined) {
@@ -1087,6 +1148,7 @@ export class GeminiProvider extends BaseProvider {
             continue;
           }
           if (typeof part.text === "string") content += part.text;
+          messageSignature = part.thoughtSignature ?? messageSignature;
         }
 
         if (content.length > 0) delta.content = content;

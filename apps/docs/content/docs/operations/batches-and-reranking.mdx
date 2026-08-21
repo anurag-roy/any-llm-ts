@@ -47,7 +47,8 @@ await llm.retrieveBatchResults(batch.id);
 ```
 
 `retrieveBatchResults()` throws `BatchNotCompleteError` until output is available. Check
-`metadata.capabilities.batch` before using the operation.
+`metadata.capabilities.batch` before using the operation. Together uses its native batch upload and
+job lifecycle while returning the same normalized batch types.
 
 ## Reranking
 

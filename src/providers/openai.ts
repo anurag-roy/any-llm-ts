@@ -43,7 +43,14 @@ import {
   providerPromptCacheKeySupport,
   providerTier,
 } from "../provider-metadata.js";
-import { compactObject, getEnvironmentVariable, isAsyncIterable, mapAsyncIterable } from "../utils.js";
+import {
+  compactObject,
+  flattenResponsesTools,
+  getEnvironmentVariable,
+  isAsyncIterable,
+  mapAsyncIterable,
+  timeoutRequestOptions,
+} from "../utils.js";
 import { BaseProvider } from "./base.js";
 
 export const openAICapabilities: ProviderCapabilities = {
@@ -97,6 +104,7 @@ interface OpenAIProviderQuirks {
   rejectResponseFormat?: boolean;
   rejectStreamingResponseFormat?: boolean;
   xmlReasoning?: boolean;
+  trimReasoningAtResponseTag?: boolean;
 }
 
 interface AzureProviderOptions extends ProviderOptions {
@@ -152,10 +160,14 @@ function normalizeToolCalls(value: unknown): ToolCall[] | undefined {
     }
     const functionRecord = fn as Record<string, unknown>;
     if (typeof functionRecord.name !== "string" || typeof functionRecord.arguments !== "string") continue;
+    const extraContent = record.extra_content ?? record.extraContent;
     toolCalls.push({
       function: { arguments: functionRecord.arguments, name: functionRecord.name },
       id: record.id,
       type: "function",
+      ...(typeof extraContent === "object" && extraContent !== null
+        ? { extraContent: extraContent as Record<string, unknown> }
+        : {}),
     });
   }
   return toolCalls.length === 0 ? undefined : toolCalls;
@@ -171,6 +183,21 @@ function normalizeUsage(value: unknown): CompletionUsage | undefined {
     return undefined;
   }
   const normalized: CompletionUsage = { completionTokens, promptTokens, totalTokens };
+  const timingFields = {
+    completionTime: usage.completion_time ?? usage.completionTime,
+    evalDuration: usage.eval_duration ?? usage.evalDuration,
+    loadDuration: usage.load_duration ?? usage.loadDuration,
+    promptEvalDuration: usage.prompt_eval_duration ?? usage.promptEvalDuration,
+    promptTime: usage.prompt_time ?? usage.promptTime,
+    queueTime: usage.queue_time ?? usage.queueTime,
+    totalDuration: usage.total_duration ?? usage.totalDuration,
+    totalTime: usage.total_time ?? usage.totalTime,
+  };
+  for (const [field, timing] of Object.entries(timingFields)) {
+    if (typeof timing === "number") {
+      (normalized as unknown as Record<string, unknown>)[field] = timing;
+    }
+  }
   const completionTokensDetails = usage.completion_tokens_details ?? usage.completionTokensDetails;
   const promptTokensDetails = usage.prompt_tokens_details ?? usage.promptTokensDetails;
   if (typeof completionTokensDetails === "object" && completionTokensDetails !== null) {
@@ -463,6 +490,39 @@ function makeSchemaStrict(value: unknown): unknown {
   return result;
 }
 
+function togetherResponseFormat(
+  format: Record<string, unknown>,
+  definition: Record<string, unknown>,
+): Record<string, unknown> {
+  let jsonSchema = { ...definition };
+  if (!("schema" in jsonSchema)) {
+    const metadata: Record<string, unknown> = {};
+    for (const key of ["name", "description", "strict"] as const) {
+      if (format[key] !== undefined) metadata[key] = format[key];
+      if (jsonSchema[key] !== undefined) {
+        metadata[key] = jsonSchema[key];
+        delete jsonSchema[key];
+      }
+    }
+    const topLevelSchema = format.schema;
+    jsonSchema = {
+      ...metadata,
+      schema: Object.keys(jsonSchema).length > 0
+        ? jsonSchema
+        : typeof topLevelSchema === "object" && topLevelSchema !== null
+          ? topLevelSchema
+          : {},
+    };
+  }
+  return {
+    json_schema: {
+      ...jsonSchema,
+      name: jsonSchema.name ?? "response_schema",
+    },
+    type: "json_schema",
+  };
+}
+
 function normalizeBatchStatus(value: unknown): BatchStatus {
   if (
     value === "cancelled" ||
@@ -612,8 +672,11 @@ export class OpenAIProvider extends BaseProvider {
 
     return this.execute(async () => {
       const request = this.completionRequest(params);
+      const requestOptions = timeoutRequestOptions(params.timeout);
       if (params.stream === true) {
-        const stream = await this.client.chat.completions.create({ ...request, stream: true } as never);
+        const stream = requestOptions === undefined
+          ? await this.client.chat.completions.create({ ...request, stream: true } as never)
+          : await this.client.chat.completions.create({ ...request, stream: true } as never, requestOptions);
         const chunks = mapAsyncIterable(stream as unknown as AsyncIterable<unknown>, (chunk) =>
           this.normalizeChunk(chunk),
         );
@@ -625,7 +688,9 @@ export class OpenAIProvider extends BaseProvider {
           : filtered;
         return this.protectStream(normalized);
       }
-      const response = await this.client.chat.completions.create({ ...request, stream: false } as never);
+      const response = requestOptions === undefined
+        ? await this.client.chat.completions.create({ ...request, stream: false } as never)
+        : await this.client.chat.completions.create({ ...request, stream: false } as never, requestOptions);
       return this.normalizeCompletion(response);
     });
   }
@@ -669,14 +734,17 @@ export class OpenAIProvider extends BaseProvider {
           ? paramsWithoutFormat.text
           : { ...(paramsWithoutFormat.text ?? {}), format: responseFormat },
         tool_choice: paramsWithoutFormat.toolChoice,
-        tools: paramsWithoutFormat.tools,
+        tools: flattenResponsesTools(paramsWithoutFormat.tools),
         top_logprobs: paramsWithoutFormat.topLogprobs,
         top_p: paramsWithoutFormat.topP,
         truncation: paramsWithoutFormat.truncation,
         user: paramsWithoutFormat.user,
         ...providerOptions,
       });
-      const response = await this.client.responses.create(request as never);
+      const requestOptions = timeoutRequestOptions(params.timeout);
+      const response = requestOptions === undefined
+        ? await this.client.responses.create(request as never)
+        : await this.client.responses.create(request as never, requestOptions);
       return isAsyncIterable(response)
         ? this.protectStream(response as unknown as AsyncIterable<ResponseStreamEvent>)
         : (response as Response);
@@ -917,6 +985,7 @@ export class OpenAIProvider extends BaseProvider {
         reasoning_effort: reasoningEffort,
         response_format: params.responseFormat,
         seed: params.seed,
+        service_tier: params.serviceTier,
         stop: params.stop,
         stream_options: params.streamOptions,
         temperature: params.temperature,
@@ -952,10 +1021,7 @@ export class OpenAIProvider extends BaseProvider {
         ) {
           const definition = jsonSchema as Record<string, unknown>;
           if (quirks.responseFormatMode === "together") {
-            request.response_format = {
-              schema: definition.schema ?? jsonSchema,
-              type: "json_schema",
-            };
+            request.response_format = togetherResponseFormat(format, definition);
           } else {
             request.response_format = {
               ...format,
@@ -1043,11 +1109,23 @@ export class OpenAIProvider extends BaseProvider {
 
   protected normalizeCompletion(value: unknown): ChatCompletion {
     const response = value as Record<string, any>;
-    const usage = normalizeUsage(response.usage);
+    const usage = normalizeUsage(response.usage ?? response.x_groq?.usage);
     const normalized: ChatCompletion = {
       choices: (response.choices as Record<string, any>[]).map((choice) => {
         const message = choice.message as Record<string, any>;
-        const reasoning = message.reasoning ?? message.reasoning_content;
+        let reasoning = message.reasoning ?? message.reasoning_content;
+        let content = (message.content ?? null) as ChatMessage["content"];
+        if (
+          this.config.quirks?.trimReasoningAtResponseTag === true &&
+          content === null &&
+          typeof reasoning === "string"
+        ) {
+          const match = /<response>([\s\S]*?)<\/response>/u.exec(reasoning);
+          if (match?.[1] !== undefined) {
+            content = match[1];
+            reasoning = reasoning.slice(0, match.index) || undefined;
+          }
+        }
         const toolCalls = normalizeToolCalls(message.tool_calls ?? message.toolCalls);
         return {
           finishReason: normalizeFinishReason(
@@ -1057,7 +1135,7 @@ export class OpenAIProvider extends BaseProvider {
           index: choice.index as number,
           logprobs: choice.logprobs,
           message: {
-            content: (message.content ?? null) as ChatMessage["content"],
+            content,
             role: "assistant",
             ...(typeof reasoning === "string" ? { reasoning } : {}),
             ...(this.metadata.name === "deepseek" && typeof reasoning === "string"
@@ -1102,7 +1180,7 @@ export class OpenAIProvider extends BaseProvider {
 
   protected normalizeChunk(value: unknown): ChatCompletionChunk {
     const response = value as Record<string, any>;
-    const usage = normalizeUsage(response.usage);
+    const usage = normalizeUsage(response.usage ?? response.x_groq?.usage);
     return {
       choices: (Array.isArray(response.choices) ? response.choices : []).flatMap((choice) => {
         if (typeof choice.delta !== "object" || choice.delta === null) return [];
@@ -1135,6 +1213,9 @@ export class OpenAIProvider extends BaseProvider {
                         }),
                     ...(toolCall.id === undefined ? {} : { id: toolCall.id as string }),
                     ...(toolCall.type === "function" ? { type: "function" as const } : {}),
+                    ...((toolCall.extra_content ?? toolCall.extraContent) === undefined
+                      ? {}
+                      : { extraContent: (toolCall.extra_content ?? toolCall.extraContent) as Record<string, unknown> }),
                   })),
                 }
               : {}),

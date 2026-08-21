@@ -102,7 +102,7 @@ describe("Gemini provider", () => {
                 },
                 thoughtSignature: "tool-signature",
               },
-              { text: "Checking now." },
+              { text: "Checking now.", thoughtSignature: "text-signature" },
             ],
             role: "model",
           },
@@ -162,7 +162,7 @@ describe("Gemini provider", () => {
         {
           content: "Let me check.",
           extraContent: {
-            google: { thoughtSignature: "previous-reasoning-signature" },
+            google: { thoughtSignature: "previous-text-signature" },
           },
           reasoning: "I should use the weather tool.",
           role: "assistant",
@@ -191,6 +191,7 @@ describe("Gemini provider", () => {
       presencePenalty: 0.1,
       providerOptions: { topK: 40 },
       reasoningEffort: "high",
+      serviceTier: "priority",
       responseFormat: {
         json_schema: {
           name: "weather",
@@ -205,6 +206,7 @@ describe("Gemini provider", () => {
       seed: 42,
       stop: "END",
       temperature: 0.3,
+      timeout: 1.5,
       toolChoice: { function: { name: "weather" }, type: "function" },
       tools: [
         {
@@ -219,10 +221,9 @@ describe("Gemini provider", () => {
           },
           type: "function",
         },
-        { type: "google_search" },
+        { google_search: {} },
         { type: "code_execution" },
         { type: "url_context" },
-        { type: "unsupported_builtin" },
       ],
       topLogprobs: 5,
       topP: 0.8,
@@ -247,9 +248,11 @@ describe("Gemini provider", () => {
         responseLogprobs: true,
         responseMimeType: "application/json",
         seed: 42,
+        serviceTier: "priority",
         stopSequences: ["END"],
         systemInstruction: "You are concise.\n\nUse tools when useful.",
         temperature: 0.3,
+        httpOptions: { timeout: 1500 },
         thinkingConfig: { includeThoughts: true, thinkingBudget: 24576 },
         toolConfig: {
           functionCallingConfig: {
@@ -305,9 +308,8 @@ describe("Gemini provider", () => {
         {
           text: "I should use the weather tool.",
           thought: true,
-          thoughtSignature: "previous-reasoning-signature",
         },
-        { text: "Let me check." },
+        { text: "Let me check.", thoughtSignature: "previous-text-signature" },
         {
           functionCall: {
             args: { city: "London" },
@@ -340,7 +342,7 @@ describe("Gemini provider", () => {
           message: {
             content: "Checking now.",
             extraContent: {
-              google: { thoughtSignature: "reasoning-signature" },
+              google: { thoughtSignature: "text-signature" },
             },
             reasoning: "I should check the weather.",
             role: "assistant",
@@ -365,7 +367,7 @@ describe("Gemini provider", () => {
       model: "gemini-2.5-pro-001",
       provider: "gemini",
       usage: {
-        completionTokens: 7,
+        completionTokens: 10,
         completionTokensDetails: { reasoningTokens: 3 },
         promptTokens: 11,
         promptTokensDetails: { cachedTokens: 4 },
@@ -480,6 +482,16 @@ describe("Gemini provider", () => {
         functionCallingConfig: { mode: FunctionCallingConfigMode.VALIDATED },
       },
     });
+
+    await provider.completion({
+      messages: [{ content: "hi", role: "user" }],
+      model: "publishers/google/models/gemini-3.5-pro",
+      reasoningEffort: "high",
+    });
+    expect(sdk.models.generateContent.mock.calls[3]?.[0].config.thinkingConfig).toEqual({
+      includeThoughts: true,
+      thinkingLevel: "HIGH",
+    });
   });
 
   it("normalizes streaming text, reasoning, tools, usage, and stable roles", async () => {
@@ -506,6 +518,7 @@ describe("Gemini provider", () => {
                   functionCall: { args: { q: "news" }, name: "search" },
                   thoughtSignature: "stream-tool-signature",
                 },
+                { text: "", thoughtSignature: "stream-text-signature" },
               ],
               role: "model",
             },
@@ -558,7 +571,7 @@ describe("Gemini provider", () => {
         {
           delta: {
             extraContent: {
-              google: { thoughtSignature: "stream-reasoning-signature" },
+              google: { thoughtSignature: "stream-text-signature" },
             },
             reasoning: "Thinking",
             toolCalls: [
@@ -577,7 +590,7 @@ describe("Gemini provider", () => {
         },
       ],
       usage: {
-        completionTokens: 4,
+        completionTokens: 5,
         completionTokensDetails: { reasoningTokens: 1 },
         promptTokens: 6,
         promptTokensDetails: { cachedTokens: 2 },
@@ -665,6 +678,13 @@ describe("Gemini provider", () => {
         responseFormat: { type: "xml" },
       })
     ).toThrow(/Unsupported Gemini responseFormat/u);
+    expect(() =>
+      provider.completion({
+        messages: [{ content: "Hi", role: "user" }],
+        model: "gemini-test",
+        tools: [{ unsupported_native_tool: {} }],
+      })
+    ).toThrow(/Unsupported Gemini tool/u);
     expect(() =>
       provider.completion({
         messages: [{ content: "Hi", role: "user" }],

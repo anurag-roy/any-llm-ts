@@ -51,13 +51,14 @@ import {
   compactObject,
   getEnvironmentVariable,
   isAsyncIterable,
+  timeoutAbortOptions,
   unixTimestamp,
 } from "../utils.js";
 import { BaseProvider } from "./base.js";
 import { completeProviderMetadata } from "../provider-metadata.js";
 
 export interface BedrockClientLike {
-  send(command: unknown): Promise<unknown>;
+  send(command: unknown, options?: { abortSignal?: AbortSignal }): Promise<unknown>;
 }
 
 export interface BedrockProviderClients {
@@ -836,10 +837,12 @@ export class BedrockProvider extends BaseProvider {
     }
     const request = completionRequest(params);
     return this.execute(async () => {
+      const requestOptions = timeoutAbortOptions(params.timeout);
       if (params.stream === true) {
-        const response = (await this.runtime.send(
-          new ConverseStreamCommand(request as never),
-        )) as Record<string, unknown>;
+        const command = new ConverseStreamCommand(request as never);
+        const response = (await (requestOptions === undefined
+          ? this.runtime.send(command)
+          : this.runtime.send(command, requestOptions))) as Record<string, unknown>;
         if (!isAsyncIterable(response.stream)) {
           throw new TypeError("Bedrock returned an empty Converse stream.");
         }
@@ -847,9 +850,10 @@ export class BedrockProvider extends BaseProvider {
           normalizeStream(response.stream, params.model),
         );
       }
-      const response = await this.runtime.send(
-        new ConverseCommand(request as never),
-      );
+      const command = new ConverseCommand(request as never);
+      const response = requestOptions === undefined
+        ? await this.runtime.send(command)
+        : await this.runtime.send(command, requestOptions);
       return normalizeCompletion(response, params.model);
     });
   }

@@ -384,6 +384,9 @@ export class WatsonxProvider extends BaseProvider {
   override async completion(
     params: CompletionParams,
   ): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion> {
+    if (params.timeout !== undefined) {
+      throw new UnsupportedParameterError("timeout", "watsonx");
+    }
     const request = completionRequest(params, this.configuration);
     if (params.stream === true) {
       const stream = await this.execute(() =>

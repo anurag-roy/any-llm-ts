@@ -60,7 +60,7 @@
       "completion": true,
       "embedding": true,
       "imageGeneration": false,
-      "listModels": false,
+      "listModels": true,
       "messages": true,
       "moderation": false,
       "pdfInput": false,
@@ -746,6 +746,7 @@
     "envApiKey": "MINIMAX_API_KEY"
   },
   {
+    "apiBase": "https://api.mistral.ai/v1",
     "capabilities": {
       "audioSpeech": false,
       "audioTranscription": false,
@@ -764,13 +765,12 @@
       "vision": false
     },
     "documentationUrl": "https://docs.mistral.ai/api/",
-    "name": "mistral",
-    "promptCacheKeySupport": "unsupported",
-    "requiresApiKey": true,
-    "tier": "verified",
-    "apiBase": "https://api.mistral.ai/v1",
     "envApiBase": "MISTRAL_API_BASE",
-    "envApiKey": "MISTRAL_API_KEY"
+    "envApiKey": "MISTRAL_API_KEY",
+    "name": "mistral",
+    "requiresApiKey": true,
+    "promptCacheKeySupport": "unsupported",
+    "tier": "verified"
   },
   {
     "capabilities": {
@@ -947,7 +947,7 @@
       "pdfInput": true,
       "reasoning": true,
       "rerank": false,
-      "responses": false,
+      "responses": true,
       "streaming": true,
       "vision": true
     },
@@ -985,6 +985,33 @@
     "requiresApiKey": false,
     "promptCacheKeySupport": "passthrough",
     "tier": "verified"
+  },
+  {
+    "capabilities": {
+      "audioSpeech": false,
+      "audioTranscription": false,
+      "batch": false,
+      "completion": true,
+      "embedding": false,
+      "imageGeneration": false,
+      "listModels": true,
+      "messages": true,
+      "moderation": false,
+      "pdfInput": false,
+      "reasoning": false,
+      "rerank": false,
+      "responses": false,
+      "streaming": true,
+      "vision": false
+    },
+    "documentationUrl": "https://docs.ovhcloud.com/en/guides/public-cloud/ai-machine-learning/ai-endpoints-getting-started",
+    "name": "ovhcloud",
+    "promptCacheKeySupport": "unsupported",
+    "requiresApiKey": true,
+    "tier": "community",
+    "apiBase": "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
+    "envApiBase": "OVHCLOUD_API_BASE",
+    "envApiKey": "OVHCLOUD_API_KEY"
   },
   {
     "capabilities": {
@@ -1175,12 +1202,13 @@
     "envApiKey": "TELNYX_API_KEY"
   },
   {
+    "apiBase": "https://api.together.xyz/v1",
     "capabilities": {
       "audioSpeech": false,
       "audioTranscription": false,
-      "batch": false,
+      "batch": true,
       "completion": true,
-      "embedding": false,
+      "embedding": true,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -1192,14 +1220,13 @@
       "streaming": true,
       "vision": true
     },
-    "documentationUrl": "https://docs.together.ai/reference/chat-completions-1",
-    "name": "together",
-    "promptCacheKeySupport": "unsupported",
-    "requiresApiKey": true,
-    "tier": "verified",
-    "apiBase": "https://api.together.xyz/v1",
+    "documentationUrl": "https://docs.together.ai/reference/",
     "envApiBase": "TOGETHER_API_BASE",
-    "envApiKey": "TOGETHER_API_KEY"
+    "envApiKey": "TOGETHER_API_KEY",
+    "name": "together",
+    "requiresApiKey": true,
+    "promptCacheKeySupport": "unsupported",
+    "tier": "verified"
   },
   {
     "capabilities": {

@@ -98,7 +98,7 @@ describe("Otari provider", () => {
           stop_reason: "end_turn",
           type: "message",
           usage: { input_tokens: 1, output_tokens: 1 },
-        });
+        }, { headers: { "x-request-id": "request-message-1" } });
       }
       if (url.endsWith("/embeddings")) {
         return Response.json({
@@ -174,7 +174,8 @@ describe("Otari provider", () => {
       maxTokens: 10,
       messages: [{ content: "hello", role: "user" }],
       model: "anthropic:claude",
-    })).resolves.toMatchObject({ stopReason: "end_turn" });
+      timeout: 2,
+    })).resolves.toMatchObject({ requestId: "request-message-1", stopReason: "end_turn" });
     await expect(provider.embedding({ input: "hello", model: "openai:embedding" }))
       .resolves.toMatchObject({ data: [{ embedding: [0.1] }] });
     await expect(provider.moderation({ includeRaw: true, input: "hello" })).resolves.toMatchObject({

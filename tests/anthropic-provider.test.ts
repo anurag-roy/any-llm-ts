@@ -75,7 +75,9 @@ describe("Anthropic provider", () => {
       model: "claude-test",
       providerOptions: { metadata: { user_id: "123" } },
       reasoningEffort: "high",
+      serviceTier: "auto",
       stop: "END",
+      timeout: 1.5,
       toolChoice: { function: { name: "weather" }, type: "function" },
       tools: [
         {
@@ -98,10 +100,12 @@ describe("Anthropic provider", () => {
       stop_sequences: ["END"],
       system: "You are concise.\n\nUse tools",
       output_config: { effort: "high" },
+      service_tier: "auto",
       thinking: { type: "adaptive" },
       tool_choice: { name: "weather", type: "tool" },
       tools: [{ name: "weather" }],
     });
+    expect(create.mock.calls[0]?.[1]).toEqual({ timeout: 1_500 });
     expect(request.messages[0].content[0]).toMatchObject({
       source: { data: "aGVsbG8=", media_type: "image/png", type: "base64" },
       type: "image",
@@ -361,10 +365,12 @@ describe("Anthropic provider", () => {
       model: "claude",
       outputFormat: { format: { schema: { type: "object" }, type: "json_schema" } },
       providerOptions: { custom_option: true },
+      serviceTier: "auto",
       stopSequences: ["STOP"],
       system: [{ cacheControl: { type: "ephemeral" }, text: "system", type: "text" }],
       temperature: 0.2,
       thinking: { budget_tokens: 1_000, type: "enabled" },
+      timeout: 2,
       toolChoice: { name: "weather", type: "tool" },
       tools: [{ cacheControl: { type: "ephemeral" }, inputSchema: { type: "object" }, name: "weather" }],
       topK: 10,
@@ -422,10 +428,11 @@ describe("Anthropic provider", () => {
         },
       ],
       model: "claude",
+      service_tier: "auto",
       stop_sequences: ["STOP"],
       top_k: 10,
       top_p: 0.8,
-    }));
+    }), { timeout: 2_000 });
   });
 
   it("normalizes model pages", async () => {
