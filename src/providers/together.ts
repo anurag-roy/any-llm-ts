@@ -87,7 +87,7 @@ async function contentText(value: unknown): Promise<string> {
     const bytes = await content.read() as Uint8Array | string;
     return typeof bytes === "string" ? bytes : new TextDecoder().decode(bytes);
   }
-  return JSON.stringify(value ?? "") ?? "";
+  return JSON.stringify(value ?? "");
 }
 
 /** Together AI adapter with its native batch lifecycle and OpenAI-compatible chat/embedding APIs. */
