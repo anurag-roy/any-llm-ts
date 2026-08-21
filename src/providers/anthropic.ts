@@ -26,7 +26,14 @@ import type {
   ProviderOptions,
   ToolCall,
 } from "../types.js";
-import { compactObject, getEnvironmentVariable, isAsyncIterable, mapAsyncIterable, unixTimestamp } from "../utils.js";
+import {
+  compactObject,
+  getEnvironmentVariable,
+  isAsyncIterable,
+  mapAsyncIterable,
+  timeoutRequestOptions,
+  unixTimestamp,
+} from "../utils.js";
 import { BaseProvider } from "./base.js";
 import { completeProviderMetadata } from "../provider-metadata.js";
 
@@ -268,6 +275,7 @@ export function nativeMessagesRequest(params: MessagesParams): Record<string, un
     metadata: params.metadata,
     model: params.model,
     output_config: params.outputFormat,
+    service_tier: params.serviceTier,
     stop_sequences: params.stopSequences,
     stream: params.stream,
     system:
@@ -497,20 +505,28 @@ export class AnthropicProvider extends BaseProvider {
     }
     const request = this.completionRequest(params);
     return this.execute(async () => {
+      const requestOptions = timeoutRequestOptions(params.timeout);
       if (params.stream === true) {
-        const stream = await this.client.messages.create({ ...request, stream: true } as never);
+        const stream = requestOptions === undefined
+          ? await this.client.messages.create({ ...request, stream: true } as never)
+          : await this.client.messages.create({ ...request, stream: true } as never, requestOptions);
         return this.protectStream(
           this.normalizeStream(stream as unknown as AsyncIterable<Record<string, any>>, params.model),
         );
       }
-      const response = await this.client.messages.create({ ...request, stream: false } as never);
+      const response = requestOptions === undefined
+        ? await this.client.messages.create({ ...request, stream: false } as never)
+        : await this.client.messages.create({ ...request, stream: false } as never, requestOptions);
       return this.normalizeCompletion(response);
     });
   }
 
   override messages(params: MessagesParams): Promise<AsyncIterable<MessageStreamEvent> | MessageResponse> {
     return this.execute(async () => {
-      const response = await this.client.messages.create(nativeMessagesRequest(params) as never);
+      const requestOptions = timeoutRequestOptions(params.timeout);
+      const response = requestOptions === undefined
+        ? await this.client.messages.create(nativeMessagesRequest(params) as never)
+        : await this.client.messages.create(nativeMessagesRequest(params) as never, requestOptions);
       if (isAsyncIterable(response)) {
         return this.protectStream(mapAsyncIterable(response, nativeMessageEvent));
       }
@@ -652,6 +668,7 @@ export class AnthropicProvider extends BaseProvider {
       ...(Object.keys(outputConfig).length === 0 ? {} : { output_config: outputConfig }),
       ...("thinking" in reasoning ? { thinking: reasoning.thinking } : {}),
       stop_sequences: typeof params.stop === "string" ? [params.stop] : params.stop,
+      service_tier: params.serviceTier,
       stream: params.stream,
       temperature: params.temperature,
       tool_choice: toolChoice,

@@ -22,6 +22,21 @@ const response = await completion({
 The stateless form also accepts `apiKey`, `apiBase`, and `clientOptions` because it creates a client
 for the call.
 
+Set `timeout` in seconds to bound an individual request. `serviceTier` forwards the provider's
+service-tier selection when the underlying API supports it:
+
+```ts
+const response = await llm.completion({
+  model: "gpt-4.1-mini",
+  messages: [{ role: "user", content: "Hello" }],
+  timeout: 30,
+  serviceTier: "auto",
+});
+```
+
+Adapters that cannot preserve per-request timeout semantics reject `timeout` instead of silently
+ignoring it.
+
 ## Reusable client
 
 ```ts

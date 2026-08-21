@@ -30,7 +30,13 @@ import type {
   Transcription,
   TranscriptionParams,
 } from "../types.js";
-import { compactObject, isAsyncIterable, mapAsyncIterable } from "../utils.js";
+import {
+  compactObject,
+  flattenResponsesTools,
+  isAsyncIterable,
+  mapAsyncIterable,
+  timeoutMilliseconds,
+} from "../utils.js";
 import { OpenAIProvider } from "./openai.js";
 
 type Fetch = (input: string | URL | Request, init?: RequestInit) => Promise<globalThis.Response>;
@@ -73,8 +79,26 @@ async function providerError(response: globalThis.Response): Promise<Error> {
   });
 }
 
+function responseRequestId(response: globalThis.Response): string | undefined {
+  return response.headers.get("request-id") ??
+    response.headers.get("x-request-id") ??
+    response.headers.get("x-stainless-request-id") ??
+    undefined;
+}
+
+function withRequestId(value: unknown, requestId: string | undefined): unknown {
+  if (requestId === undefined || typeof value !== "object" || value === null) return value;
+  const record = value as Record<string, unknown>;
+  if (record.type === "message_start" && typeof record.message === "object" && record.message !== null) {
+    const message = record.message as Record<string, unknown>;
+    return { ...record, message: { ...message, request_id: message.request_id ?? requestId } };
+  }
+  return { ...record, request_id: record.request_id ?? requestId };
+}
+
 async function* responseEvents(response: globalThis.Response): AsyncIterable<unknown> {
   if (response.body === null) return;
+  const requestId = responseRequestId(response);
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -90,7 +114,9 @@ async function* responseEvents(response: globalThis.Response): AsyncIterable<unk
         for (const line of event.split(/\r?\n/u)) {
           if (!line.startsWith("data:")) continue;
           const data = line.slice(5).trim();
-          if (data.length > 0 && data !== "[DONE]") yield JSON.parse(data) as unknown;
+          if (data.length > 0 && data !== "[DONE]") {
+            yield withRequestId(JSON.parse(data) as unknown, requestId);
+          }
         }
       }
     } while (!complete);
@@ -217,13 +243,18 @@ class FetchOtariClient implements OtariClientLike {
   }
 
   private async post(path: string, body: Record<string, unknown>): Promise<unknown> {
+    const { timeout, ...requestBody } = body;
+    const milliseconds = typeof timeout === "number" ? timeoutMilliseconds(timeout) : undefined;
     const response = await this.fetch(`${this.baseUrl}${path}`, {
-      body: JSON.stringify(body),
+      body: JSON.stringify(requestBody),
       headers: { "Content-Type": "application/json", ...this.headers },
       method: "POST",
+      ...(milliseconds === undefined ? {} : { signal: AbortSignal.timeout(milliseconds) }),
     });
     if (!response.ok) throw await providerError(response);
-    return body.stream === true ? responseEvents(response) : response.json();
+    return requestBody.stream === true
+      ? responseEvents(response)
+      : withRequestId(await response.json(), responseRequestId(response));
   }
 
   private async bytes(path: string, body: Record<string, unknown>): Promise<Uint8Array> {
@@ -382,7 +413,11 @@ export class OtariProvider extends OpenAIProvider {
         request.max_tokens = request.max_completion_tokens;
         delete request.max_completion_tokens;
       }
-      const response = await this.otari.completion({ ...request, stream: params.stream === true });
+      const response = await this.otari.completion({
+        ...request,
+        stream: params.stream === true,
+        timeout: params.timeout,
+      });
       if (isAsyncIterable(response)) {
         return this.protectStream(mapAsyncIterable(response, (chunk) => this.normalizeChunk(chunk)));
       }
@@ -418,11 +453,12 @@ export class OtariProvider extends OpenAIProvider {
           stream: request.stream,
           stream_options: request.streamOptions,
           temperature: request.temperature,
+          timeout: request.timeout,
           text: request.responseFormat === undefined
             ? request.text
             : { ...(request.text ?? {}), format: request.responseFormat },
           tool_choice: request.toolChoice,
-          tools: request.tools,
+          tools: flattenResponsesTools(request.tools),
           top_logprobs: request.topLogprobs,
           top_p: request.topP,
           truncation: request.truncation,

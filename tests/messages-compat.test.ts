@@ -281,9 +281,11 @@ describe("Messages compatibility API", () => {
           ],
           outputFormat: { format: {} },
           providerOptions: { custom: true },
+          serviceTier: "priority",
           stopSequences: ["STOP"],
           stream: false,
           temperature: 0,
+          timeout: 2.5,
           toolChoice: { type: "any" },
           tools: [],
           topP: 0.9,
@@ -303,9 +305,11 @@ describe("Messages compatibility API", () => {
         { content: "answer", role: "assistant" },
       ],
       providerOptions: { custom: true },
+      serviceTier: "priority",
       stop: ["STOP"],
       stream: false,
       temperature: 0,
+      timeout: 2.5,
       toolChoice: "required",
       tools: [],
       topP: 0.9,
@@ -405,6 +409,38 @@ describe("Messages compatibility API", () => {
       "content_block_start",
       "content_block_stop",
       "message_delta",
+    ]);
+  });
+
+  it("routes interleaved parallel tool-call arguments to their own content blocks", async () => {
+    const stream = completionStreamToMessageEvents(
+      (async function* (): AsyncIterable<ChatCompletionChunk> {
+        yield chunk({ role: "assistant" });
+        yield chunk({ toolCalls: [{ function: { name: "first" }, id: "tool-1", index: 0 }] });
+        yield chunk({ toolCalls: [{ function: { name: "second" }, id: "tool-2", index: 1 }] });
+        yield chunk({ toolCalls: [{ function: { arguments: "{\"one\":" }, index: 0 }] });
+        yield chunk({ toolCalls: [{ function: { arguments: "{\"two\":" }, index: 1 }] });
+        yield chunk({ toolCalls: [{ function: { arguments: "1}" }, index: 0 }] });
+        yield chunk({ toolCalls: [{ function: { arguments: "2}" }, index: 1 }] });
+        yield chunk({}, "tool_calls");
+      })(),
+    );
+    const events: MessageStreamEvent[] = [];
+    for await (const event of stream) events.push(event);
+
+    expect(events.filter((event) => event.type === "content_block_start")).toMatchObject([
+      { contentBlock: { id: "tool-1", name: "first" }, index: 0 },
+      { contentBlock: { id: "tool-2", name: "second" }, index: 1 },
+    ]);
+    expect(events.filter((event) => event.type === "content_block_delta")).toMatchObject([
+      { delta: { partialJson: "{\"one\":" }, index: 0 },
+      { delta: { partialJson: "{\"two\":" }, index: 1 },
+      { delta: { partialJson: "1}" }, index: 0 },
+      { delta: { partialJson: "2}" }, index: 1 },
+    ]);
+    expect(events.filter((event) => event.type === "content_block_stop")).toEqual([
+      { index: 0, type: "content_block_stop" },
+      { index: 1, type: "content_block_stop" },
     ]);
   });
 

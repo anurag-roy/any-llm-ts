@@ -4,7 +4,6 @@ import {
   AnyLLM,
   AzureProvider,
   MissingApiKeyError,
-  UnsupportedOperationError,
 } from "../src/index.js";
 import type { AzureInferenceClientLike } from "../src/providers/azure.js";
 import type {
@@ -19,8 +18,11 @@ function fakeAzure(
   embedding: AzureInferenceClientLike["embedding"] = vi.fn(
     async () => undefined,
   ),
+  modelInfo: AzureInferenceClientLike["modelInfo"] = vi.fn(
+    async () => ({ model_name: "model-a", model_provider_name: "provider-a" }),
+  ),
 ): AzureInferenceClientLike {
-  return { completion, embedding };
+  return { completion, embedding, modelInfo };
 }
 
 async function* events(...values: unknown[]): AsyncIterable<unknown> {
@@ -287,14 +289,19 @@ describe("Azure AI inference provider", () => {
     });
   });
 
-  it("rejects unsupported input and model listing", async () => {
-    const provider = new AzureProvider({}, fakeAzure());
+  it("rejects unsupported embedding input and lists the endpoint's deployed model", async () => {
+    const modelInfo = vi.fn().mockResolvedValue({
+      model_name: "model-a",
+      model_provider_name: "provider-a",
+    });
+    const provider = new AzureProvider({}, fakeAzure(undefined, undefined, modelInfo));
     await expect(
       provider.embedding({ input: [1, 2], model: "embed-model" }),
     ).rejects.toThrow(/string or an array of strings/u);
-    await expect(provider.listModels()).rejects.toBeInstanceOf(
-      UnsupportedOperationError,
-    );
+    await expect(provider.listModels({ trace: true })).resolves.toMatchObject([
+      { created: 0, id: "model-a", ownedBy: "provider-a" },
+    ]);
+    expect(modelInfo).toHaveBeenCalledWith({ trace: true });
   });
 
   it("is registered separately from Azure OpenAI", () => {
@@ -302,7 +309,7 @@ describe("Azure AI inference provider", () => {
       expect.arrayContaining(["azure", "azureopenai"]),
     );
     expect(AnyLLM.getProviderMetadata("azure")).toMatchObject({
-      capabilities: { embedding: true, listModels: false, reasoning: false },
+      capabilities: { embedding: true, listModels: true, reasoning: false },
       name: "azure",
     });
   });

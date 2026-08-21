@@ -77,7 +77,7 @@ export interface FunctionTool {
   type: "function";
 }
 
-export type Tool = FunctionTool | { type: string; [key: string]: unknown };
+export type Tool = FunctionTool | Record<string, unknown>;
 
 export type ReasoningEffort = "auto" | "high" | "low" | "max" | "medium" | "minimal" | "none" | "xhigh";
 
@@ -97,10 +97,13 @@ export interface CompletionParams {
   reasoningEffort?: ReasoningEffort;
   responseFormat?: Record<string, unknown>;
   seed?: number;
+  serviceTier?: string;
   stop?: string | string[];
   stream?: boolean;
   streamOptions?: Record<string, unknown>;
   temperature?: number;
+  /** Per-request timeout in seconds. */
+  timeout?: number;
   toolChoice?: Record<string, unknown> | string;
   tools?: Tool[];
   topLogprobs?: number;
@@ -119,8 +122,16 @@ export interface CompletionUsage {
   completionTokens: number;
   promptTokens: number;
   totalTokens: number;
+  completionTime?: number;
   completionTokensDetails?: Record<string, unknown>;
+  evalDuration?: number;
+  loadDuration?: number;
+  promptEvalDuration?: number;
+  promptTime?: number;
   promptTokensDetails?: Record<string, unknown>;
+  queueTime?: number;
+  totalDuration?: number;
+  totalTime?: number;
 }
 
 export type FinishReason = "content_filter" | "function_call" | "length" | "stop" | "tool_calls" | null;
@@ -268,6 +279,8 @@ export interface ResponsesParams {
   streamOptions?: Record<string, unknown>;
   temperature?: number;
   text?: Record<string, unknown>;
+  /** Per-request timeout in seconds. */
+  timeout?: number;
   toolChoice?: Record<string, unknown> | string;
   tools?: Record<string, unknown>[];
   topLogprobs?: number;
@@ -537,11 +550,14 @@ export interface MessagesParams {
   outputFormat?: Record<string, unknown>;
   promptCacheKey?: string;
   providerOptions?: Record<string, unknown>;
+  serviceTier?: string;
   stopSequences?: string[];
   stream?: boolean;
   system?: MessagesTextBlock[] | string;
   temperature?: number;
   thinking?: Record<string, unknown>;
+  /** Per-request timeout in seconds. */
+  timeout?: number;
   toolChoice?: Record<string, unknown>;
   tools?: MessagesTool[];
   topK?: number;
@@ -579,6 +595,7 @@ export interface MessageResponse {
   stopReason: MessageStopReason | null;
   type: "message";
   usage: MessageUsage;
+  requestId?: string;
   raw?: unknown;
 }
 

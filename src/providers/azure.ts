@@ -10,7 +10,7 @@ import {
 
 import {
   MissingApiKeyError,
-  UnsupportedOperationError,
+  UnsupportedParameterError,
 } from "../errors.js";
 import type {
   ChatCompletion,
@@ -21,6 +21,7 @@ import type {
   EmbeddingParams,
   EmbeddingResponse,
   FinishReason,
+  Model,
   ProviderCapabilities,
   ProviderMetadata,
   ProviderOptions,
@@ -40,6 +41,7 @@ import { completeProviderMetadata } from "../provider-metadata.js";
 export interface AzureInferenceClientLike {
   completion(params: Record<string, unknown>): Promise<unknown>;
   embedding(params: Record<string, unknown>): Promise<unknown>;
+  modelInfo(params?: Record<string, unknown>): Promise<unknown>;
 }
 
 type AzureSdkOptions = ModelClientOptions & {
@@ -53,7 +55,7 @@ const azureCapabilities: ProviderCapabilities = {
   completion: true,
   embedding: true,
   imageGeneration: false,
-  listModels: false,
+  listModels: true,
   messages: true,
   moderation: false,
   pdfInput: false,
@@ -147,6 +149,14 @@ class AzureRestInferenceClient implements AzureInferenceClientLike {
       body: params,
       headers: { "extra-parameters": "pass-through" },
     } as never);
+    if (isUnexpected(response)) {
+      throw errorFromResponse(response.body, response.status);
+    }
+    return response.body;
+  }
+
+  async modelInfo(params: Record<string, unknown> = {}): Promise<unknown> {
+    const response = await this.client.path("/info").get(params);
     if (isUnexpected(response)) {
       throw errorFromResponse(response.body, response.status);
     }
@@ -425,6 +435,9 @@ export class AzureProvider extends BaseProvider {
     if (params.messages.length === 0) {
       return Promise.reject(new TypeError("The messages array cannot be empty."));
     }
+    if (params.timeout !== undefined) {
+      return Promise.reject(new UnsupportedParameterError("timeout", "azure"));
+    }
     const request = completionRequest(params);
     return this.execute(async () => {
       const response = await this.client.completion(request);
@@ -492,9 +505,18 @@ export class AzureProvider extends BaseProvider {
     });
   }
 
-  override listModels(): Promise<never[]> {
-    return Promise.reject(
-      new UnsupportedOperationError("model listing", "azure"),
-    );
+  override listModels(providerOptions: Record<string, unknown> = {}): Promise<Model[]> {
+    return this.execute(async () => {
+      const response = await this.client.modelInfo(providerOptions) as Record<string, unknown>;
+      const id = response.model_name ?? response.modelName;
+      const ownedBy = response.model_provider_name ?? response.modelProviderName;
+      return [{
+        created: 0,
+        id: typeof id === "string" ? id : "unknown",
+        object: "model",
+        ownedBy: typeof ownedBy === "string" ? ownedBy : "azure",
+        raw: response,
+      }];
+    });
   }
 }

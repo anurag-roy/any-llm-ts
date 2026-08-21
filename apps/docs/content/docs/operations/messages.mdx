@@ -23,6 +23,10 @@ for (const block of response.content) {
 }
 ```
 
+Messages calls also accept a per-request `timeout` in seconds and a provider `serviceTier`. Native
+Anthropic-family adapters forward both directly; compatibility adapters map them through chat
+completions. When returned by the provider, `requestId` is normalized on `MessageResponse`.
+
 ## Tools
 
 ```ts

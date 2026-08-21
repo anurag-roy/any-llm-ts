@@ -76,6 +76,7 @@ export type {
   HuggingFaceProviderClients,
 } from "./providers/huggingface.js";
 export { MistralProvider } from "./providers/mistral.js";
+export { TogetherProvider } from "./providers/together.js";
 export { MetaProvider } from "./providers/meta.js";
 export type { MetaProviderClients } from "./providers/meta.js";
 export { OtariProvider } from "./providers/otari.js";

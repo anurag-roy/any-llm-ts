@@ -1,7 +1,11 @@
 import type OpenAI from "openai";
 import { describe, expect, it, vi } from "vitest";
 
-import { UnsupportedParameterError, type ChatCompletionChunk } from "../src/index.js";
+import {
+  UnsupportedParameterError,
+  type ChatCompletion,
+  type ChatCompletionChunk,
+} from "../src/index.js";
 import { OpenAIProvider } from "../src/providers/openai.js";
 
 function fakeClient(overrides: Record<string, unknown> = {}): OpenAI {
@@ -505,8 +509,77 @@ describe("OpenAI-compatible provider quirks", () => {
       },
     });
     expect(togetherCreate.mock.calls[0]?.[0].response_format).toEqual({
-      schema,
+      json_schema: { name: "result", schema },
       type: "json_schema",
+    });
+
+    await together.completion({
+      messages: [{ content: "hello", role: "user" }],
+      model: "llama",
+      responseFormat: {
+        json_schema: {
+          properties: { answer: { type: "string" } },
+          type: "object",
+        },
+        type: "json_schema",
+      },
+    });
+    expect(togetherCreate.mock.calls[1]?.[0].response_format).toEqual({
+      json_schema: {
+        name: "response_schema",
+        schema: {
+          properties: { answer: { type: "string" } },
+          type: "object",
+        },
+      },
+      type: "json_schema",
+    });
+  });
+
+  it("separates a Mistral answer accidentally embedded in reasoning", async () => {
+    const create = vi.fn().mockResolvedValue({
+      ...response(""),
+      choices: [{
+        finish_reason: "stop",
+        index: 0,
+        message: {
+          content: null,
+          reasoning_content: "working through it<response>final answer</response>",
+          role: "assistant",
+        },
+      }],
+    });
+    const provider = new OpenAIProvider(
+      config("mistral", { trimReasoningAtResponseTag: true }),
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+    await expect(provider.completion({
+      messages: [{ content: "hello", role: "user" }],
+      model: "mistral-small",
+    })).resolves.toMatchObject({
+      choices: [{ message: { content: "final answer", reasoning: "working through it" } }],
+    });
+
+    create.mockResolvedValueOnce({
+      ...response(""),
+      choices: [{
+        finish_reason: "stop",
+        index: 0,
+        message: {
+          content: null,
+          reasoning_content: "<response>final answer</response>",
+          role: "assistant",
+        },
+      }],
+    });
+    const result = await provider.completion({
+      messages: [{ content: "hello", role: "user" }],
+      model: "mistral-small",
+    }) as ChatCompletion;
+    expect(result.choices[0]?.message).toEqual({
+      content: "final answer",
+      role: "assistant",
     });
   });
 });
