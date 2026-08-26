@@ -112,6 +112,26 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null) return false;
+  const proto = Object.getPrototypeOf(value) as object | null;
+  return proto === Object.prototype || proto === null;
+}
+
+function isEncodedJson(value: unknown): value is string | Uint8Array {
+  return typeof value === "string" || value instanceof Uint8Array;
+}
+
+function decodeEncodedJson(value: string | Uint8Array): string {
+  return typeof value === "string"
+    ? value
+    : new TextDecoder("utf-8", { fatal: true }).decode(value);
+}
+
+function encodedJsonLength(value: string | Uint8Array): number {
+  return typeof value === "string" ? value.length : value.byteLength;
+}
+
 function resolveApiKey(options: ProviderOptions): string {
   const apiKey =
     options.apiKey ??
@@ -301,13 +321,33 @@ function thoughtSignature(value: unknown): string | undefined {
     : undefined;
 }
 
-function parseFunctionArguments(value: string): Record<string, unknown> {
-  if (value.length === 0) return {};
+function parseJsonValue(value: string | Uint8Array): unknown {
+  return JSON.parse(decodeEncodedJson(value)) as unknown;
+}
+
+function parseFunctionArguments(value: unknown): Record<string, unknown> {
+  if (isEncodedJson(value)) {
+    if (encodedJsonLength(value) === 0) return {};
+    try {
+      const parsed = parseJsonValue(value);
+      return isPlainObject(parsed) ? parsed : { value: parsed };
+    } catch {
+      return typeof value === "string" ? { arguments: value } : {};
+    }
+  }
+  return isPlainObject(value) ? value : {};
+}
+
+function normalizeToolResponse(response: unknown): Record<string, unknown> {
+  return isPlainObject(response) ? response : { result: response };
+}
+
+function decodeToolContent(content: unknown): unknown {
+  if (!isEncodedJson(content)) return content;
   try {
-    const parsed = JSON.parse(value) as unknown;
-    return asRecord(parsed) ?? { value: parsed };
+    return parseJsonValue(content);
   } catch {
-    return { arguments: value };
+    return content;
   }
 }
 
@@ -315,15 +355,7 @@ function functionResponse(
   value: ChatMessage,
   namesById: Map<string, string>
 ): Part {
-  let parsed: unknown = value.content;
-  if (typeof value.content === "string") {
-    try {
-      parsed = JSON.parse(value.content) as unknown;
-    } catch {
-      parsed = value.content;
-    }
-  }
-  const response = asRecord(parsed) ?? { result: parsed };
+  const response = normalizeToolResponse(decodeToolContent(value.content));
   const id = value.toolCallId;
   const name =
     value.name ??
