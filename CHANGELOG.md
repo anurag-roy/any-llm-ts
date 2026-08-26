@@ -1,5 +1,11 @@
 # any-llm-ts
 
+## 0.4.1
+
+### Patch Changes
+
+- 8f15c5e: Sync with Python any-llm through `43b3bbb`: Gemini now accepts already-parsed tool-call arguments and tool results instead of only JSON strings.
+
 ## 0.4.0
 
 ### Minor Changes
