@@ -19,7 +19,9 @@ import {
 import type {
   ChatCompletion,
   ChatCompletionChunk,
+  ChatMessage,
   CompletionParams,
+  FunctionCall,
 } from "../src/types.js";
 
 interface FakeModels {
@@ -74,6 +76,28 @@ async function collect(
   const chunks: ChatCompletionChunk[] = [];
   for await (const chunk of stream) chunks.push(chunk);
   return chunks;
+}
+
+function okSdk() {
+  return fakeGemini({
+    generateContent: vi.fn().mockResolvedValue(
+      response({
+        candidates: [
+          {
+            content: { parts: [{ text: "ok" }], role: "model" },
+            finishReason: GeminiFinishReason.STOP,
+          },
+        ],
+      })
+    ),
+  });
+}
+
+async function convertedContents(messages: ChatMessage[]): Promise<any[]> {
+  const sdk = okSdk();
+  const provider = new GeminiProvider({}, sdk.client);
+  await provider.completion({ messages, model: "gemini-test" });
+  return sdk.models.generateContent.mock.calls[0]?.[0].contents as any[];
 }
 
 afterEach(() => {
@@ -492,6 +516,76 @@ describe("Gemini provider", () => {
       includeThoughts: true,
       thinkingLevel: "HIGH",
     });
+  });
+
+  it.each([
+    [{ name: "get_weather", arguments: '{"location": "Paris"}' }, { location: "Paris" }],
+    [
+      { name: "get_weather", arguments: Buffer.from('{"location": "Paris"}') },
+      { location: "Paris" },
+    ],
+    [
+      {
+        name: "get_weather",
+        arguments: Uint8Array.from(Buffer.from('{"location": "Paris"}')),
+      },
+      { location: "Paris" },
+    ],
+    [{ name: "get_weather", arguments: { location: "Paris" } }, { location: "Paris" }],
+    [{ name: "get_weather" }, {}],
+    [{ name: "get_weather", arguments: null }, {}],
+    [{ name: "get_weather", arguments: "" }, {}],
+  ])("accepts JSON or parsed tool-call arguments %#", async (fn, expectedArgs) => {
+    const contents = await convertedContents([
+      {
+        content: null,
+        role: "assistant",
+        toolCalls: [
+          {
+            function: fn as FunctionCall,
+            id: "call_1",
+            type: "function",
+          },
+        ],
+      },
+    ]);
+    expect(contents[0].parts[0].functionCall.args).toEqual(expectedArgs);
+  });
+
+  it.each([
+    ['{"temp": "20C"}', { temp: "20C" }],
+    [Buffer.from('{"temp": "20C"}'), { temp: "20C" }],
+    [Uint8Array.from(Buffer.from('{"temp": "20C"}')), { temp: "20C" }],
+    [Buffer.from([0xff]), { result: Buffer.from([0xff]) }],
+    [Uint8Array.of(0xff), { result: Uint8Array.of(0xff) }],
+    [{ temp: "20C" }, { temp: "20C" }],
+    ["[]", { result: [] }],
+    [[], { result: [] }],
+    [[{ type: "text", text: "ok" }], { result: [{ type: "text", text: "ok" }] }],
+    ["1", { result: 1 }],
+    ["not JSON", { result: "not JSON" }],
+  ])("accepts JSON or parsed tool-result content %#", async (toolContent, expectedResponse) => {
+    const contents = await convertedContents([
+      { content: "What is the weather?", role: "user" },
+      {
+        content: null,
+        role: "assistant",
+        toolCalls: [
+          {
+            function: { arguments: '{"location": "Paris"}', name: "get_weather" },
+            id: "call_123",
+            type: "function",
+          },
+        ],
+      },
+      {
+        content: toolContent,
+        name: "get_weather",
+        role: "tool",
+        toolCallId: "call_123",
+      } as ChatMessage,
+    ]);
+    expect(contents[2].parts[0].functionResponse.response).toEqual(expectedResponse);
   });
 
   it("normalizes streaming text, reasoning, tools, usage, and stable roles", async () => {
