@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 
 import {
+  BlockedReason,
   FinishReason as GeminiFinishReason,
   FunctionCallingConfigMode,
   GoogleGenAI,
@@ -559,6 +560,8 @@ function structuredOutput(
   return { responseJsonSchema: schema, responseMimeType: "application/json" };
 }
 
+const GEMINI_CONTENT_FILTER_REFUSAL = "Response blocked by Gemini content filtering.";
+
 function usesThinkingLevel(model: string): boolean {
   const match = /(?:^|\/)gemini-(\d+)(?:\.(\d+))?/iu.exec(model);
   if (match?.[1] === undefined) return false;
@@ -584,6 +587,15 @@ function thinkingConfiguration(
     return { includeThoughts: true, thinkingLevel: levels[value] } as GenerateContentConfig["thinkingConfig"];
   }
   return { includeThoughts: true, thinkingBudget: reasoningBudgets[value] };
+}
+
+function promptWasBlocked(response: GenerateContentResponse): boolean {
+  const reason = response.promptFeedback?.blockReason;
+  return (
+    reason !== undefined &&
+    (Object.values(BlockedReason) as string[]).includes(reason) &&
+    reason !== BlockedReason.BLOCKED_REASON_UNSPECIFIED
+  );
 }
 
 function normalizeFinishReason(
@@ -1072,15 +1084,19 @@ export class GeminiProvider extends BaseProvider {
           candidate.content?.parts,
           candidateIndex
         );
+        const finishReason = normalizeFinishReason(
+          candidate.finishReason,
+          normalized.toolCalls !== undefined
+        );
         return {
-          finishReason: normalizeFinishReason(
-            candidate.finishReason,
-            normalized.toolCalls !== undefined
-          ),
+          finishReason,
           index: candidate.index ?? candidateIndex,
           message: {
             content: normalized.content,
             role: "assistant" as const,
+            ...(finishReason === "content_filter"
+              ? { refusal: GEMINI_CONTENT_FILTER_REFUSAL }
+              : {}),
             ...(normalized.messageExtraContent === undefined
               ? {}
               : { extraContent: normalized.messageExtraContent }),
@@ -1097,14 +1113,15 @@ export class GeminiProvider extends BaseProvider {
         };
       }
     );
-    if (
-      choices.length === 0 &&
-      response.promptFeedback?.blockReason !== undefined
-    ) {
+    if (choices.length === 0 && promptWasBlocked(response)) {
       choices.push({
         finishReason: "content_filter",
         index: 0,
-        message: { content: null, role: "assistant" },
+        message: {
+          content: null,
+          refusal: GEMINI_CONTENT_FILTER_REFUSAL,
+          role: "assistant",
+        },
       });
     }
 
@@ -1140,80 +1157,85 @@ export class GeminiProvider extends BaseProvider {
         response.createTime === undefined
           ? state.created
           : createdAt(response.createTime);
-      const choices: ChatCompletionChunk["choices"] = (
-        response.candidates ?? []
-      ).map((candidate, candidateIndex) => {
-        const choiceIndex = candidate.index ?? candidateIndex;
-        const delta: ChatCompletionChunk["choices"][number]["delta"] = {};
-        if (!state.emittedRoles.has(choiceIndex)) {
-          delta.role = "assistant";
-          state.emittedRoles.add(choiceIndex);
-        }
-        let content = "";
-        let reasoning = "";
-        let messageSignature: string | undefined;
-        const toolCalls: ToolCallDelta[] = [];
-
-        for (const part of candidate.content?.parts ?? []) {
-          if (part.thought === true) {
-            reasoning += part.text ?? "";
-            continue;
-          }
-          if (part.functionCall !== undefined) {
-            const toolIndex = state.nextToolIndices.get(choiceIndex) ?? 0;
-            state.nextToolIndices.set(choiceIndex, toolIndex + 1);
-            const signature = part.thoughtSignature;
-            toolCalls.push({
-              function: {
-                arguments: JSON.stringify(part.functionCall.args ?? {}),
-                name: part.functionCall.name ?? "unknown",
+      const promptBlocked = promptWasBlocked(response);
+      const candidates = response.candidates ?? [];
+      const choices: ChatCompletionChunk["choices"] =
+        candidates.length === 0
+          ? [
+              {
+                delta: {
+                  ...(state.emittedRoles.has(0) ? {} : { role: "assistant" as const }),
+                  ...(promptBlocked ? { refusal: GEMINI_CONTENT_FILTER_REFUSAL } : {}),
+                },
+                finishReason: promptBlocked ? "content_filter" : null,
+                index: 0,
               },
-              id: part.functionCall.id ?? `call_${choiceIndex}_${toolIndex}`,
-              index: toolIndex,
-              type: "function",
-              ...(signature === undefined
-                ? {}
-                : {
-                    extraContent: { google: { thoughtSignature: signature } },
-                  }),
-            });
-            continue;
-          }
-          if (typeof part.text === "string") content += part.text;
-          messageSignature = part.thoughtSignature ?? messageSignature;
-        }
+            ]
+          : candidates.map((candidate, candidateIndex) => {
+              const choiceIndex = candidate.index ?? candidateIndex;
+              const delta: ChatCompletionChunk["choices"][number]["delta"] = {};
+              if (!state.emittedRoles.has(choiceIndex)) {
+                delta.role = "assistant";
+                state.emittedRoles.add(choiceIndex);
+              }
+              let content = "";
+              let reasoning = "";
+              let messageSignature: string | undefined;
+              const toolCalls: ToolCallDelta[] = [];
 
-        if (content.length > 0) delta.content = content;
-        if (reasoning.length > 0) delta.reasoning = reasoning;
-        if (messageSignature !== undefined) {
-          delta.extraContent = {
-            google: { thoughtSignature: messageSignature },
-          };
-        }
-        if (toolCalls.length > 0) delta.toolCalls = toolCalls;
-        return {
-          delta,
-          finishReason: normalizeFinishReason(
-            candidate.finishReason,
-            toolCalls.length > 0
-          ),
-          index: choiceIndex,
-          ...(candidate.logprobsResult === undefined
-            ? {}
-            : { logprobs: candidate.logprobsResult }),
-        };
-      });
-      if (
-        choices.length === 0 &&
-        response.promptFeedback?.blockReason !== undefined
-      ) {
-        choices.push({
-          delta: state.emittedRoles.has(0) ? {} : { role: "assistant" },
-          finishReason: "content_filter",
-          index: 0,
-        });
-        state.emittedRoles.add(0);
-      }
+              for (const part of candidate.content?.parts ?? []) {
+                if (part.thought === true) {
+                  reasoning += part.text ?? "";
+                  continue;
+                }
+                if (part.functionCall !== undefined) {
+                  const toolIndex = state.nextToolIndices.get(choiceIndex) ?? 0;
+                  state.nextToolIndices.set(choiceIndex, toolIndex + 1);
+                  const signature = part.thoughtSignature;
+                  toolCalls.push({
+                    function: {
+                      arguments: JSON.stringify(part.functionCall.args ?? {}),
+                      name: part.functionCall.name ?? "unknown",
+                    },
+                    id: part.functionCall.id ?? `call_${choiceIndex}_${toolIndex}`,
+                    index: toolIndex,
+                    type: "function",
+                    ...(signature === undefined
+                      ? {}
+                      : {
+                          extraContent: { google: { thoughtSignature: signature } },
+                        }),
+                  });
+                  continue;
+                }
+                if (typeof part.text === "string") content += part.text;
+                messageSignature = part.thoughtSignature ?? messageSignature;
+              }
+
+              if (content.length > 0) delta.content = content;
+              if (reasoning.length > 0) delta.reasoning = reasoning;
+              if (messageSignature !== undefined) {
+                delta.extraContent = {
+                  google: { thoughtSignature: messageSignature },
+                };
+              }
+              if (toolCalls.length > 0) delta.toolCalls = toolCalls;
+              const mappedFinishReason = promptBlocked
+                ? "content_filter"
+                : normalizeFinishReason(candidate.finishReason, toolCalls.length > 0);
+              if (mappedFinishReason === "content_filter") {
+                delta.refusal = GEMINI_CONTENT_FILTER_REFUSAL;
+              }
+              return {
+                delta,
+                finishReason: mappedFinishReason,
+                index: choiceIndex,
+                ...(candidate.logprobsResult === undefined
+                  ? {}
+                  : { logprobs: candidate.logprobsResult }),
+              };
+            });
+      if (candidates.length === 0) state.emittedRoles.add(0);
 
       const usage = normalizeUsage(response.usageMetadata);
       yield {

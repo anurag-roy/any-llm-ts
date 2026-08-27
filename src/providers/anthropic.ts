@@ -55,6 +55,16 @@ const anthropicCapabilities: ProviderCapabilities = {
   vision: true,
 };
 
+const ANTHROPIC_CONTENT_FILTER_REFUSAL = "Response blocked by Anthropic content filtering.";
+
+const ANTHROPIC_STOP_REASON_TO_FINISH_REASON: Record<string, Exclude<FinishReason, null>> = {
+  end_turn: "stop",
+  max_tokens: "length",
+  model_context_window_exceeded: "length",
+  tool_use: "tool_calls",
+  refusal: "content_filter",
+};
+
 export interface AnthropicProviderConfig {
   capabilities?: Partial<ProviderCapabilities>;
   documentationUrl?: string;
@@ -439,12 +449,18 @@ function normalizeAnthropicBatch(value: unknown, provider: string): Batch {
   };
 }
 
-function finishReason(value: unknown): FinishReason {
-  if (value === "max_tokens") return "length";
-  if (value === "tool_use") return "tool_calls";
-  if (value === "end_turn" || value === "stop_sequence") return "stop";
-  if (value === "refusal") return "content_filter";
-  return null;
+function finishReason(value: unknown, missing: FinishReason = "stop"): FinishReason {
+  if (value === null || value === undefined) return missing;
+  if (typeof value !== "string") return "stop";
+  return ANTHROPIC_STOP_REASON_TO_FINISH_REASON[value] ?? "stop";
+}
+
+function refusalStopDetails(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const details = (value as Record<string, unknown>).stop_details;
+  if (typeof details !== "object" || details === null || Array.isArray(details)) return undefined;
+  const entries = Object.entries(details).filter(([, entry]) => entry !== undefined && entry !== null);
+  return entries.length === 0 ? undefined : Object.fromEntries(entries);
 }
 
 function anthropicUsage(value: Record<string, unknown>): CompletionUsage {
@@ -692,6 +708,11 @@ export class AnthropicProvider extends BaseProvider {
     const thinkingSignature = contentBlocks.find(
       (block) => block.type === "thinking" && typeof block.signature === "string",
     )?.signature as string | undefined;
+    const reason = finishReason(response.stop_reason);
+    const anthropicExtra: Record<string, unknown> = {};
+    if (thinkingSignature !== undefined) anthropicExtra.signature = thinkingSignature;
+    const stopDetails = refusalStopDetails(response);
+    if (stopDetails !== undefined) anthropicExtra.stop_details = stopDetails;
     const toolCalls = contentBlocks.flatMap((block): ToolCall[] =>
       block.type === "tool_use"
         ? [
@@ -706,15 +727,16 @@ export class AnthropicProvider extends BaseProvider {
     return {
       choices: [
         {
-          finishReason: finishReason(response.stop_reason),
+          finishReason: reason,
           index: 0,
           message: {
             content: text.length === 0 ? null : text,
             role: "assistant",
+            ...(reason === "content_filter" ? { refusal: ANTHROPIC_CONTENT_FILTER_REFUSAL } : {}),
             ...(reasoning.length === 0 ? {} : { reasoning }),
-            ...(thinkingSignature === undefined
+            ...(Object.keys(anthropicExtra).length === 0
               ? {}
-              : { extraContent: { anthropic: { signature: thinkingSignature } } }),
+              : { extraContent: { anthropic: anthropicExtra } }),
             ...(toolCalls.length === 0 ? {} : { toolCalls }),
           },
         },
@@ -810,8 +832,22 @@ export class AnthropicProvider extends BaseProvider {
       }
       if (event.type === "message_delta") {
         const outputTokens = Number(event.usage?.output_tokens ?? 0);
+        const reason = finishReason(event.delta?.stop_reason, null);
+        const stopDetails = refusalStopDetails(event.delta);
         yield {
-          ...this.chunk(id, model, created, {}, finishReason(event.delta?.stop_reason), event),
+          ...this.chunk(
+            id,
+            model,
+            created,
+            {
+              ...(reason === "content_filter" ? { refusal: ANTHROPIC_CONTENT_FILTER_REFUSAL } : {}),
+              ...(stopDetails === undefined
+                ? {}
+                : { extraContent: { anthropic: { stop_details: stopDetails } } }),
+            },
+            reason,
+            event,
+          ),
           usage: {
             completionTokens: outputTokens,
             promptTokens: inputTokens,

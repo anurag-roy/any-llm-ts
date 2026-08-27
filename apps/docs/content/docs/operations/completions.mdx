@@ -83,6 +83,7 @@ const choice = response.choices[0];
 console.log(choice?.finishReason);
 console.log(choice?.message.content);
 console.log(choice?.message.reasoning);
+console.log(choice?.message.refusal);
 console.log(choice?.message.toolCalls);
 console.log(response.usage);
 console.log(response.provider);
