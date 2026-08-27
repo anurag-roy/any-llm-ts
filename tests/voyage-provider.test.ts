@@ -9,6 +9,7 @@ import {
 import type { VoyageAIClientLike } from "../src/providers/voyage.js";
 
 function fakeVoyage(embed: ReturnType<typeof vi.fn>): VoyageAIClientLike {
+  // SAFETY: This test double implements the provider surface exercised by this test.
   return { embed } as VoyageAIClientLike;
 }
 
@@ -80,9 +81,9 @@ describe("Voyage provider", () => {
   it("rejects token IDs, base64 output, and unsupported operations", async () => {
     const provider = new VoyageProvider({}, fakeVoyage(vi.fn()));
 
-    await expect(
-      provider.embedding({ input: [1, 2], model: "voyage-3" }),
-    ).rejects.toThrow(/string or an array of strings/u);
+    await expect(provider.embedding({ input: [1, 2], model: "voyage-3" })).rejects.toThrow(
+      /string or an array of strings/u,
+    );
     await expect(
       provider.embedding({
         encodingFormat: "base64",

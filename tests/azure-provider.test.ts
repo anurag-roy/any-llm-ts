@@ -1,31 +1,21 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  AnyLLM,
-  AzureProvider,
-  MissingApiKeyError,
-} from "../src/index.js";
+import { AnyLLM, AzureProvider, MissingApiKeyError } from "../src/index.js";
 import type { AzureInferenceClientLike } from "../src/providers/azure.js";
-import type {
-  ChatCompletion,
-  ChatCompletionChunk,
-} from "../src/types.js";
+import type { ChatCompletion, ChatCompletionChunk } from "../src/types.js";
 
 function fakeAzure(
-  completion: AzureInferenceClientLike["completion"] = vi.fn(
-    async () => undefined,
-  ),
-  embedding: AzureInferenceClientLike["embedding"] = vi.fn(
-    async () => undefined,
-  ),
-  modelInfo: AzureInferenceClientLike["modelInfo"] = vi.fn(
-    async () => ({ model_name: "model-a", model_provider_name: "provider-a" }),
-  ),
+  completion: AzureInferenceClientLike["completion"] = vi.fn(async () => ({})),
+  embedding: AzureInferenceClientLike["embedding"] = vi.fn(async () => undefined),
+  modelInfo: AzureInferenceClientLike["modelInfo"] = vi.fn(async () => ({
+    model_name: "model-a",
+    model_provider_name: "provider-a",
+  })),
 ): AzureInferenceClientLike {
   return { completion, embedding, modelInfo };
 }
 
-async function* events(...values: unknown[]): AsyncIterable<unknown> {
+async function* events<Value>(...values: Value[]): AsyncIterable<Value> {
   yield* values;
 }
 
@@ -37,17 +27,21 @@ afterEach(() => {
 describe("Azure AI inference provider", () => {
   it("requires an endpoint and either a key or token credential", () => {
     expect(() => new AzureProvider({ apiKey: "key" })).toThrow(/requires apiBase/u);
-    expect(() =>
-      new AzureProvider({ apiBase: "https://deployment.models.ai.azure.com" }),
+    expect(
+      () =>
+        new AzureProvider({
+          apiBase: "https://deployment.models.ai.azure.com",
+        }),
     ).toThrow(MissingApiKeyError);
 
-    expect(() =>
-      new AzureProvider({
-        apiBase: "https://deployment.models.ai.azure.com",
-        clientOptions: {
-          credential: { getToken: vi.fn() },
-        },
-      }),
+    expect(
+      () =>
+        new AzureProvider({
+          apiBase: "https://deployment.models.ai.azure.com",
+          clientOptions: {
+            credential: { getToken: vi.fn() },
+          },
+        }),
     ).not.toThrow();
   });
 
@@ -76,6 +70,7 @@ describe("Azure AI inference provider", () => {
     });
     const provider = new AzureProvider({}, fakeAzure(complete));
 
+    // SAFETY: This test double implements the provider surface exercised by this test.
     const result = (await provider.completion({
       maxCompletionTokens: 200,
       messages: [
@@ -157,7 +152,10 @@ describe("Azure AI inference provider", () => {
       responseFormat: {
         json_schema: {
           name: "answer",
-          schema: { properties: { answer: { type: "string" } }, type: "object" },
+          schema: {
+            properties: { answer: { type: "string" } },
+            type: "object",
+          },
         },
         type: "json_schema",
       },
@@ -167,7 +165,10 @@ describe("Azure AI inference provider", () => {
         response_format: {
           json_schema: {
             name: "answer",
-            schema: { properties: { answer: { type: "string" } }, type: "object" },
+            schema: {
+              properties: { answer: { type: "string" } },
+              type: "object",
+            },
             strict: true,
           },
           type: "json_schema",
@@ -230,6 +231,7 @@ describe("Azure AI inference provider", () => {
       streamOptions: { includeUsage: true },
     });
     const chunks: ChatCompletionChunk[] = [];
+    // SAFETY: This test double implements the provider surface exercised by this test.
     for await (const chunk of stream as AsyncIterable<ChatCompletionChunk>) {
       chunks.push(chunk);
     }
@@ -272,11 +274,7 @@ describe("Azure AI inference provider", () => {
         providerOptions: { input_type: "document" },
       }),
     ).resolves.toMatchObject({
-      data: [
-        { embedding: [0.1, 0.2] },
-        { embedding: [0.3, 0.4] },
-        { embedding: [] },
-      ],
+      data: [{ embedding: [0.1, 0.2] }, { embedding: [0.3, 0.4] }, { embedding: [] }],
       provider: "azure",
       usage: { promptTokens: 6, totalTokens: 6 },
     });
@@ -295,9 +293,9 @@ describe("Azure AI inference provider", () => {
       model_provider_name: "provider-a",
     });
     const provider = new AzureProvider({}, fakeAzure(undefined, undefined, modelInfo));
-    await expect(
-      provider.embedding({ input: [1, 2], model: "embed-model" }),
-    ).rejects.toThrow(/string or an array of strings/u);
+    await expect(provider.embedding({ input: [1, 2], model: "embed-model" })).rejects.toThrow(
+      /string or an array of strings/u,
+    );
     await expect(provider.listModels({ trace: true })).resolves.toMatchObject([
       { created: 0, id: "model-a", ownedBy: "provider-a" },
     ]);

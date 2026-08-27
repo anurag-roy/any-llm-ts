@@ -1,11 +1,12 @@
-import type { Mistral } from "@mistralai/mistralai";
+import type { JsonObject } from "../src/types.js";
+import { Mistral } from "@mistralai/mistralai";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 
 import { AnyLLM, BatchNotCompleteError, MistralProvider } from "../src/index.js";
 import { createProvider } from "../src/providers/registry.js";
 
-function batch(overrides: Record<string, unknown> = {}) {
+function batch(overrides: JsonObject = {}) {
   return {
     completedAt: 110,
     completedRequests: 2,
@@ -28,19 +29,27 @@ function batch(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function client(overrides: Record<string, unknown> = {}): Mistral {
-  return {
-    batch: {
-      jobs: {
-        cancel: vi.fn(),
-        create: vi.fn(),
-        get: vi.fn(),
-        list: vi.fn(),
-      },
+interface MistralTestOverrides {
+  batch?: object;
+  files?: object;
+}
+
+function client(overrides: MistralTestOverrides = {}): Mistral {
+  const instance = new Mistral({ apiKey: "test" });
+  const batchService = overrides.batch ?? {
+    jobs: {
+      cancel: vi.fn(),
+      create: vi.fn(),
+      get: vi.fn(),
+      list: vi.fn(),
     },
-    files: { download: vi.fn(), upload: vi.fn() },
-    ...overrides,
-  } as unknown as Mistral;
+  };
+  const filesService = overrides.files ?? { download: vi.fn(), upload: vi.fn() };
+  Object.defineProperties(instance, {
+    batch: { configurable: true, value: batchService },
+    files: { configurable: true, value: filesService },
+  });
+  return instance;
 }
 
 describe("Mistral provider batches", () => {
@@ -72,7 +81,10 @@ describe("Mistral provider batches", () => {
         total: 5,
       }),
     };
-    const files = { download: vi.fn(), upload: vi.fn().mockResolvedValue({ id: "file-1" }) };
+    const files = {
+      download: vi.fn(),
+      upload: vi.fn().mockResolvedValue({ id: "file-1" }),
+    };
     const provider = new MistralProvider({ apiKey: "secret" }, client({ batch: { jobs }, files }));
     const inputFilePath = fileURLToPath(new URL("./fixtures/batch.jsonl", import.meta.url));
 
@@ -92,7 +104,9 @@ describe("Mistral provider batches", () => {
       requestCounts: { completed: 2, failed: 1, total: 3 },
       status: "completed",
     });
-    expect(files.upload).toHaveBeenCalledWith(expect.objectContaining({ file: expect.any(File), purpose: "batch" }));
+    expect(files.upload).toHaveBeenCalledWith(
+      expect.objectContaining({ file: expect.any(File), purpose: "batch" }),
+    );
     expect(jobs.create).toHaveBeenCalledWith({
       endpoint: "/v1/chat/completions",
       inputFiles: ["file-1"],
@@ -100,9 +114,15 @@ describe("Mistral provider batches", () => {
       model: "model-a",
       timeoutHours: 48,
     });
-    await expect(provider.retrieveBatch("batch-1")).resolves.toMatchObject({ id: "batch-1" });
-    await expect(provider.cancelBatch("batch-1")).resolves.toMatchObject({ status: "cancelling" });
-    await expect(provider.listBatches({ limit: 10, providerOptions: { page: 2 } })).resolves.toMatchObject([
+    await expect(provider.retrieveBatch("batch-1")).resolves.toMatchObject({
+      id: "batch-1",
+    });
+    await expect(provider.cancelBatch("batch-1")).resolves.toMatchObject({
+      status: "cancelling",
+    });
+    await expect(
+      provider.listBatches({ limit: 10, providerOptions: { page: 2 } }),
+    ).resolves.toMatchObject([
       { id: "batch-1", status: "completed" },
       { id: "batch-failed", status: "failed" },
       { id: "batch-expired", status: "expired" },
@@ -114,7 +134,10 @@ describe("Mistral provider batches", () => {
     expect(AnyLLM.create("mistral", { apiKey: "secret" })).toBeInstanceOf(AnyLLM);
     expect(createProvider("mistral", { apiKey: "secret" })).toBeInstanceOf(MistralProvider);
     expect(
-      new MistralProvider({ apiBase: "https://mistral.example/v1", apiKey: "secret" }),
+      new MistralProvider({
+        apiBase: "https://mistral.example/v1",
+        apiKey: "secret",
+      }),
     ).toBeInstanceOf(MistralProvider);
 
     await expect(
@@ -135,15 +158,27 @@ describe("Mistral provider batches", () => {
 
   it("normalizes result JSONL and incomplete jobs", async () => {
     const completion = {
-      choices: [{ finish_reason: "stop", index: 0, message: { content: "done", role: "assistant" } }],
+      choices: [
+        {
+          finish_reason: "stop",
+          index: 0,
+          message: { content: "done", role: "assistant" },
+        },
+      ],
       created: 100,
       id: "completion-1",
       model: "model-a",
       object: "chat.completion",
     };
     const output = [
-      JSON.stringify({ custom_id: "ok", response: { body: completion, status_code: 200 } }),
-      JSON.stringify({ custom_id: "bad", error: { code: "bad", message: "Bad request" } }),
+      JSON.stringify({
+        custom_id: "ok",
+        response: { body: completion, status_code: 200 },
+      }),
+      JSON.stringify({
+        custom_id: "bad",
+        error: { code: "bad", message: "Bad request" },
+      }),
       JSON.stringify({ response: { status_code: 500 } }),
     ].join("\n");
     const stream = new Response(output).body;
@@ -157,37 +192,66 @@ describe("Mistral provider batches", () => {
         .mockResolvedValueOnce(batch({ outputFile: null })),
       list: vi.fn(),
     };
-    const files = { download: vi.fn().mockResolvedValue(stream), upload: vi.fn() };
+    const files = {
+      download: vi.fn().mockResolvedValue(stream),
+      upload: vi.fn(),
+    };
     const provider = new MistralProvider({ apiKey: "secret" }, client({ batch: { jobs }, files }));
 
     await expect(provider.retrieveBatchResults("batch-1")).resolves.toMatchObject({
       results: [
         { customId: "ok", result: { id: "completion-1", provider: "mistral" } },
         { customId: "bad", error: { code: "bad", message: "Bad request" } },
-        { customId: "", error: { code: "unknown", message: "Unexpected response format" } },
+        {
+          customId: "",
+          error: { code: "unknown", message: "Unexpected response format" },
+        },
       ],
     });
-    await expect(provider.retrieveBatchResults("batch-2")).rejects.toBeInstanceOf(BatchNotCompleteError);
-    await expect(provider.retrieveBatchResults("batch-3")).resolves.toEqual({ results: [] });
+    await expect(provider.retrieveBatchResults("batch-2")).rejects.toBeInstanceOf(
+      BatchNotCompleteError,
+    );
+    await expect(provider.retrieveBatchResults("batch-3")).resolves.toEqual({
+      results: [],
+    });
   });
 
   it("rejects mixed models and invalid completion windows", async () => {
-    const sdk = client({ files: { download: vi.fn(), upload: vi.fn().mockResolvedValue({ id: "file-1" }) } });
+    const sdk = client({
+      files: {
+        download: vi.fn(),
+        upload: vi.fn().mockResolvedValue({ id: "file-1" }),
+      },
+    });
     const provider = new MistralProvider({ apiKey: "secret" }, sdk);
     const mixed = fileURLToPath(new URL("./fixtures/mistral-mixed-batch.jsonl", import.meta.url));
     const noModel = fileURLToPath(new URL("./fixtures/mistral-no-model.jsonl", import.meta.url));
     const input = fileURLToPath(new URL("./fixtures/batch.jsonl", import.meta.url));
     await expect(
-      provider.createBatch({ endpoint: "/v1/chat/completions", inputFilePath: mixed }),
+      provider.createBatch({
+        endpoint: "/v1/chat/completions",
+        inputFilePath: mixed,
+      }),
     ).rejects.toThrow(/require one model/u);
     await expect(
-      provider.createBatch({ completionWindow: "tomorrow", endpoint: "/v1/chat/completions", inputFilePath: input }),
+      provider.createBatch({
+        completionWindow: "tomorrow",
+        endpoint: "/v1/chat/completions",
+        inputFilePath: input,
+      }),
     ).rejects.toThrow(/completionWindow/u);
     await expect(
-      provider.createBatch({ completionWindow: "0h", endpoint: "/v1/chat/completions", inputFilePath: input }),
+      provider.createBatch({
+        completionWindow: "0h",
+        endpoint: "/v1/chat/completions",
+        inputFilePath: input,
+      }),
     ).rejects.toThrow(/must be positive/u);
     await expect(
-      provider.createBatch({ endpoint: "/v1/chat/completions", inputFilePath: noModel }),
+      provider.createBatch({
+        endpoint: "/v1/chat/completions",
+        inputFilePath: noModel,
+      }),
     ).rejects.toThrow(/require a model/u);
   });
 });

@@ -9,11 +9,7 @@ Batch operations normalize the common lifecycle while preserving the provider re
 The input file format and accepted endpoint depend on the selected provider.
 
 ```ts
-import {
-  createBatch,
-  retrieveBatch,
-  retrieveBatchResults,
-} from "any-llm-ts";
+import { createBatch, retrieveBatch, retrieveBatchResults } from "any-llm-ts";
 
 const batch = await createBatch({
   provider: "openai",

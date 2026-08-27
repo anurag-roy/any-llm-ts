@@ -1,3 +1,7 @@
+import { includeWhen } from "../utils.js";
+import type { JsonValue } from "../types.js";
+import { parseJsonObject, parseJsonObjectArray, parseOptionalJsonObject } from "../utils.js";
+import { isNumber, isObject, isString } from "../utils.js";
 import { MissingApiKeyError } from "../errors.js";
 import type { ProviderOptions, RerankMeta, RerankParams, RerankResponse } from "../types.js";
 import { getEnvironmentVariable } from "../utils.js";
@@ -9,40 +13,43 @@ function rootApiBase(value: string): string {
   return value.replace(/\/(?:compatibility\/)?v1\/?$/u, "").replace(/\/+$/u, "");
 }
 
-function numericRecord(value: unknown): Record<string, number> | undefined {
-  if (typeof value !== "object" || value === null) return undefined;
-  const entries = Object.entries(value).filter((entry): entry is [string, number] => typeof entry[1] === "number");
+function numericRecord(value: JsonValue | undefined): Record<string, number> | undefined {
+  if (!isObject(value)) return undefined;
+  const entries = Object.entries(value).filter((entry): entry is [string, number] =>
+    isNumber(entry[1]),
+  );
   return entries.length === 0 ? undefined : Object.fromEntries(entries);
 }
 
-function normalizeRerank(value: unknown): RerankResponse {
-  const response = value as Record<string, any>;
-  const rawResults = Array.isArray(response.results) ? (response.results as Record<string, unknown>[]) : [];
+function normalizeRerank(value: JsonValue | undefined): RerankResponse {
+  const response = parseJsonObject(value);
+  const rawResults = Array.isArray(response.results) ? parseJsonObjectArray(response.results) : [];
   const results = rawResults
     .flatMap((result) =>
-      typeof result.index === "number" && typeof result.relevance_score === "number"
+      isNumber(result.index) && isNumber(result.relevance_score)
         ? [{ index: result.index, relevanceScore: result.relevance_score }]
         : [],
     )
     .sort((left, right) => right.relevanceScore - left.relevanceScore);
-  const rawMeta = response.meta as Record<string, unknown> | undefined;
+  const rawMeta = parseOptionalJsonObject(response.meta);
   const billedUnits = numericRecord(rawMeta?.billed_units);
   const tokens = numericRecord(rawMeta?.tokens);
   const meta: RerankMeta | undefined =
     billedUnits === undefined && tokens === undefined
       ? undefined
       : {
-          ...(billedUnits === undefined ? {} : { billedUnits }),
-          ...(tokens === undefined ? {} : { tokens }),
+          ...includeWhen(!(billedUnits === undefined), { billedUnits }),
+          ...includeWhen(!(tokens === undefined), { tokens }),
         };
   const totalTokens = tokens?.input_tokens;
-  return {
+  const normalized: RerankResponse = {
     results,
     raw: value,
-    ...(typeof response.id === "string" ? { id: response.id } : {}),
-    ...(meta === undefined ? {} : { meta }),
-    ...(totalTokens === undefined ? {} : { usage: { totalTokens } }),
   };
+  if (isString(response.id)) normalized.id = response.id;
+  if (meta !== undefined) normalized.meta = meta;
+  if (totalTokens !== undefined) normalized.usage = { totalTokens };
+  return normalized;
 }
 
 export class CohereProvider extends OpenAIProvider {
@@ -53,7 +60,9 @@ export class CohereProvider extends OpenAIProvider {
   constructor(options: ProviderOptions = {}, fetchImplementation: Fetch = globalThis.fetch) {
     const apiKey = options.apiKey ?? getEnvironmentVariable("COHERE_API_KEY");
     if (apiKey === undefined) throw new MissingApiKeyError("cohere", "COHERE_API_KEY");
-    const root = rootApiBase(options.apiBase ?? getEnvironmentVariable("COHERE_BASE_URL") ?? "https://api.cohere.com");
+    const root = rootApiBase(
+      options.apiBase ?? getEnvironmentVariable("COHERE_BASE_URL") ?? "https://api.cohere.com",
+    );
     super(
       {
         capabilities: {
@@ -95,9 +104,9 @@ export class CohereProvider extends OpenAIProvider {
         method: "POST",
       });
       if (!response.ok) {
-        const error = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+        const error = parseJsonObject(await response.json().catch(() => ({})));
         throw Object.assign(
-          new Error(typeof error.message === "string" ? error.message : response.statusText),
+          new Error(isString(error.message) ? error.message : response.statusText),
           { status: response.status },
         );
       }

@@ -59,11 +59,9 @@ class CompanyProvider extends BaseProvider {
   }
 }
 
-registerProvider(
-  "company",
-  (options) => new CompanyProvider(options),
-  { metadata },
-);
+registerProvider("company", (options) => new CompanyProvider(options), {
+  metadata,
+});
 ```
 
 After registration:

@@ -1,3 +1,5 @@
+import { parseJsonObject } from "../utils.js";
+import { isFunction, isObject, isString } from "../utils.js";
 import { MissingApiKeyError } from "../errors.js";
 import type { CompletionParams, Model, ProviderOptions } from "../types.js";
 import { getEnvironmentVariable } from "../utils.js";
@@ -18,7 +20,9 @@ export class GitHubProvider extends OpenAIProvider {
   private readonly fetch: Fetch;
 
   constructor(options: ProviderOptions = {}, fetchImplementation?: Fetch) {
-    const apiBase = options.apiBase ?? getEnvironmentVariable("GITHUB_MODELS_API_BASE") ??
+    const apiBase =
+      options.apiBase ??
+      getEnvironmentVariable("GITHUB_MODELS_API_BASE") ??
       "https://models.github.ai/inference";
     const apiKey = options.apiKey ?? getEnvironmentVariable("GITHUB_TOKEN");
     if (apiKey === undefined) throw new MissingApiKeyError("github", "GITHUB_TOKEN");
@@ -41,8 +45,14 @@ export class GitHubProvider extends OpenAIProvider {
     );
     this.apiKey = apiKey;
     this.catalog = catalogUrl(apiBase);
-    this.fetch = fetchImplementation ??
-      (typeof options.clientOptions?.fetch === "function" ? options.clientOptions.fetch as Fetch : globalThis.fetch);
+    const configuredFetch =
+      isObject(options.clientOptions) &&
+      "fetch" in options.clientOptions &&
+      isFunction(options.clientOptions.fetch)
+        ? options.clientOptions.fetch
+        : undefined;
+    // SAFETY: isFunction verifies that the configured transport is callable; Fetch supplies its API contract.
+    this.fetch = fetchImplementation ?? (configuredFetch as Fetch | undefined) ?? globalThis.fetch;
   }
 
   override listModels(): Promise<Model[]> {
@@ -54,33 +64,36 @@ export class GitHubProvider extends OpenAIProvider {
         },
       });
       if (!response.ok) {
-        const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+        const body = parseJsonObject(await response.json().catch(() => ({})));
         throw Object.assign(
-          new Error(typeof body.message === "string" ? body.message : response.statusText),
+          new Error(isString(body.message) ? body.message : response.statusText),
           { headers: response.headers, status: response.status },
         );
       }
-      const payload = await response.json() as unknown;
+      // SAFETY: The provider contract establishes the asserted representation at this boundary.
+      const payload = (await response.json()) as unknown;
       if (!Array.isArray(payload)) return [];
       return payload.flatMap((item): Model[] => {
-        if (typeof item !== "object" || item === null) return [];
-        const record = item as Record<string, unknown>;
-        if (typeof record.id !== "string" || record.id.length === 0) return [];
-        return [{
-          created: 0,
-          id: record.id,
-          object: "model",
-          ownedBy: typeof record.publisher === "string" ? record.publisher : "unknown",
-          raw: item,
-        }];
+        if (!isObject(item)) return [];
+        const record = parseJsonObject(item);
+        if (!isString(record.id) || record.id.length === 0) return [];
+        return [
+          {
+            created: 0,
+            id: record.id,
+            object: "model",
+            ownedBy: isString(record.publisher) ? record.publisher : "unknown",
+            raw: item,
+          },
+        ];
       });
     });
   }
 
-  protected override completionRequest(params: CompletionParams): Record<string, unknown> {
+  protected override completionRequest(params: CompletionParams) {
     const request = super.completionRequest(params);
     if ("max_completion_tokens" in request) {
-      request.max_tokens = request.max_completion_tokens;
+      Object.assign(request, { max_tokens: request.max_completion_tokens });
       delete request.max_completion_tokens;
     }
     return request;

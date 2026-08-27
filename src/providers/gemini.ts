@@ -1,3 +1,8 @@
+import { includeWhen } from "../utils.js";
+import type { JsonValue } from "../types.js";
+import { parseJsonObject } from "../utils.js";
+import type { JsonObject } from "../types.js";
+import { isObject, isString } from "../utils.js";
 import { readFile } from "node:fs/promises";
 
 import {
@@ -52,6 +57,8 @@ import {
   getEnvironmentVariable,
   timeoutMilliseconds,
   unixTimestamp,
+  isJsonValue,
+  parseJsonValue as validateJsonValue,
 } from "../utils.js";
 import { BaseProvider } from "./base.js";
 import { completeProviderMetadata } from "../provider-metadata.js";
@@ -107,30 +114,27 @@ interface StreamState {
   nextToolIndices: Map<number, number>;
 }
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null
-    ? (value as Record<string, unknown>)
-    : undefined;
+function asRecord<Value>(value: Value): JsonObject | undefined {
+  return isObject(value) ? parseJsonObject(value) : undefined;
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== "object" || value === null) return false;
+function isPlainObject<Value>(value: Value): value is Value & JsonObject {
+  if (!isObject(value)) return false;
+  // SAFETY: The provider contract establishes the asserted representation at this boundary.
   const proto = Object.getPrototypeOf(value) as object | null;
   return proto === Object.prototype || proto === null;
 }
 
-function isEncodedJson(value: unknown): value is string | Uint8Array {
-  return typeof value === "string" || value instanceof Uint8Array;
+function isEncodedJson<Value>(value: Value): value is Value & (string | Uint8Array) {
+  return isString(value) || value instanceof Uint8Array;
 }
 
 function decodeEncodedJson(value: string | Uint8Array): string {
-  return typeof value === "string"
-    ? value
-    : new TextDecoder("utf-8", { fatal: true }).decode(value);
+  return isString(value) ? value : new TextDecoder("utf-8", { fatal: true }).decode(value);
 }
 
 function encodedJsonLength(value: string | Uint8Array): number {
-  return typeof value === "string" ? value.length : value.byteLength;
+  return isString(value) ? value.length : value.byteLength;
 }
 
 function resolveApiKey(options: ProviderOptions): string {
@@ -146,21 +150,21 @@ function resolveApiKey(options: ProviderOptions): string {
 
 function mergeClientOptions(
   options: ProviderOptions,
-  apiBase: string | undefined
+  apiBase: string | undefined,
 ): GoogleGenAIOptions {
+  // SAFETY: The provider contract establishes the asserted representation at this boundary.
+  // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- TypeScript needs the SDK owner type after spreading generic JSON options.
   const clientOptions = {
-    ...(options.clientOptions as GoogleGenAIOptions | undefined),
-  };
+    ...options.clientOptions,
+  } as GoogleGenAIOptions;
   const existingHttpOptions = clientOptions.httpOptions;
   const httpOptions =
-    apiBase === undefined
-      ? existingHttpOptions
-      : { baseUrl: apiBase, ...existingHttpOptions };
+    apiBase === undefined ? existingHttpOptions : { baseUrl: apiBase, ...existingHttpOptions };
 
   return {
     ...clientOptions,
     apiKey: resolveApiKey(options),
-    ...(httpOptions === undefined ? {} : { httpOptions }),
+    ...includeWhen(!(httpOptions === undefined), { httpOptions }),
   };
 }
 
@@ -188,15 +192,10 @@ function inferMimeType(value: string | undefined, fallback: string): string {
     [".mp4", "video/mp4"],
     [".webm", "video/webm"],
   ];
-  return (
-    mappings.find(([extension]) => path.endsWith(extension))?.[1] ?? fallback
-  );
+  return mappings.find(([extension]) => path.endsWith(extension))?.[1] ?? fallback;
 }
 
-function parseDataUrl(
-  value: string,
-  field: string
-): { data: string; mimeType: string } {
+function parseDataUrl(value: string, field: string) {
   const match = /^data:([^;,]+);base64,([A-Za-z\d+/]*={0,2})$/u.exec(value);
   if (match?.[1] === undefined || match[2] === undefined) {
     throw new TypeError(`${field} must be a valid base64 data URL.`);
@@ -222,80 +221,66 @@ function parseDataUrl(
 function inlineData(
   data: string,
   mimeType: string,
-  field: string
+  field: string,
 ): { data: string; mimeType: string } {
   return parseDataUrl(`data:${mimeType};base64,${data}`, field);
 }
 
 function imagePart(value: string): Part {
-  if (value.startsWith("data:"))
-    return { inlineData: parseDataUrl(value, "image_url.url") };
+  if (value.startsWith("data:")) return { inlineData: parseDataUrl(value, "image_url.url") };
   return {
     fileData: { fileUri: value, mimeType: inferMimeType(value, "image/jpeg") },
   };
 }
 
-function filePart(file: {
-  file_data?: string;
-  file_id?: string;
-  filename?: string;
-}): Part {
+function filePart(file: { file_data?: string; file_id?: string; filename?: string }): Part {
   const value = file.file_data ?? file.file_id;
   if (value === undefined || value.length === 0) {
-    throw new TypeError(
-      "Gemini file content requires file.file_data or file.file_id."
-    );
+    throw new TypeError("Gemini file content requires file.file_data or file.file_id.");
   }
-  if (value.startsWith("data:"))
-    return { inlineData: parseDataUrl(value, "file.file_data") };
+  if (value.startsWith("data:")) return { inlineData: parseDataUrl(value, "file.file_data") };
   return {
     fileData: {
       fileUri: value,
-      mimeType: inferMimeType(
-        file.filename ?? value,
-        "application/octet-stream"
-      ),
+      mimeType: inferMimeType(file.filename ?? value, "application/octet-stream"),
     },
   };
 }
 
 function contentParts(content: ChatMessage["content"]): Part[] {
-  if (typeof content === "string") return [{ text: content }];
+  if (isString(content)) return [{ text: content }];
   if (content === null) return [];
 
   return content.flatMap((part): Part[] => {
-    if (
-      part.type === "text" &&
-      "text" in part &&
-      typeof part.text === "string"
-    ) {
+    if (part.type === "text" && "text" in part && isString(part.text)) {
       return [{ text: part.text }];
     }
     if (part.type === "image_url" && "image_url" in part) {
+      // SAFETY: The provider contract establishes the asserted representation at this boundary.
       const imageUrl = part.image_url as string | { url: string };
-      return [
-        imagePart(typeof imageUrl === "string" ? imageUrl : imageUrl.url),
-      ];
+      return [imagePart(isString(imageUrl) ? imageUrl : imageUrl.url)];
     }
     if (part.type === "file" && "file" in part) {
+      // SAFETY: The provider contract establishes the asserted representation at this boundary.
       return [
         filePart(
           part.file as {
             file_data?: string;
             file_id?: string;
             filename?: string;
-          }
+          },
         ),
       ];
     }
     if (part.type === "input_audio" && "input_audio" in part) {
+      // SAFETY: The provider contract establishes the asserted representation at this boundary.
       const audio = part.input_audio as { data: string; format: "mp3" | "wav" };
       const data = audio.data.startsWith("data:")
         ? parseDataUrl(audio.data, "input_audio.data")
         : inlineData(
             audio.data,
             audio.format === "mp3" ? "audio/mpeg" : "audio/wav",
-            "input_audio.data"
+            "input_audio.data",
           );
       return [{ inlineData: data }];
     }
@@ -304,80 +289,68 @@ function contentParts(content: ChatMessage["content"]): Part[] {
 }
 
 function textContent(message: ChatMessage): string {
-  if (typeof message.content === "string") return message.content;
+  if (isString(message.content)) return message.content;
+  // SAFETY: The provider contract establishes the asserted representation at this boundary.
   return (message.content ?? [])
-    .filter(
-      (part) =>
-        part.type === "text" && "text" in part && typeof part.text === "string"
-    )
+    .filter((part) => part.type === "text" && "text" in part && isString(part.text))
     .map((part) => (part as { text: string }).text)
     .join("\n");
 }
 
-function thoughtSignature(value: unknown): string | undefined {
+function thoughtSignature(value: JsonValue | undefined): string | undefined {
   const google = asRecord(asRecord(value)?.google);
   const signature = google?.thoughtSignature ?? google?.thought_signature;
-  return typeof signature === "string" && signature.length > 0
-    ? signature
-    : undefined;
+  return isString(signature) && signature.length > 0 ? signature : undefined;
 }
 
-function parseJsonValue(value: string | Uint8Array): unknown {
-  return JSON.parse(decodeEncodedJson(value)) as unknown;
+function parseJsonValue(value: string | Uint8Array): JsonValue {
+  return validateJsonValue(JSON.parse(decodeEncodedJson(value)), "Gemini JSON value");
 }
 
-function parseFunctionArguments(value: unknown): Record<string, unknown> {
+function parseFunctionArguments<Value>(value: Value): JsonObject {
   if (isEncodedJson(value)) {
     if (encodedJsonLength(value) === 0) return {};
     try {
       const parsed = parseJsonValue(value);
       return isPlainObject(parsed) ? parsed : { value: parsed };
     } catch {
-      return typeof value === "string" ? { arguments: value } : {};
+      return isString(value) ? { arguments: value } : {};
     }
   }
   return isPlainObject(value) ? value : {};
 }
 
-function normalizeToolResponse(response: unknown): Record<string, unknown> {
-  return isPlainObject(response) ? response : { result: response };
+function normalizeToolResponse<Value>(response: Value): JsonObject {
+  if (isPlainObject(response)) return response;
+  return { result: isJsonValue(response) ? response : JSON.stringify(response) };
 }
 
-function decodeToolContent(content: unknown): unknown {
-  if (!isEncodedJson(content)) return content;
+function decodeToolContent<Value>(content: Value): JsonValue {
+  if (!isEncodedJson(content)) return validateJsonValue(content, "Gemini tool result");
   try {
     return parseJsonValue(content);
   } catch {
-    return content;
+    return validateJsonValue(content, "Gemini tool result");
   }
 }
 
-function functionResponse(
-  value: ChatMessage,
-  namesById: Map<string, string>
-): Part {
+function functionResponse(value: ChatMessage, namesById: Map<string, string>): Part {
   const response = normalizeToolResponse(decodeToolContent(value.content));
   const id = value.toolCallId;
-  const name =
-    value.name ??
-    (id === undefined ? undefined : namesById.get(id)) ??
-    "unknown";
+  const name = value.name ?? (id === undefined ? undefined : namesById.get(id)) ?? "unknown";
   return {
     functionResponse: {
-      ...(id === undefined ? {} : { id }),
+      ...includeWhen(!(id === undefined), { id }),
       name,
       response,
     },
   };
 }
 
-function assistantParts(
-  message: ChatMessage,
-  namesById: Map<string, string>
-): Part[] {
+function assistantParts(message: ChatMessage, namesById: Map<string, string>): Part[] {
   const parts: Part[] = [];
   const messageSignature = thoughtSignature(message.extraContent);
-  if (typeof message.reasoning === "string" && message.reasoning.length > 0) {
+  if (isString(message.reasoning) && message.reasoning.length > 0) {
     parts.push({
       text: message.reasoning,
       thought: true,
@@ -399,9 +372,9 @@ function assistantParts(
         id: toolCall.id,
         name: toolCall.function.name,
       },
-      ...(signature === undefined && index !== 0
-        ? {}
-        : { thoughtSignature: signature ?? SKIP_THOUGHT_SIGNATURE_VALIDATOR }),
+      ...includeWhen(!(signature === undefined && index !== 0), {
+        thoughtSignature: signature ?? SKIP_THOUGHT_SIGNATURE_VALIDATOR,
+      }),
     });
   }
   return parts;
@@ -409,9 +382,7 @@ function assistantParts(
 
 function convertMessages(messages: ChatMessage[]): ConvertedMessages {
   const systemInstruction = messages
-    .filter(
-      (message) => message.role === "developer" || message.role === "system"
-    )
+    .filter((message) => message.role === "developer" || message.role === "system")
     .map(textContent)
     .filter((value) => value.length > 0)
     .join("\n\n");
@@ -437,9 +408,7 @@ function convertMessages(messages: ChatMessage[]): ConvertedMessages {
     contents.push({ parts: contentParts(message.content), role: "user" });
   }
 
-  return systemInstruction.length === 0
-    ? { contents }
-    : { contents, systemInstruction };
+  return systemInstruction.length === 0 ? { contents } : { contents, systemInstruction };
 }
 
 function convertFunctionTools(
@@ -447,44 +416,45 @@ function convertFunctionTools(
   provider: string,
 ): GeminiTool[] | undefined {
   if (tools === undefined) return undefined;
-  const declarations = tools.flatMap(
-    (tool): NonNullable<GeminiTool["functionDeclarations"]> => {
-      if (tool.type !== "function" || !("function" in tool)) return [];
-      const functionTool = tool as FunctionTool;
-      return [
-        {
-          name: functionTool.function.name,
-          parametersJsonSchema: functionTool.function.parameters ?? {
-            additionalProperties: true,
-            type: "object",
-          },
-          ...(functionTool.function.description === undefined
-            ? {}
-            : { description: functionTool.function.description }),
+  const declarations = tools.flatMap((tool): NonNullable<GeminiTool["functionDeclarations"]> => {
+    if (tool.type !== "function" || !("function" in tool)) return [];
+    // SAFETY: The provider contract establishes the asserted representation at this boundary.
+    const functionTool = tool as FunctionTool;
+    return [
+      {
+        name: functionTool.function.name,
+        parametersJsonSchema: functionTool.function.parameters ?? {
+          additionalProperties: true,
+          type: "object",
         },
-      ];
-    }
-  );
+        ...includeWhen(!(functionTool.function.description === undefined), {
+          description: functionTool.function.description,
+        }),
+      },
+    ];
+  });
   const converted: GeminiTool[] =
     declarations.length === 0 ? [] : [{ functionDeclarations: declarations }];
 
   for (const tool of tools) {
     if (tool.type === "function") continue;
-    const nativeAliases: Record<string, string> = {
-      code_execution: "codeExecution",
-      computer_use: "computerUse",
-      enterprise_web_search: "enterpriseWebSearch",
-      google_search: "googleSearch",
-      google_search_retrieval: "googleSearchRetrieval",
-      url_context: "urlContext",
+    const nativeAlias = (key: string): string => {
+      if (key === "code_execution") return "codeExecution";
+      if (key === "computer_use") return "computerUse";
+      if (key === "enterprise_web_search") return "enterpriseWebSearch";
+      if (key === "google_search") return "googleSearch";
+      if (key === "google_search_retrieval") return "googleSearchRetrieval";
+      if (key === "url_context") return "urlContext";
+      return key;
     };
-    const nativeTool: Record<string, unknown> = {};
+    const nativeTool: GeminiTool = {};
     for (const [key, value] of Object.entries(tool)) {
-      if (key === "type" && typeof value === "string" && nativeAliases[value] !== undefined) {
-        nativeTool[nativeAliases[value]] = {};
+      const aliasedValue = isString(value) ? nativeAlias(value) : "";
+      if (key === "type" && aliasedValue !== value) {
+        Object.assign(nativeTool, { [aliasedValue]: {} });
         continue;
       }
-      const nativeKey = nativeAliases[key] ?? key;
+      const nativeKey = nativeAlias(key);
       if (
         nativeKey === "codeExecution" ||
         nativeKey === "computerUse" ||
@@ -494,11 +464,13 @@ function convertFunctionTools(
         nativeKey === "retrieval" ||
         nativeKey === "urlContext"
       ) {
-        nativeTool[nativeKey] = value;
+        Object.assign(nativeTool, { [nativeKey]: value });
       }
     }
     if (Object.keys(nativeTool).length === 0) {
-      throw new InvalidRequestError(`Unsupported Gemini tool: ${JSON.stringify(tool)}`, { provider });
+      throw new InvalidRequestError(`Unsupported Gemini tool: ${JSON.stringify(tool)}`, {
+        provider,
+      });
     }
     converted.push(nativeTool);
   }
@@ -506,7 +478,7 @@ function convertFunctionTools(
 }
 
 function convertToolChoice(
-  value: CompletionParams["toolChoice"]
+  value: CompletionParams["toolChoice"],
 ): GenerateContentConfig["toolConfig"] {
   if (value === undefined) return undefined;
   if (value === "auto") {
@@ -523,9 +495,9 @@ function convertToolChoice(
       functionCallingConfig: { mode: FunctionCallingConfigMode.VALIDATED },
     };
   }
-  if (typeof value === "object") {
+  if (isObject(value)) {
     const name = asRecord(value.function)?.name;
-    if (typeof name === "string" && name.length > 0) {
+    if (isString(name) && name.length > 0) {
       return {
         functionCallingConfig: {
           allowedFunctionNames: [name],
@@ -534,28 +506,23 @@ function convertToolChoice(
       };
     }
   }
-  const description =
-    typeof value === "string" ? value : JSON.stringify(value);
+  const description = isString(value) ? value : JSON.stringify(value);
   throw new TypeError(`Unsupported Gemini toolChoice value: ${description}.`);
 }
 
 function structuredOutput(
-  responseFormat: CompletionParams["responseFormat"]
+  responseFormat: CompletionParams["responseFormat"],
 ): Partial<GenerateContentConfig> {
   if (responseFormat === undefined || responseFormat.type === "text") return {};
-  if (responseFormat.type === "json_object")
-    return { responseMimeType: "application/json" };
+  if (responseFormat.type === "json_object") return { responseMimeType: "application/json" };
   if (responseFormat.type !== "json_schema") {
-    throw new TypeError(
-      `Unsupported Gemini responseFormat type: ${String(responseFormat.type)}.`
-    );
+    const type = isString(responseFormat.type) ? responseFormat.type : "unknown";
+    throw new TypeError(`Unsupported Gemini responseFormat type: ${type}.`);
   }
   const jsonSchema = asRecord(responseFormat.json_schema);
   const schema = asRecord(jsonSchema?.schema);
   if (schema === undefined) {
-    throw new TypeError(
-      "Gemini responseFormat.json_schema.schema must be an object."
-    );
+    throw new TypeError("Gemini responseFormat.json_schema.schema must be an object.");
   }
   return { responseJsonSchema: schema, responseMimeType: "application/json" };
 }
@@ -584,7 +551,11 @@ function thinkingConfiguration(
       minimal: "MINIMAL",
       xhigh: "HIGH",
     } as const;
-    return { includeThoughts: true, thinkingLevel: levels[value] } as GenerateContentConfig["thinkingConfig"];
+    // SAFETY: The provider contract establishes the asserted representation at this boundary.
+    return {
+      includeThoughts: true,
+      thinkingLevel: levels[value],
+    } as GenerateContentConfig["thinkingConfig"];
   }
   return { includeThoughts: true, thinkingBudget: reasoningBudgets[value] };
 }
@@ -593,15 +564,12 @@ function promptWasBlocked(response: GenerateContentResponse): boolean {
   const reason = response.promptFeedback?.blockReason;
   return (
     reason !== undefined &&
-    (Object.values(BlockedReason) as string[]).includes(reason) &&
+    Object.values(BlockedReason).some((value) => value === reason) &&
     reason !== BlockedReason.BLOCKED_REASON_UNSPECIFIED
   );
 }
 
-function normalizeFinishReason(
-  value: unknown,
-  hasToolCalls: boolean
-): FinishReason {
+function normalizeFinishReason(value: JsonValue | undefined, hasToolCalls: boolean): FinishReason {
   let normalized: FinishReason = null;
   if (value === GeminiFinishReason.STOP) normalized = "stop";
   else if (value === GeminiFinishReason.MAX_TOKENS) normalized = "length";
@@ -617,17 +585,13 @@ function normalizeFinishReason(
   ) {
     normalized = "content_filter";
   }
-  if (
-    hasToolCalls &&
-    normalized !== "length" &&
-    normalized !== "content_filter"
-  )
+  if (hasToolCalls && normalized !== "length" && normalized !== "content_filter")
     return "tool_calls";
   return normalized;
 }
 
 function normalizeUsage(
-  value: GenerateContentResponse["usageMetadata"]
+  value: GenerateContentResponse["usageMetadata"],
 ): CompletionUsage | undefined {
   if (value === undefined) return undefined;
   const promptTokens = value.promptTokenCount ?? 0;
@@ -645,10 +609,8 @@ function normalizeUsage(
     completionTokens,
     promptTokens,
     totalTokens,
-    ...(completionTokensDetails === undefined
-      ? {}
-      : { completionTokensDetails }),
-    ...(promptTokensDetails === undefined ? {} : { promptTokensDetails }),
+    ...includeWhen(!(completionTokensDetails === undefined), { completionTokensDetails }),
+    ...includeWhen(!(promptTokensDetails === undefined), { promptTokensDetails }),
   };
 }
 
@@ -658,15 +620,7 @@ function createdAt(value: string | undefined): number {
   return Number.isNaN(parsed) ? unixTimestamp() : Math.floor(parsed / 1_000);
 }
 
-function completionParts(
-  parts: Part[] | undefined,
-  candidateIndex: number
-): {
-  content: string | null;
-  messageExtraContent?: Record<string, unknown>;
-  reasoning?: string;
-  toolCalls?: ToolCall[];
-} {
+function completionParts(parts: Part[] | undefined, candidateIndex: number) {
   let content = "";
   let reasoning = "";
   let messageSignature: string | undefined;
@@ -688,27 +642,25 @@ function completionParts(
         },
         id: part.functionCall.id ?? `call_${candidateIndex}_${index}`,
         type: "function",
-        ...(signature === undefined
-          ? {}
-          : { extraContent: { google: { thoughtSignature: signature } } }),
+        ...includeWhen(!(signature === undefined), {
+          extraContent: { google: { thoughtSignature: signature } },
+        }),
       });
       continue;
     }
-    if (typeof part.text === "string") content += part.text;
+    if (isString(part.text)) content += part.text;
     messageSignature = part.thoughtSignature ?? messageSignature;
   }
 
   return {
     content: content.length === 0 ? null : content,
-    ...(messageSignature === undefined
-      ? {}
-      : {
-          messageExtraContent: {
-            google: { thoughtSignature: messageSignature },
-          },
-        }),
-    ...(reasoning.length === 0 ? {} : { reasoning }),
-    ...(toolCalls.length === 0 ? {} : { toolCalls }),
+    ...includeWhen(!(messageSignature === undefined), {
+      messageExtraContent: {
+        google: { thoughtSignature: messageSignature },
+      },
+    }),
+    ...includeWhen(!(reasoning.length === 0), { reasoning }),
+    ...includeWhen(!(toolCalls.length === 0), { toolCalls }),
   };
 }
 
@@ -717,32 +669,26 @@ function assertStructuredOutputCompleted(
   result: ChatCompletion,
   provider: string,
 ): void {
-  if (
-    params.responseFormat === undefined ||
-    params.responseFormat.type === "text"
-  )
-    return;
+  if (params.responseFormat === undefined || params.responseFormat.type === "text") return;
   const finishReason = result.choices[0]?.finishReason;
   if (finishReason === "length") {
     throw new ContextLengthExceededError(
       "Gemini truncated the structured output before it completed.",
       {
         provider,
-      }
+      },
     );
   }
   if (finishReason === "content_filter") {
-    throw new ContentFilterError(
-      "Gemini filtered the structured output before it completed.",
-      {
-        provider,
-      }
-    );
+    throw new ContentFilterError("Gemini filtered the structured output before it completed.", {
+      provider,
+    });
   }
 }
 
-function geminiBatchStatus(state: unknown): BatchStatus {
-  if (state === "JOB_STATE_SUCCEEDED" || state === "JOB_STATE_PARTIALLY_SUCCEEDED") return "completed";
+function geminiBatchStatus(state: JsonValue | undefined): BatchStatus {
+  if (state === "JOB_STATE_SUCCEEDED" || state === "JOB_STATE_PARTIALLY_SUCCEEDED")
+    return "completed";
   if (state === "JOB_STATE_FAILED") return "failed";
   if (state === "JOB_STATE_CANCELLING") return "cancelling";
   if (state === "JOB_STATE_CANCELLED") return "cancelled";
@@ -768,7 +714,7 @@ function normalizeGeminiBatch(job: BatchJob, provider: string): Batch {
     job.dest?.bigqueryUri ??
     job.dest?.fileName;
   const completedAt = geminiBatchTimestamp(job.endTime);
-  return {
+  const normalized: Batch = {
     completionWindow: "24h",
     createdAt: geminiBatchTimestamp(job.createTime),
     endpoint: "/v1/chat/completions",
@@ -777,32 +723,43 @@ function normalizeGeminiBatch(job: BatchJob, provider: string): Batch {
     provider,
     status: geminiBatchStatus(job.state),
     raw: job,
-    ...(completedAt === 0 ? {} : { completedAt }),
-    ...(job.displayName === undefined ? {} : { metadata: { displayName: job.displayName } }),
-    ...(job.model === undefined ? {} : { model: job.model }),
     ...(outputFileId === undefined ? { outputFileId: null } : { outputFileId }),
-    requestCounts: { completed: successful, failed, total: successful + failed + incomplete },
+    requestCounts: {
+      completed: successful,
+      failed,
+      total: successful + failed + incomplete,
+    },
   };
+  if (completedAt !== 0) normalized.completedAt = completedAt;
+  if (job.displayName !== undefined) normalized.metadata = { displayName: job.displayName };
+  if (job.model !== undefined) normalized.model = job.model;
+  return normalized;
 }
 
-function inlinedBatchRequest(entry: Record<string, unknown>): InlinedRequest {
-  const body = (entry.body ?? {}) as Record<string, unknown>;
-  const messages = Array.isArray(body.messages) ? (body.messages as ChatMessage[]) : [];
+function inlinedBatchRequest(entry: JsonObject): InlinedRequest {
+  const body = parseJsonObject(entry.body ?? {});
+  // SAFETY: The provider contract establishes the asserted representation at this boundary.
+  const messages = Array.isArray(body.messages)
+    ? // SAFETY: Batch JSONL messages are validated by convertMessages before SDK submission.
+      (body.messages as (ChatMessage & JsonObject)[])
+    : [];
   const converted = convertMessages(messages);
   const stop = body.stop;
+  // SAFETY: The provider contract establishes the asserted representation at this boundary.
   const config = compactObject({
     maxOutputTokens: body.max_tokens,
-    stopSequences: typeof stop === "string" ? [stop] : stop,
+    stopSequences: isString(stop) ? [stop] : stop,
     systemInstruction: converted.systemInstruction,
     temperature: body.temperature,
     topP: body.top_p,
   }) as GenerateContentConfig;
-  return {
+  const request: InlinedRequest = {
     contents: converted.contents,
-    model: typeof body.model === "string" ? body.model : "",
-    ...(Object.keys(config).length === 0 ? {} : { config }),
-    ...(typeof entry.custom_id === "string" ? { metadata: { custom_id: entry.custom_id } } : {}),
+    model: isString(body.model) ? body.model : "",
   };
+  if (Object.keys(config).length > 0) request.config = config;
+  if (isString(entry.custom_id)) request.metadata = { custom_id: entry.custom_id };
+  return request;
 }
 
 export class GeminiProvider extends BaseProvider {
@@ -818,35 +775,28 @@ export class GeminiProvider extends BaseProvider {
     super();
     this.providerName = config.name ?? "gemini";
     const apiBase =
-      options.apiBase ??
-      getEnvironmentVariable(config.envApiBase ?? "GOOGLE_GEMINI_BASE_URL");
-    this.client =
-      client ?? new GoogleGenAI(mergeClientOptions(options, apiBase));
+      options.apiBase ?? getEnvironmentVariable(config.envApiBase ?? "GOOGLE_GEMINI_BASE_URL");
+    this.client = client ?? new GoogleGenAI(mergeClientOptions(options, apiBase));
     this.metadata = completeProviderMetadata({
       capabilities: { ...geminiCapabilities },
-      documentationUrl:
-        config.documentationUrl ?? "https://ai.google.dev/gemini-api/docs",
+      documentationUrl: config.documentationUrl ?? "https://ai.google.dev/gemini-api/docs",
       envApiBase: config.envApiBase ?? "GOOGLE_GEMINI_BASE_URL",
       envApiKey: config.envApiKey ?? "GEMINI_API_KEY or GOOGLE_API_KEY",
       name: this.providerName,
       requiresApiKey: config.requiresApiKey ?? true,
-      ...(apiBase === undefined ? {} : { apiBase }),
+      ...includeWhen(!(apiBase === undefined), { apiBase }),
     });
   }
 
   override completion(
-    params: CompletionParams
+    params: CompletionParams,
   ): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion> {
     if (params.messages.length === 0) {
-      return Promise.reject(
-        new TypeError("The messages array cannot be empty.")
-      );
+      return Promise.reject(new TypeError("The messages array cannot be empty."));
     }
     if (params.parallelToolCalls !== undefined) {
       return Promise.reject(
-        new TypeError(
-          "Gemini does not support the normalized parallelToolCalls parameter."
-        )
+        new TypeError("Gemini does not support the normalized parallelToolCalls parameter."),
       );
     }
     const request = this.completionRequest(params);
@@ -865,31 +815,25 @@ export class GeminiProvider extends BaseProvider {
 
   override embedding(params: EmbeddingParams): Promise<EmbeddingResponse> {
     if (params.encodingFormat === "base64") {
-      return Promise.reject(
-        new TypeError("Gemini embeddings do not support base64 encoding.")
-      );
+      return Promise.reject(new TypeError("Gemini embeddings do not support base64 encoding."));
     }
     if (
-      typeof params.input !== "string" &&
-      !(
-        Array.isArray(params.input) &&
-        params.input.every((value) => typeof value === "string")
-      )
+      !isString(params.input) &&
+      !(Array.isArray(params.input) && params.input.every((value) => isString(value)))
     ) {
       return Promise.reject(
-        new TypeError(
-          "Gemini embeddings require a string or an array of strings."
-        )
+        new TypeError("Gemini embeddings require a string or an array of strings."),
       );
     }
     return this.execute(async () => {
+      // SAFETY: The provider contract establishes the asserted representation at this boundary.
       const response = await this.client.models.embedContent({
         contents: params.input as string | string[],
         model: params.model,
         config: {
-          ...(params.dimensions === undefined
-            ? {}
-            : { outputDimensionality: params.dimensions }),
+          ...includeWhen(!(params.dimensions === undefined), {
+            outputDimensionality: params.dimensions,
+          }),
           ...params.providerOptions,
         },
       });
@@ -903,7 +847,7 @@ export class GeminiProvider extends BaseProvider {
                   index,
                   object: "embedding" as const,
                 },
-              ]
+              ],
         ),
         model: params.model,
         object: "list",
@@ -914,9 +858,7 @@ export class GeminiProvider extends BaseProvider {
     });
   }
 
-  override listModels(
-    providerOptions: Record<string, unknown> = {}
-  ): Promise<Model[]> {
+  override listModels(providerOptions: JsonObject = {}): Promise<Model[]> {
     return this.execute(async () => {
       const page = await this.client.models.list({ config: providerOptions });
       const models: Model[] = [];
@@ -944,38 +886,43 @@ export class GeminiProvider extends BaseProvider {
     }
     return this.execute(async () => {
       const options = params.providerOptions ?? {};
-      const modelOverride = typeof options.model === "string" ? options.model : undefined;
+      const modelOverride = isString(options.model) ? options.model : undefined;
       const requests: InlinedRequest[] = [];
       for (const line of (await readFile(params.inputFilePath, "utf8")).split("\n")) {
         if (line.trim().length === 0) continue;
-        const request = inlinedBatchRequest(JSON.parse(line) as Record<string, unknown>);
+        const request = inlinedBatchRequest(parseJsonObject(JSON.parse(line)));
         requests.push(modelOverride === undefined ? request : { ...request, model: modelOverride });
       }
       const model = modelOverride ?? requests.find((request) => request.model !== undefined)?.model;
       if (model === undefined || model.length === 0) {
-        throw new TypeError("No model was provided in providerOptions or the JSONL request bodies.");
+        throw new TypeError(
+          "No model was provided in providerOptions or the JSONL request bodies.",
+        );
       }
       const config = compactObject({
-        dest: options.dest,
-        displayName: options.displayName,
+        dest: isString(options.dest) ? options.dest : undefined,
+        displayName: isString(options.displayName) ? options.displayName : undefined,
       });
       const response = await this.client.batches.create({
         model,
         src: requests,
-        ...(Object.keys(config).length === 0 ? {} : { config }),
+        ...includeWhen(!(Object.keys(config).length === 0), { config }),
       });
       return normalizeGeminiBatch(response, this.providerName);
     });
   }
 
-  override retrieveBatch(batchId: string, providerOptions: Record<string, unknown> = {}): Promise<Batch> {
+  override retrieveBatch(batchId: string, providerOptions: JsonObject = {}): Promise<Batch> {
     return this.execute(async () => {
-      const response = await this.client.batches.get({ name: batchId, ...providerOptions });
+      const response = await this.client.batches.get({
+        name: batchId,
+        ...providerOptions,
+      });
       return normalizeGeminiBatch(response, this.providerName);
     });
   }
 
-  override cancelBatch(batchId: string, providerOptions: Record<string, unknown> = {}): Promise<Batch> {
+  override cancelBatch(batchId: string, providerOptions: JsonObject = {}): Promise<Batch> {
     return this.execute(async () => {
       await this.client.batches.cancel({ name: batchId, ...providerOptions });
       const response = await this.client.batches.get({ name: batchId });
@@ -1004,11 +951,17 @@ export class GeminiProvider extends BaseProvider {
 
   override retrieveBatchResults(
     batchId: string,
-    providerOptions: Record<string, unknown> = {},
+    providerOptions: JsonObject = {},
   ): Promise<BatchResult> {
     return this.execute(async () => {
-      const job = await this.client.batches.get({ name: batchId, ...providerOptions });
-      if (job.state !== JobState.JOB_STATE_SUCCEEDED && job.state !== JobState.JOB_STATE_PARTIALLY_SUCCEEDED) {
+      const job = await this.client.batches.get({
+        name: batchId,
+        ...providerOptions,
+      });
+      if (
+        job.state !== JobState.JOB_STATE_SUCCEEDED &&
+        job.state !== JobState.JOB_STATE_PARTIALLY_SUCCEEDED
+      ) {
         throw new BatchNotCompleteError(batchId, geminiBatchStatus(job.state), this.providerName);
       }
       if (job.dest?.inlinedResponses === undefined) {
@@ -1019,7 +972,10 @@ export class GeminiProvider extends BaseProvider {
       const results: BatchResult["results"] = job.dest.inlinedResponses.map((entry) => {
         const customId = entry.metadata?.custom_id ?? "";
         if (entry.response !== undefined) {
-          return { customId, result: this.normalizeCompletion(entry.response, job.model ?? "") };
+          return {
+            customId,
+            result: this.normalizeCompletion(entry.response, job.model ?? ""),
+          };
         }
         return {
           customId,
@@ -1033,14 +989,13 @@ export class GeminiProvider extends BaseProvider {
     });
   }
 
-  private completionRequest(
-    params: CompletionParams
-  ): GenerateContentParameters {
+  private completionRequest(params: CompletionParams): GenerateContentParameters {
     const converted = convertMessages(params.messages);
     const tools = convertFunctionTools(params.tools, this.providerName);
     const toolConfig = convertToolChoice(params.toolChoice);
     const thinkingConfig = thinkingConfiguration(params.reasoningEffort, params.model);
     const output = structuredOutput(params.responseFormat);
+    // SAFETY: The provider contract establishes the asserted representation at this boundary.
     const config = compactObject({
       candidateCount: params.n,
       frequencyPenalty: params.frequencyPenalty,
@@ -1050,8 +1005,7 @@ export class GeminiProvider extends BaseProvider {
       responseLogprobs: params.logprobs,
       seed: params.seed,
       serviceTier: params.serviceTier,
-      stopSequences:
-        typeof params.stop === "string" ? [params.stop] : params.stop,
+      stopSequences: isString(params.stop) ? [params.stop] : params.stop,
       systemInstruction: converted.systemInstruction,
       temperature: params.temperature,
       thinkingConfig,
@@ -1063,11 +1017,9 @@ export class GeminiProvider extends BaseProvider {
     }) as GenerateContentConfig;
     const timeout = timeoutMilliseconds(params.timeout);
     if (timeout !== undefined) {
-      const configRecord = config as unknown as Record<string, unknown>;
-      const existing = asRecord(configRecord.httpOptions);
-      configRecord.httpOptions = {
-        ...existing,
-        timeout: existing?.timeout ?? timeout,
+      config.httpOptions = {
+        ...config.httpOptions,
+        timeout: config.httpOptions?.timeout ?? timeout,
       };
     }
 
@@ -1076,17 +1028,14 @@ export class GeminiProvider extends BaseProvider {
 
   private normalizeCompletion(
     response: GenerateContentResponse,
-    requestedModel: string
+    requestedModel: string,
   ): ChatCompletion {
     const choices: ChatCompletion["choices"] = (response.candidates ?? []).map(
       (candidate, candidateIndex) => {
-        const normalized = completionParts(
-          candidate.content?.parts,
-          candidateIndex
-        );
+        const normalized = completionParts(candidate.content?.parts, candidateIndex);
         const finishReason = normalizeFinishReason(
           candidate.finishReason,
-          normalized.toolCalls !== undefined
+          normalized.toolCalls !== undefined,
         );
         return {
           finishReason,
@@ -1094,24 +1043,24 @@ export class GeminiProvider extends BaseProvider {
           message: {
             content: normalized.content,
             role: "assistant" as const,
-            ...(finishReason === "content_filter"
-              ? { refusal: GEMINI_CONTENT_FILTER_REFUSAL }
-              : {}),
-            ...(normalized.messageExtraContent === undefined
-              ? {}
-              : { extraContent: normalized.messageExtraContent }),
-            ...(normalized.reasoning === undefined
-              ? {}
-              : { reasoning: normalized.reasoning }),
-            ...(normalized.toolCalls === undefined
-              ? {}
-              : { toolCalls: normalized.toolCalls }),
+            ...includeWhen(finishReason === "content_filter", {
+              refusal: GEMINI_CONTENT_FILTER_REFUSAL,
+            }),
+            ...includeWhen(!(normalized.messageExtraContent === undefined), {
+              extraContent: normalized.messageExtraContent,
+            }),
+            ...includeWhen(!(normalized.reasoning === undefined), {
+              reasoning: normalized.reasoning,
+            }),
+            ...includeWhen(!(normalized.toolCalls === undefined), {
+              toolCalls: normalized.toolCalls,
+            }),
           },
-          ...(candidate.logprobsResult === undefined
-            ? {}
-            : { logprobs: candidate.logprobsResult }),
+          ...includeWhen(!(candidate.logprobsResult === undefined), {
+            logprobs: candidate.logprobsResult,
+          }),
         };
-      }
+      },
     );
     if (choices.length === 0 && promptWasBlocked(response)) {
       choices.push({
@@ -1135,12 +1084,12 @@ export class GeminiProvider extends BaseProvider {
       object: "chat.completion",
       provider: this.providerName,
       raw: response,
-      ...(usage === undefined ? {} : { usage }),
+      ...includeWhen(!(usage === undefined), { usage }),
     };
   }
 
   private async *normalizeStream(
-    stream: AsyncIterable<GenerateContentResponse>
+    stream: AsyncIterable<GenerateContentResponse>,
   ): AsyncIterable<ChatCompletionChunk> {
     const state: StreamState = {
       created: unixTimestamp(),
@@ -1154,88 +1103,84 @@ export class GeminiProvider extends BaseProvider {
       state.id = response.responseId ?? state.id;
       state.model = response.modelVersion ?? state.model;
       state.created =
-        response.createTime === undefined
-          ? state.created
-          : createdAt(response.createTime);
+        response.createTime === undefined ? state.created : createdAt(response.createTime);
       const promptBlocked = promptWasBlocked(response);
       const candidates = response.candidates ?? [];
-      const choices: ChatCompletionChunk["choices"] =
-        candidates.length === 0
-          ? [
-              {
-                delta: {
-                  ...(state.emittedRoles.has(0) ? {} : { role: "assistant" as const }),
-                  ...(promptBlocked ? { refusal: GEMINI_CONTENT_FILTER_REFUSAL } : {}),
+      const choices: ChatCompletionChunk["choices"] = [];
+      if (candidates.length === 0) {
+        const delta: ChatCompletionChunk["choices"][number]["delta"] = {};
+        if (!state.emittedRoles.has(0)) delta.role = "assistant";
+        if (promptBlocked) delta.refusal = GEMINI_CONTENT_FILTER_REFUSAL;
+        choices.push({
+          delta,
+          finishReason: promptBlocked ? "content_filter" : null,
+          index: 0,
+        });
+        state.emittedRoles.add(0);
+      } else {
+        for (const [candidateIndex, candidate] of candidates.entries()) {
+          const choiceIndex = candidate.index ?? candidateIndex;
+          const delta: ChatCompletionChunk["choices"][number]["delta"] = {};
+          if (!state.emittedRoles.has(choiceIndex)) {
+            delta.role = "assistant";
+            state.emittedRoles.add(choiceIndex);
+          }
+          let content = "";
+          let reasoning = "";
+          let messageSignature: string | undefined;
+          const toolCalls: ToolCallDelta[] = [];
+
+          for (const part of candidate.content?.parts ?? []) {
+            if (part.thought === true) {
+              reasoning += part.text ?? "";
+              continue;
+            }
+            if (part.functionCall !== undefined) {
+              const toolIndex = state.nextToolIndices.get(choiceIndex) ?? 0;
+              state.nextToolIndices.set(choiceIndex, toolIndex + 1);
+              const signature = part.thoughtSignature;
+              toolCalls.push({
+                function: {
+                  arguments: JSON.stringify(part.functionCall.args ?? {}),
+                  name: part.functionCall.name ?? "unknown",
                 },
-                finishReason: promptBlocked ? "content_filter" : null,
-                index: 0,
-              },
-            ]
-          : candidates.map((candidate, candidateIndex) => {
-              const choiceIndex = candidate.index ?? candidateIndex;
-              const delta: ChatCompletionChunk["choices"][number]["delta"] = {};
-              if (!state.emittedRoles.has(choiceIndex)) {
-                delta.role = "assistant";
-                state.emittedRoles.add(choiceIndex);
-              }
-              let content = "";
-              let reasoning = "";
-              let messageSignature: string | undefined;
-              const toolCalls: ToolCallDelta[] = [];
+                id: part.functionCall.id ?? `call_${choiceIndex}_${toolIndex}`,
+                index: toolIndex,
+                type: "function",
+                ...includeWhen(!(signature === undefined), {
+                  extraContent: { google: { thoughtSignature: signature } },
+                }),
+              });
+              continue;
+            }
+            if (isString(part.text)) content += part.text;
+            messageSignature = part.thoughtSignature ?? messageSignature;
+          }
 
-              for (const part of candidate.content?.parts ?? []) {
-                if (part.thought === true) {
-                  reasoning += part.text ?? "";
-                  continue;
-                }
-                if (part.functionCall !== undefined) {
-                  const toolIndex = state.nextToolIndices.get(choiceIndex) ?? 0;
-                  state.nextToolIndices.set(choiceIndex, toolIndex + 1);
-                  const signature = part.thoughtSignature;
-                  toolCalls.push({
-                    function: {
-                      arguments: JSON.stringify(part.functionCall.args ?? {}),
-                      name: part.functionCall.name ?? "unknown",
-                    },
-                    id: part.functionCall.id ?? `call_${choiceIndex}_${toolIndex}`,
-                    index: toolIndex,
-                    type: "function",
-                    ...(signature === undefined
-                      ? {}
-                      : {
-                          extraContent: { google: { thoughtSignature: signature } },
-                        }),
-                  });
-                  continue;
-                }
-                if (typeof part.text === "string") content += part.text;
-                messageSignature = part.thoughtSignature ?? messageSignature;
-              }
-
-              if (content.length > 0) delta.content = content;
-              if (reasoning.length > 0) delta.reasoning = reasoning;
-              if (messageSignature !== undefined) {
-                delta.extraContent = {
-                  google: { thoughtSignature: messageSignature },
-                };
-              }
-              if (toolCalls.length > 0) delta.toolCalls = toolCalls;
-              const mappedFinishReason = promptBlocked
-                ? "content_filter"
-                : normalizeFinishReason(candidate.finishReason, toolCalls.length > 0);
-              if (mappedFinishReason === "content_filter") {
-                delta.refusal = GEMINI_CONTENT_FILTER_REFUSAL;
-              }
-              return {
-                delta,
-                finishReason: mappedFinishReason,
-                index: choiceIndex,
-                ...(candidate.logprobsResult === undefined
-                  ? {}
-                  : { logprobs: candidate.logprobsResult }),
-              };
-            });
-      if (candidates.length === 0) state.emittedRoles.add(0);
+          if (content.length > 0) delta.content = content;
+          if (reasoning.length > 0) delta.reasoning = reasoning;
+          if (messageSignature !== undefined) {
+            delta.extraContent = {
+              google: { thoughtSignature: messageSignature },
+            };
+          }
+          if (toolCalls.length > 0) delta.toolCalls = toolCalls;
+          const mappedFinishReason = promptBlocked
+            ? "content_filter"
+            : normalizeFinishReason(candidate.finishReason, toolCalls.length > 0);
+          if (mappedFinishReason === "content_filter") {
+            delta.refusal = GEMINI_CONTENT_FILTER_REFUSAL;
+          }
+          choices.push({
+            delta,
+            finishReason: mappedFinishReason,
+            index: choiceIndex,
+            ...includeWhen(!(candidate.logprobsResult === undefined), {
+              logprobs: candidate.logprobsResult,
+            }),
+          });
+        }
+      }
 
       const usage = normalizeUsage(response.usageMetadata);
       yield {
@@ -1246,7 +1191,7 @@ export class GeminiProvider extends BaseProvider {
         object: "chat.completion.chunk",
         provider: this.providerName,
         raw: response,
-        ...(usage === undefined ? {} : { usage }),
+        ...includeWhen(!(usage === undefined), { usage }),
       };
     }
   }

@@ -1,4 +1,5 @@
-import type { AnthropicVertex } from "@anthropic-ai/vertex-sdk";
+import { AnthropicVertex } from "@anthropic-ai/vertex-sdk";
+import { JWT } from "google-auth-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -10,7 +11,12 @@ import {
 import type { ChatCompletion } from "../src/types.js";
 
 function fakeVertex(create: ReturnType<typeof vi.fn>): AnthropicVertex {
-  return { messages: { create } } as unknown as AnthropicVertex;
+  return Object.assign(
+    new AnthropicVertex({ authClient: new JWT(), projectId: "test", region: "us-central1" }),
+    {
+      messages: { create },
+    },
+  );
 }
 
 afterEach(() => {
@@ -52,6 +58,7 @@ describe("Vertex AI Anthropic provider", () => {
     });
     const provider = new VertexAIAnthropicProvider({}, fakeVertex(create));
 
+    // SAFETY: This test double implements the provider surface exercised by this test.
     const result = (await provider.completion({
       messages: [
         { content: "You are concise.", role: "system" },
@@ -77,12 +84,8 @@ describe("Vertex AI Anthropic provider", () => {
   it("reports Vertex Anthropic operations that the official SDK omits", async () => {
     const provider = new VertexAIAnthropicProvider({}, fakeVertex(vi.fn()));
 
-    await expect(provider.listModels()).rejects.toBeInstanceOf(
-      UnsupportedOperationError,
-    );
-    await expect(provider.listBatches()).rejects.toBeInstanceOf(
-      UnsupportedOperationError,
-    );
+    await expect(provider.listModels()).rejects.toBeInstanceOf(UnsupportedOperationError);
+    await expect(provider.listBatches()).rejects.toBeInstanceOf(UnsupportedOperationError);
   });
 
   it("is registered as a supported provider", () => {

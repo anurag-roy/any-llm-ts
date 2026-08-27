@@ -1,17 +1,12 @@
-import ModelClient, {
-  isUnexpected,
-  type ModelClientOptions,
-} from "@azure-rest/ai-inference";
-import {
-  AzureKeyCredential,
-  type KeyCredential,
-  type TokenCredential,
-} from "@azure/core-auth";
+import { includeWhen } from "../utils.js";
+import type { JsonValue } from "../types.js";
+import { parseJsonObject, parseJsonValue, parseOptionalJsonObject } from "../utils.js";
+import type { JsonObject } from "../types.js";
+import { isNumber, isObject, isString } from "../utils.js";
+import ModelClient, { isUnexpected, type ModelClientOptions } from "@azure-rest/ai-inference";
+import { AzureKeyCredential, type KeyCredential, type TokenCredential } from "@azure/core-auth";
 
-import {
-  MissingApiKeyError,
-  UnsupportedParameterError,
-} from "../errors.js";
+import { MissingApiKeyError, UnsupportedParameterError } from "../errors.js";
 import type {
   ChatCompletion,
   ChatCompletionChunk,
@@ -39,9 +34,9 @@ import { BaseProvider } from "./base.js";
 import { completeProviderMetadata } from "../provider-metadata.js";
 
 export interface AzureInferenceClientLike {
-  completion(params: Record<string, unknown>): Promise<unknown>;
-  embedding(params: Record<string, unknown>): Promise<unknown>;
-  modelInfo(params?: Record<string, unknown>): Promise<unknown>;
+  completion<Params extends object>(params: Params): Promise<AsyncIterable<JsonValue> | JsonValue>;
+  embedding<Params extends object>(params: Params): Promise<JsonValue | undefined>;
+  modelInfo<Params extends object>(params?: Params): Promise<JsonValue | undefined>;
 }
 
 type AzureSdkOptions = ModelClientOptions & {
@@ -66,12 +61,12 @@ const azureCapabilities: ProviderCapabilities = {
   vision: false,
 };
 
-function errorFromResponse(value: unknown, status: string): Error {
-  const body = value as Record<string, unknown>;
-  const nested = body.error as Record<string, unknown> | undefined;
+function errorFromResponse<Value>(value: Value, status: string): Error {
+  const body = parseJsonObject(value);
+  const nested = parseOptionalJsonObject(body.error);
   const message =
-    (typeof nested?.message === "string" ? nested.message : undefined) ??
-    (typeof body.message === "string" ? body.message : undefined) ??
+    (isString(nested?.message) ? nested.message : undefined) ??
+    (isString(body.message) ? body.message : undefined) ??
     `Azure AI Inference returned HTTP ${status}.`;
   return Object.assign(new Error(message), {
     error: nested,
@@ -79,16 +74,11 @@ function errorFromResponse(value: unknown, status: string): Error {
   });
 }
 
-async function* sseEvents(
-  body: AsyncIterable<string | Uint8Array>,
-): AsyncIterable<unknown> {
+async function* sseEvents(body: AsyncIterable<string | Uint8Array>): AsyncIterable<JsonValue> {
   const decoder = new TextDecoder();
   let buffer = "";
   for await (const chunk of body) {
-    buffer +=
-      typeof chunk === "string"
-        ? chunk
-        : decoder.decode(chunk, { stream: true });
+    buffer += isString(chunk) ? chunk : decoder.decode(chunk, { stream: true });
     const events = buffer.split(/\r?\n\r?\n/u);
     buffer = events.pop() ?? "";
     for (const event of events) {
@@ -96,7 +86,7 @@ async function* sseEvents(
         if (!line.startsWith("data:")) continue;
         const data = line.slice(5).trim();
         if (data.length > 0 && data !== "[DONE]") {
-          yield JSON.parse(data) as unknown;
+          yield parseJsonValue(JSON.parse(data), "Azure stream event");
         }
       }
     }
@@ -105,7 +95,7 @@ async function* sseEvents(
   if (trailing.startsWith("data:")) {
     const data = trailing.slice(5).trim();
     if (data.length > 0 && data !== "[DONE]") {
-      yield JSON.parse(data) as unknown;
+      yield parseJsonValue(JSON.parse(data), "Azure stream event");
     }
   }
 }
@@ -121,12 +111,15 @@ class AzureRestInferenceClient implements AzureInferenceClientLike {
     this.client = ModelClient(endpoint, credential, options);
   }
 
-  async completion(params: Record<string, unknown>): Promise<unknown> {
+  async completion<Params extends object>(
+    params: Params,
+  ): Promise<AsyncIterable<JsonValue> | JsonValue> {
+    // SAFETY: The provider contract establishes the asserted representation at this boundary.
     const method = this.client.path("/chat/completions").post({
       body: params,
       headers: { "extra-parameters": "pass-through" },
     } as never);
-    if (params.stream === true) {
+    if ("stream" in params && params.stream === true) {
       const response = await method.asNodeStream();
       if (response.status !== "200") {
         throw errorFromResponse({}, response.status);
@@ -141,10 +134,11 @@ class AzureRestInferenceClient implements AzureInferenceClientLike {
     if (isUnexpected(response)) {
       throw errorFromResponse(response.body, response.status);
     }
-    return response.body;
+    return parseJsonObject(response.body, "Azure completion response");
   }
 
-  async embedding(params: Record<string, unknown>): Promise<unknown> {
+  async embedding<Params extends object>(params: Params): Promise<JsonValue> {
+    // SAFETY: The provider contract establishes the asserted representation at this boundary.
     const response = await this.client.path("/embeddings").post({
       body: params,
       headers: { "extra-parameters": "pass-through" },
@@ -152,49 +146,49 @@ class AzureRestInferenceClient implements AzureInferenceClientLike {
     if (isUnexpected(response)) {
       throw errorFromResponse(response.body, response.status);
     }
-    return response.body;
+    return parseJsonObject(response.body, "Azure embedding response");
   }
 
-  async modelInfo(params: Record<string, unknown> = {}): Promise<unknown> {
-    const response = await this.client.path("/info").get(params);
+  async modelInfo<Params extends object>(params?: Params): Promise<JsonValue> {
+    // SAFETY: The Azure client accepts the caller's model-info request options.
+    const response = await this.client.path("/info").get(params ?? {});
     if (isUnexpected(response)) {
       throw errorFromResponse(response.body, response.status);
     }
-    return response.body;
+    return parseJsonObject(response.body, "Azure model info response");
   }
 }
 
 function createAzureClient(options: ProviderOptions): AzureInferenceClientLike {
-  const endpoint =
-    options.apiBase ?? getEnvironmentVariable("AZURE_AI_CHAT_ENDPOINT");
+  const endpoint = options.apiBase ?? getEnvironmentVariable("AZURE_AI_CHAT_ENDPOINT");
   if (endpoint === undefined) {
     throw new TypeError(
       "Azure requires apiBase or AZURE_AI_CHAT_ENDPOINT (for example, https://<deployment>.<region>.models.ai.azure.com).",
     );
   }
 
+  // SAFETY: The provider contract establishes the asserted representation at this boundary.
+  // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- TypeScript needs the SDK owner type after spreading generic JSON options.
   const { credential: configuredCredential, ...sdkOptions } = {
-    ...(options.clientOptions as AzureSdkOptions | undefined),
-  };
+    ...options.clientOptions,
+  } as AzureSdkOptions;
   const apiKey = options.apiKey ?? getEnvironmentVariable("AZURE_API_KEY");
   const credential =
-    configuredCredential ??
-    (apiKey === undefined ? undefined : new AzureKeyCredential(apiKey));
+    configuredCredential ?? (apiKey === undefined ? undefined : new AzureKeyCredential(apiKey));
   if (credential === undefined) {
     throw new MissingApiKeyError("azure", "AZURE_API_KEY");
   }
   return new AzureRestInferenceClient(endpoint, credential, sdkOptions);
 }
 
-function messageBody(message: ChatMessage): Record<string, unknown> {
+function messageBody(message: ChatMessage) {
   return compactObject({
     content:
       message.content === null
         ? undefined
         : Array.isArray(message.content)
           ? message.content.map((part) =>
-              part.type === "image_url" &&
-              typeof part.image_url === "string"
+              part.type === "image_url" && isString(part.image_url)
                 ? { ...part, image_url: { url: part.image_url } }
                 : part,
             )
@@ -202,37 +196,34 @@ function messageBody(message: ChatMessage): Record<string, unknown> {
     name: message.name,
     role: message.role,
     tool_call_id: message.toolCallId,
-    tool_calls: message.toolCalls?.map(({ extraContent: _extra, ...toolCall }) =>
-      toolCall,
-    ),
+    tool_calls: message.toolCalls?.map(({ extraContent: _extra, ...toolCall }) => toolCall),
   });
 }
 
-function responseFormat(value: Record<string, unknown> | undefined): unknown {
+function responseFormat(value: JsonObject | undefined): JsonValue | undefined {
   if (value === undefined) return undefined;
   if (value.type !== "json_schema") {
-    throw new TypeError(
-      "Azure structured output requires responseFormat.type to be json_schema.",
-    );
+    throw new TypeError("Azure structured output requires responseFormat.type to be json_schema.");
   }
   const jsonSchema = value.json_schema;
-  if (typeof jsonSchema !== "object" || jsonSchema === null) {
+  if (!isObject(jsonSchema)) {
     throw new TypeError("responseFormat.json_schema must be an object.");
   }
-  const schema = (jsonSchema as Record<string, unknown>).schema;
-  if (typeof schema !== "object" || schema === null) {
+  const jsonSchemaObject: JsonObject = parseJsonObject(jsonSchema);
+  const schema = jsonSchemaObject.schema;
+  if (!isObject(schema)) {
     throw new TypeError("responseFormat.json_schema.schema must be an object.");
   }
   return {
     json_schema: {
-      ...(jsonSchema as Record<string, unknown>),
-      strict: (jsonSchema as Record<string, unknown>).strict ?? true,
+      ...jsonSchemaObject,
+      strict: jsonSchemaObject.strict ?? true,
     },
     type: "json_schema",
   };
 }
 
-function completionRequest(params: CompletionParams): Record<string, unknown> {
+function completionRequest(params: CompletionParams) {
   const format = responseFormat(params.responseFormat);
   const reasoningEffort =
     params.reasoningEffort === "auto" || params.reasoningEffort === "none"
@@ -251,7 +242,7 @@ function completionRequest(params: CompletionParams): Record<string, unknown> {
     reasoning_effort: reasoningEffort,
     response_format: format,
     seed: params.seed,
-    stop: typeof params.stop === "string" ? [params.stop] : params.stop,
+    stop: isString(params.stop) ? [params.stop] : params.stop,
     stream: params.stream,
     temperature: params.temperature,
     tool_choice: params.toolChoice,
@@ -263,7 +254,7 @@ function completionRequest(params: CompletionParams): Record<string, unknown> {
   });
 }
 
-function finishReason(value: unknown): FinishReason {
+function finishReason(value: JsonValue | undefined): FinishReason {
   return value === "stop" ||
     value === "length" ||
     value === "tool_calls" ||
@@ -273,9 +264,9 @@ function finishReason(value: unknown): FinishReason {
     : null;
 }
 
-function usage(value: unknown): CompletionUsage | undefined {
-  if (typeof value !== "object" || value === null) return undefined;
-  const raw = value as Record<string, unknown>;
+function usage(value: JsonValue | undefined): CompletionUsage | undefined {
+  if (!isObject(value)) return undefined;
+  const raw = parseJsonObject(value);
   return {
     completionTokens: Number(raw.completion_tokens ?? 0),
     promptTokens: Number(raw.prompt_tokens ?? 0),
@@ -283,18 +274,17 @@ function usage(value: unknown): CompletionUsage | undefined {
   };
 }
 
-function normalizedToolCalls(value: unknown): ToolCall[] | undefined {
+function normalizedToolCalls(value: JsonValue | undefined): ToolCall[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const calls = value.flatMap((entry): ToolCall[] => {
-    const call = entry as Record<string, unknown>;
-    const fn = call.function as Record<string, unknown> | undefined;
-    return typeof call.id === "string" && fn !== undefined
+    const call = parseJsonObject(entry);
+    const fn = parseOptionalJsonObject(call.function);
+    return isString(call.id) && fn !== undefined
       ? [
           {
             function: {
-              arguments:
-                typeof fn.arguments === "string" ? fn.arguments : "",
-              name: typeof fn.name === "string" ? fn.name : "",
+              arguments: isString(fn.arguments) ? fn.arguments : "",
+              name: isString(fn.name) ? fn.name : "",
             },
             id: call.id,
             type: "function",
@@ -305,100 +295,83 @@ function normalizedToolCalls(value: unknown): ToolCall[] | undefined {
   return calls.length === 0 ? undefined : calls;
 }
 
-function normalizeCompletion(value: unknown): ChatCompletion {
-  const response = value as Record<string, unknown>;
+function normalizeCompletion(value: JsonValue | undefined): ChatCompletion {
+  const response = parseJsonObject(value);
   const rawChoices = Array.isArray(response.choices) ? response.choices : [];
   const normalizedUsage = usage(response.usage);
   return {
     choices: rawChoices.map((entry, choiceIndex) => {
-      const choice = entry as Record<string, unknown>;
-      const message = (choice.message ?? {}) as Record<string, unknown>;
+      const choice = parseJsonObject(entry);
+      const message = parseJsonObject(choice.message ?? {});
       const toolCalls = normalizedToolCalls(message.tool_calls);
       return {
         finishReason: finishReason(choice.finish_reason),
-        index:
-          typeof choice.index === "number" ? choice.index : choiceIndex,
+        index: isNumber(choice.index) ? choice.index : choiceIndex,
         message: {
-          content:
-            typeof message.content === "string" ? message.content : null,
+          content: isString(message.content) ? message.content : null,
           role: "assistant",
-          ...(toolCalls === undefined ? {} : { toolCalls }),
+          ...includeWhen(!(toolCalls === undefined), { toolCalls }),
         },
       };
     }),
-    created:
-      typeof response.created === "number"
-        ? response.created
-        : unixTimestamp(),
-    id: typeof response.id === "string" ? response.id : "azure-response",
-    model: typeof response.model === "string" ? response.model : "unknown",
+    created: isNumber(response.created) ? response.created : unixTimestamp(),
+    id: isString(response.id) ? response.id : "azure-response",
+    model: isString(response.model) ? response.model : "unknown",
     object: "chat.completion",
     provider: "azure",
     raw: value,
-    ...(normalizedUsage === undefined ? {} : { usage: normalizedUsage }),
+    ...includeWhen(!(normalizedUsage === undefined), { usage: normalizedUsage }),
   };
 }
 
-function normalizeChunk(value: unknown): ChatCompletionChunk {
-  const response = value as Record<string, unknown>;
+function normalizeChunk(value: JsonValue | undefined): ChatCompletionChunk {
+  const response = parseJsonObject(value);
   const rawChoices = Array.isArray(response.choices) ? response.choices : [];
   const normalizedUsage = usage(response.usage);
   return {
     choices: rawChoices.map((entry, choiceIndex) => {
-      const choice = entry as Record<string, unknown>;
-      const delta = (choice.delta ?? {}) as Record<string, unknown>;
-      const rawToolCalls = Array.isArray(delta.tool_calls)
-        ? delta.tool_calls
-        : [];
+      const choice = parseJsonObject(entry);
+      const delta = parseJsonObject(choice.delta ?? {});
+      const rawToolCalls = Array.isArray(delta.tool_calls) ? delta.tool_calls : [];
       const toolCalls: ToolCallDelta[] = rawToolCalls.map((raw, toolIndex) => {
-        const call = raw as Record<string, unknown>;
-        const fn = (call.function ?? {}) as Record<string, unknown>;
-        return {
-          function: {
-            ...(typeof fn.arguments === "string"
-              ? { arguments: fn.arguments }
-              : {}),
-            ...(typeof fn.name === "string" ? { name: fn.name } : {}),
-          },
-          index:
-            typeof call.index === "number" ? call.index : toolIndex,
-          ...(typeof call.id === "string" ? { id: call.id } : {}),
-          ...(call.type === "function" ? { type: "function" as const } : {}),
+        const call = parseJsonObject(raw);
+        const fn = parseJsonObject(call.function ?? {});
+        const functionDelta: ToolCallDelta["function"] = {};
+        if (isString(fn.arguments)) functionDelta.arguments = fn.arguments;
+        if (isString(fn.name)) functionDelta.name = fn.name;
+        const toolCall: ToolCallDelta = {
+          function: functionDelta,
+          index: isNumber(call.index) ? call.index : toolIndex,
         };
+        if (isString(call.id)) toolCall.id = call.id;
+        if (call.type === "function") toolCall.type = "function";
+        return toolCall;
       });
+      const normalizedDelta: ChatCompletionChunk["choices"][number]["delta"] = {};
+      if (isString(delta.content)) normalizedDelta.content = delta.content;
+      if (delta.role === "assistant") normalizedDelta.role = "assistant";
+      if (toolCalls.length > 0) normalizedDelta.toolCalls = toolCalls;
       return {
-        delta: {
-          ...(typeof delta.content === "string"
-            ? { content: delta.content }
-            : {}),
-          ...(delta.role === "assistant" ? { role: "assistant" as const } : {}),
-          ...(toolCalls.length === 0 ? {} : { toolCalls }),
-        },
+        delta: normalizedDelta,
         finishReason: finishReason(choice.finish_reason),
-        index:
-          typeof choice.index === "number" ? choice.index : choiceIndex,
+        index: isNumber(choice.index) ? choice.index : choiceIndex,
       };
     }),
-    created:
-      typeof response.created === "number"
-        ? response.created
-        : unixTimestamp(),
-    id: typeof response.id === "string" ? response.id : "azure-stream",
-    model: typeof response.model === "string" ? response.model : "unknown",
+    created: isNumber(response.created) ? response.created : unixTimestamp(),
+    id: isString(response.id) ? response.id : "azure-stream",
+    model: isString(response.model) ? response.model : "unknown",
     object: "chat.completion.chunk",
     provider: "azure",
     raw: value,
-    ...(normalizedUsage === undefined ? {} : { usage: normalizedUsage }),
+    ...includeWhen(!(normalizedUsage === undefined), { usage: normalizedUsage }),
   };
 }
 
 function stringEmbedding(value: string): number[] {
   try {
+    // SAFETY: The provider contract establishes the asserted representation at this boundary.
     const parsed = JSON.parse(value) as unknown;
-    return Array.isArray(parsed) &&
-      parsed.every((entry) => typeof entry === "number")
-      ? parsed
-      : [];
+    return Array.isArray(parsed) && parsed.every((entry) => isNumber(entry)) ? parsed : [];
   } catch {
     return [];
   }
@@ -409,13 +382,9 @@ export class AzureProvider extends BaseProvider {
   readonly metadata: ProviderMetadata;
   private readonly client: AzureInferenceClientLike;
 
-  constructor(
-    options: ProviderOptions = {},
-    client?: AzureInferenceClientLike,
-  ) {
+  constructor(options: ProviderOptions = {}, client?: AzureInferenceClientLike) {
     super();
-    const apiBase =
-      options.apiBase ?? getEnvironmentVariable("AZURE_AI_CHAT_ENDPOINT");
+    const apiBase = options.apiBase ?? getEnvironmentVariable("AZURE_AI_CHAT_ENDPOINT");
     this.client = client ?? createAzureClient(options);
     this.metadata = completeProviderMetadata({
       capabilities: { ...azureCapabilities },
@@ -425,7 +394,7 @@ export class AzureProvider extends BaseProvider {
       envApiKey: "AZURE_API_KEY",
       name: "azure",
       requiresApiKey: true,
-      ...(apiBase === undefined ? {} : { apiBase }),
+      ...includeWhen(!(apiBase === undefined), { apiBase }),
     });
   }
 
@@ -453,47 +422,40 @@ export class AzureProvider extends BaseProvider {
 
   override embedding(params: EmbeddingParams): Promise<EmbeddingResponse> {
     const input = params.input;
-    if (
-      typeof input !== "string" &&
-      !(Array.isArray(input) && input.every((value) => typeof value === "string"))
-    ) {
+    if (!isString(input) && !(Array.isArray(input) && input.every((value) => isString(value)))) {
       return Promise.reject(
-        new TypeError(
-          "Azure embeddings require a string or an array of strings.",
-        ),
+        new TypeError("Azure embeddings require a string or an array of strings."),
       );
     }
-    const texts = typeof input === "string" ? [input] : input;
+    const texts = isString(input) ? [input] : input;
     return this.execute(async () => {
-      const response = (await this.client.embedding(
-        compactObject({
-          dimensions: params.dimensions,
-          encoding_format: params.encodingFormat,
-          input: texts,
-          model: params.model,
-          ...params.providerOptions,
-        }),
-      )) as Record<string, unknown>;
+      const response = parseJsonObject(
+        await this.client.embedding(
+          compactObject({
+            dimensions: params.dimensions,
+            encoding_format: params.encodingFormat,
+            input: texts,
+            model: params.model,
+            ...params.providerOptions,
+          }),
+        ),
+      );
       const rawData = Array.isArray(response.data) ? response.data : [];
-      const rawUsage = (response.usage ?? {}) as Record<string, unknown>;
+      const rawUsage = parseJsonObject(response.usage ?? {});
       return {
         data: rawData.map((entry, index) => {
-          const item = entry as Record<string, unknown>;
+          const item = parseJsonObject(entry);
           return {
-            embedding:
-              typeof item.embedding === "string"
-                ? stringEmbedding(item.embedding)
-                : Array.isArray(item.embedding)
-                  ? item.embedding.filter(
-                      (number): number is number => typeof number === "number",
-                    )
-                  : [],
-            index: typeof item.index === "number" ? item.index : index,
+            embedding: isString(item.embedding)
+              ? stringEmbedding(item.embedding)
+              : Array.isArray(item.embedding)
+                ? item.embedding.filter((number): number is number => isNumber(number))
+                : [],
+            index: isNumber(item.index) ? item.index : index,
             object: "embedding" as const,
           };
         }),
-        model:
-          typeof response.model === "string" ? response.model : params.model,
+        model: isString(response.model) ? response.model : params.model,
         object: "list",
         provider: "azure",
         raw: response,
@@ -505,18 +467,20 @@ export class AzureProvider extends BaseProvider {
     });
   }
 
-  override listModels(providerOptions: Record<string, unknown> = {}): Promise<Model[]> {
+  override listModels(providerOptions: JsonObject = {}): Promise<Model[]> {
     return this.execute(async () => {
-      const response = await this.client.modelInfo(providerOptions) as Record<string, unknown>;
+      const response = parseJsonObject(await this.client.modelInfo(providerOptions));
       const id = response.model_name ?? response.modelName;
       const ownedBy = response.model_provider_name ?? response.modelProviderName;
-      return [{
-        created: 0,
-        id: typeof id === "string" ? id : "unknown",
-        object: "model",
-        ownedBy: typeof ownedBy === "string" ? ownedBy : "azure",
-        raw: response,
-      }];
+      return [
+        {
+          created: 0,
+          id: isString(id) ? id : "unknown",
+          object: "model",
+          ownedBy: isString(ownedBy) ? ownedBy : "azure",
+          raw: response,
+        },
+      ];
     });
   }
 }

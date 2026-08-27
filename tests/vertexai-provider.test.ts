@@ -1,28 +1,10 @@
-import type { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  AnyLLM,
-  MissingApiKeyError,
-  VertexAIProvider,
-} from "../src/index.js";
+import { AnyLLM, MissingApiKeyError, VertexAIProvider } from "../src/index.js";
 import type { ChatCompletion } from "../src/types.js";
 
-function fakeVertexAI(): {
-  batches: {
-    cancel: ReturnType<typeof vi.fn>;
-    create: ReturnType<typeof vi.fn>;
-    get: ReturnType<typeof vi.fn>;
-    list: ReturnType<typeof vi.fn>;
-  };
-  client: GoogleGenAI;
-  models: {
-    embedContent: ReturnType<typeof vi.fn>;
-    generateContent: ReturnType<typeof vi.fn>;
-    generateContentStream: ReturnType<typeof vi.fn>;
-    list: ReturnType<typeof vi.fn>;
-  };
-} {
+function fakeVertexAI() {
   const batches = {
     cancel: vi.fn(),
     create: vi.fn(),
@@ -35,9 +17,10 @@ function fakeVertexAI(): {
     generateContentStream: vi.fn(),
     list: vi.fn(),
   };
+  // SAFETY: This test double implements the provider surface exercised by this test.
   return {
     batches,
-    client: { batches, models } as unknown as GoogleGenAI,
+    client: Object.assign(new GoogleGenAI({ apiKey: "test" }), { batches, models }),
     models,
   };
 }
@@ -88,6 +71,7 @@ describe("Vertex AI provider", () => {
     });
     const provider = new VertexAIProvider({}, sdk.client);
 
+    // SAFETY: This test double implements the provider surface exercised by this test.
     const result = (await provider.completion({
       messages: [{ content: "Hello", role: "user" }],
       model: "gemini-2.5-flash",
@@ -113,7 +97,9 @@ describe("Vertex AI provider", () => {
 
   it("labels embedding and batch results with the Vertex AI provider", async () => {
     const sdk = fakeVertexAI();
-    sdk.models.embedContent.mockResolvedValue({ embeddings: [{ values: [0.1, 0.2] }] });
+    sdk.models.embedContent.mockResolvedValue({
+      embeddings: [{ values: [0.1, 0.2] }],
+    });
     sdk.batches.get.mockResolvedValue({
       createTime: "2026-01-01T00:00:00Z",
       name: "projects/p/locations/l/batchPredictionJobs/1",

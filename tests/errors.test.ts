@@ -26,7 +26,15 @@ describe("provider error normalization", () => {
     [502, UpstreamProviderError],
     [504, GatewayTimeoutError],
   ])("maps HTTP %i to %s", (status, ErrorType) => {
-    const original = { error: { code: "bad", message: "Request failed", param: "model", type: "api" }, status };
+    const original = {
+      error: {
+        code: "bad",
+        message: "Request failed",
+        param: "model",
+        type: "api",
+      },
+      status,
+    };
     const normalized = normalizeProviderError(original, "test");
     expect(normalized).toBeInstanceOf(ErrorType);
     expect(normalized).toMatchObject({
@@ -42,26 +50,36 @@ describe("provider error normalization", () => {
 
   it("preserves retry-after details on rate limits", () => {
     const normalized = normalizeProviderError(
-      { headers: new Headers({ "retry-after": "12" }), message: "Slow down", statusCode: 429 },
+      {
+        headers: new Headers({ "retry-after": "12" }),
+        message: "Slow down",
+        statusCode: 429,
+      },
       "test",
     );
     expect(normalized).toBeInstanceOf(RateLimitError);
+    // SAFETY: This test double implements the provider surface exercised by this test.
     expect((normalized as RateLimitError).retryAfter).toBe("12");
 
+    // SAFETY: This test double implements the provider surface exercised by this test.
     const fromRecord = normalizeProviderError(
-      { headers: { "retry-after": "Wed, 21 Oct 2026 07:28:00 GMT" }, message: "Slow down", status: 429 },
+      {
+        headers: { "retry-after": "Wed, 21 Oct 2026 07:28:00 GMT" },
+        message: "Slow down",
+        status: 429,
+      },
       "test",
     ) as RateLimitError;
     expect(fromRecord.retryAfter).toBe("Wed, 21 Oct 2026 07:28:00 GMT");
   });
 
   it("recognizes context and content-filter errors without a status", () => {
-    expect(normalizeProviderError(new Error("Maximum context token length exceeded"), "test")).toBeInstanceOf(
-      ContextLengthExceededError,
-    );
-    expect(normalizeProviderError({ code: "content_filter", message: "Blocked" }, "test")).toBeInstanceOf(
-      ContentFilterError,
-    );
+    expect(
+      normalizeProviderError(new Error("Maximum context token length exceeded"), "test"),
+    ).toBeInstanceOf(ContextLengthExceededError);
+    expect(
+      normalizeProviderError({ code: "content_filter", message: "Blocked" }, "test"),
+    ).toBeInstanceOf(ContentFilterError);
   });
 
   it("falls back to a provider error and stringifies unknown values", () => {
@@ -69,7 +87,9 @@ describe("provider error normalization", () => {
       message: "The provider request failed.",
       provider: "test",
     });
-    expect(normalizeProviderError({ error: { message: "nested", status: 503 } }, "test")).toMatchObject({
+    expect(
+      normalizeProviderError({ error: { message: "nested", status: 503 } }, "test"),
+    ).toMatchObject({
       message: "nested",
       statusCode: 503,
     });

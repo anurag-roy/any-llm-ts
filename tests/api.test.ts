@@ -71,19 +71,47 @@ const metadata: ProviderMetadata = {
 class ApiProvider extends BaseProvider {
   readonly metadata = metadata;
 
-  override completion(_params: CompletionParams): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion> {
+  override completion(
+    _params: CompletionParams,
+  ): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion> {
     throw new Error("not used");
   }
 
-  override responses(params: ResponsesParams): Promise<AsyncIterable<ResponseStreamEvent> | Response> {
+  override responses(
+    params: ResponsesParams,
+  ): Promise<AsyncIterable<ResponseStreamEvent> | Response> {
     if (params.stream === true) {
       return Promise.resolve(
         (async function* () {
-          yield { model: params.model, type: "delta" } as unknown as ResponseStreamEvent;
+          yield {
+            content_index: 0,
+            delta: "delta",
+            item_id: "item-1",
+            logprobs: [],
+            output_index: 0,
+            sequence_number: 1,
+            type: "response.output_text.delta",
+          } satisfies ResponseStreamEvent;
         })(),
       );
     }
-    return Promise.resolve({ input: params.input, model: params.model } as unknown as Response);
+    return Promise.resolve({
+      created_at: 1,
+      error: null,
+      id: "response-1",
+      incomplete_details: null,
+      instructions: null,
+      metadata: null,
+      model: params.model,
+      object: "response",
+      output: [],
+      output_text: "",
+      parallel_tool_calls: false,
+      temperature: null,
+      tool_choice: "auto",
+      tools: [],
+      top_p: null,
+    } satisfies Response);
   }
 
   override embedding(params: EmbeddingParams): Promise<EmbeddingResponse> {
@@ -101,7 +129,11 @@ class ApiProvider extends BaseProvider {
   }
 
   override imageGeneration(params: ImageGenerationParams): Promise<ImageGenerationResponse> {
-    return Promise.resolve({ created: 1, data: [{ revisedPrompt: params.prompt }], provider: "api-fake" });
+    return Promise.resolve({
+      created: 1,
+      data: [{ revisedPrompt: params.prompt }],
+      provider: "api-fake",
+    });
   }
 
   override transcription(_params: TranscriptionParams): Promise<Transcription> {
@@ -137,7 +169,12 @@ class ApiProvider extends BaseProvider {
   }
 
   override rerank(params: RerankParams): Promise<RerankResponse> {
-    return Promise.resolve({ results: params.documents.map((_, index) => ({ index, relevanceScore: 1 - index / 10 })) });
+    return Promise.resolve({
+      results: params.documents.map((_, index) => ({
+        index,
+        relevanceScore: 1 - index / 10,
+      })),
+    });
   }
 
   private batch(id: string, overrides: Partial<Batch> = {}): Batch {
@@ -155,7 +192,10 @@ class ApiProvider extends BaseProvider {
 }
 
 beforeAll(() => {
-  registerProvider("api-fake", () => new ApiProvider(), { metadata, override: true });
+  registerProvider("api-fake", () => new ApiProvider(), {
+    metadata,
+    override: true,
+  });
 });
 
 describe("stateless operation helpers", () => {
@@ -168,14 +208,29 @@ describe("stateless operation helpers", () => {
         input: "hello",
         model: "api-fake:model",
       }),
-    ).resolves.toEqual({
-      input: "hello",
+    ).resolves.toMatchObject({
+      id: "response-1",
       model: "model",
     });
-    const stream = await responses({ input: "hello", model: "model", provider: "api-fake", stream: true });
+    const stream = await responses({
+      input: "hello",
+      model: "model",
+      provider: "api-fake",
+      stream: true,
+    });
     const values = [];
     for await (const value of stream) values.push(value);
-    expect(values).toEqual([{ model: "model", type: "delta" }]);
+    expect(values).toEqual([
+      {
+        content_index: 0,
+        delta: "delta",
+        item_id: "item-1",
+        logprobs: [],
+        output_index: 0,
+        sequence_number: 1,
+        type: "response.output_text.delta",
+      },
+    ]);
   });
 
   it("delegates embeddings and image generation", async () => {
@@ -184,7 +239,11 @@ describe("stateless operation helpers", () => {
       provider: "api-fake",
     });
     await expect(
-      imageGeneration({ model: "image", prompt: "a fox", provider: "api-fake" }),
+      imageGeneration({
+        model: "image",
+        prompt: "a fox",
+        provider: "api-fake",
+      }),
     ).resolves.toMatchObject({ data: [{ revisedPrompt: "a fox" }] });
   });
 
@@ -192,9 +251,14 @@ describe("stateless operation helpers", () => {
     await expect(
       transcription({ file: new Blob(), model: "audio", provider: "api-fake" }),
     ).resolves.toMatchObject({ text: "transcribed" });
-    await expect(speech({ input: "hi", model: "tts", provider: "api-fake", voice: "voice" })).resolves.toEqual(
-      new TextEncoder().encode("hi"),
-    );
+    await expect(
+      speech({
+        input: "hi",
+        model: "tts",
+        provider: "api-fake",
+        voice: "voice",
+      }),
+    ).resolves.toEqual(new TextEncoder().encode("hi"));
   });
 
   it("delegates moderation and model listing", async () => {
@@ -213,8 +277,13 @@ describe("stateless operation helpers", () => {
         inputFilePath: "input.jsonl",
         provider: "api-fake",
       }),
-    ).resolves.toMatchObject({ endpoint: "/v1/chat/completions", id: "batch-created" });
-    await expect(retrieveBatch({ batchId: "batch-1", provider: "api-fake" })).resolves.toMatchObject({
+    ).resolves.toMatchObject({
+      endpoint: "/v1/chat/completions",
+      id: "batch-created",
+    });
+    await expect(
+      retrieveBatch({ batchId: "batch-1", provider: "api-fake" }),
+    ).resolves.toMatchObject({
       id: "batch-1",
     });
     await expect(cancelBatch({ batchId: "batch-1", provider: "api-fake" })).resolves.toMatchObject({
@@ -223,14 +292,21 @@ describe("stateless operation helpers", () => {
     await expect(listBatches({ limit: 1, provider: "api-fake" })).resolves.toMatchObject([
       { id: "batch-listed" },
     ]);
-    await expect(retrieveBatchResults({ batchId: "batch-1", provider: "api-fake" })).resolves.toEqual({
+    await expect(
+      retrieveBatchResults({ batchId: "batch-1", provider: "api-fake" }),
+    ).resolves.toEqual({
       results: [{ customId: "request-1" }],
     });
   });
 
   it("delegates reranking and resolves provider-prefixed models", async () => {
     await expect(
-      rerank({ documents: ["a", "b"], model: "api-fake:rerank-model", query: "query", topN: 1 }),
+      rerank({
+        documents: ["a", "b"],
+        model: "api-fake:rerank-model",
+        query: "query",
+        topN: 1,
+      }),
     ).resolves.toEqual({
       results: [
         { index: 0, relevanceScore: 1 },

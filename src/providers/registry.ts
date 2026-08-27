@@ -1,9 +1,7 @@
+import { includeWhen } from "../utils.js";
 import { UnsupportedProviderError } from "../errors.js";
 import type { ProviderCapabilities, ProviderMetadata, ProviderOptions } from "../types.js";
-import {
-  providerPromptCacheKeySupport,
-  providerTier,
-} from "../provider-metadata.js";
+import { providerPromptCacheKeySupport, providerTier } from "../provider-metadata.js";
 import { AnthropicProvider } from "./anthropic.js";
 import { AzureProvider } from "./azure.js";
 import { AzureAnthropicProvider } from "./azureanthropic.js";
@@ -97,22 +95,39 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
   },
   {
     apiBase: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    capabilities: capabilities({ embedding: true, moderation: true, pdfInput: true, vision: true }),
-    documentationUrl: "https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope",
+    capabilities: capabilities({
+      embedding: true,
+      moderation: true,
+      pdfInput: true,
+      vision: true,
+    }),
+    documentationUrl:
+      "https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope",
     envApiBase: "DASHSCOPE_API_BASE",
     envApiKey: "DASHSCOPE_API_KEY",
     name: "dashscope",
   },
   {
-    capabilities: capabilities({ embedding: true, listModels: false, moderation: true, reasoning: true }),
-    documentationUrl: "https://docs.databricks.com/aws/en/machine-learning/model-serving/score-foundation-models",
+    capabilities: capabilities({
+      embedding: true,
+      listModels: false,
+      moderation: true,
+      reasoning: true,
+    }),
+    documentationUrl:
+      "https://docs.databricks.com/aws/en/machine-learning/model-serving/score-foundation-models",
     envApiBase: "DATABRICKS_HOST",
     envApiKey: "DATABRICKS_TOKEN",
     name: "databricks",
   },
   {
     apiBase: "https://api.deepinfra.com/v1/openai",
-    capabilities: capabilities({ embedding: true, moderation: true, reasoning: true, vision: true }),
+    capabilities: capabilities({
+      embedding: true,
+      moderation: true,
+      reasoning: true,
+      vision: true,
+    }),
     documentationUrl: "https://deepinfra.com/docs/openai_api",
     envApiBase: "DEEPINFRA_API_BASE",
     envApiKey: "DEEPINFRA_API_KEY",
@@ -132,7 +147,12 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
   },
   {
     apiBase: "https://api.edenai.run/v3",
-    capabilities: capabilities({ embedding: true, moderation: true, pdfInput: true, vision: true }),
+    capabilities: capabilities({
+      embedding: true,
+      moderation: true,
+      pdfInput: true,
+      vision: true,
+    }),
     documentationUrl: "https://docs.edenai.co/",
     envApiBase: "EDENAI_API_BASE",
     envApiKey: "EDENAI_API_KEY",
@@ -141,7 +161,12 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
   },
   {
     apiBase: "https://api.fireworks.ai/inference/v1",
-    capabilities: capabilities({ moderation: true, reasoning: true, responses: true, vision: true }),
+    capabilities: capabilities({
+      moderation: true,
+      reasoning: true,
+      responses: true,
+      vision: true,
+    }),
     documentationUrl: "https://docs.fireworks.ai/api-reference/introduction",
     envApiBase: "FIREWORKS_API_BASE",
     envApiKey: "FIREWORKS_API_KEY",
@@ -196,7 +221,12 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
   },
   {
     apiBase: "http://127.0.0.1:8080/v1",
-    capabilities: capabilities({ embedding: true, moderation: true, reasoning: true, vision: true }),
+    capabilities: capabilities({
+      embedding: true,
+      moderation: true,
+      reasoning: true,
+      vision: true,
+    }),
     documentationUrl: "https://github.com/ggml-org/llama.cpp",
     envApiBase: "LLAMACPP_API_BASE",
     name: "llamacpp",
@@ -204,7 +234,11 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
   },
   {
     apiBase: "http://127.0.0.1:8080/v1",
-    capabilities: capabilities({ moderation: true, reasoning: true, streaming: false }),
+    capabilities: capabilities({
+      moderation: true,
+      reasoning: true,
+      streaming: false,
+    }),
     documentationUrl: "https://github.com/Mozilla-Ocho/llamafile",
     envApiBase: "LLAMAFILE_API_BASE",
     name: "llamafile",
@@ -243,7 +277,12 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
   },
   {
     apiBase: "https://platform-api.any-llm.ai/api/v1",
-    capabilities: capabilities({ embedding: true, moderation: true, reasoning: true, vision: true }),
+    capabilities: capabilities({
+      embedding: true,
+      moderation: true,
+      reasoning: true,
+      vision: true,
+    }),
     documentationUrl: "https://any-llm.ai",
     envApiBase: "ANY_LLM_PLATFORM_URL",
     envApiKey: "ANY_LLM_KEY",
@@ -251,7 +290,12 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
   },
   {
     apiBase: "https://api.studio.nebius.ai/v1",
-    capabilities: capabilities({ embedding: true, moderation: true, reasoning: true, vision: true }),
+    capabilities: capabilities({
+      embedding: true,
+      moderation: true,
+      reasoning: true,
+      vision: true,
+    }),
     documentationUrl: "https://studio.nebius.com/api-reference/",
     envApiBase: "NEBIUS_API_BASE",
     envApiKey: "NEBIUS_API_KEY",
@@ -276,7 +320,12 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
   },
   {
     apiBase: "http://localhost:11434/v1",
-    capabilities: capabilities({ embedding: true, pdfInput: true, reasoning: true, vision: true }),
+    capabilities: capabilities({
+      embedding: true,
+      pdfInput: true,
+      reasoning: true,
+      vision: true,
+    }),
     documentationUrl: "https://docs.ollama.com/api/openai-compatibility",
     envApiBase: "OLLAMA_HOST",
     name: "ollama",
@@ -284,7 +333,13 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
   },
   {
     apiBase: "https://openrouter.ai/api/v1",
-    capabilities: capabilities({ embedding: true, pdfInput: true, reasoning: true, responses: true, vision: true }),
+    capabilities: capabilities({
+      embedding: true,
+      pdfInput: true,
+      reasoning: true,
+      responses: true,
+      vision: true,
+    }),
     documentationUrl: "https://openrouter.ai/docs/api-reference/overview",
     envApiBase: "OPENROUTER_API_BASE",
     envApiKey: "OPENROUTER_API_KEY",
@@ -297,14 +352,19 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
   {
     apiBase: "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
     capabilities: capabilities({ reasoning: false, vision: false }),
-    documentationUrl: "https://docs.ovhcloud.com/en/guides/public-cloud/ai-machine-learning/ai-endpoints-getting-started",
+    documentationUrl:
+      "https://docs.ovhcloud.com/en/guides/public-cloud/ai-machine-learning/ai-endpoints-getting-started",
     envApiBase: "OVHCLOUD_API_BASE",
     envApiKey: "OVHCLOUD_API_KEY",
     name: "ovhcloud",
   },
   {
     apiBase: "https://api.perplexity.ai",
-    capabilities: capabilities({ listModels: false, moderation: true, vision: true }),
+    capabilities: capabilities({
+      listModels: false,
+      moderation: true,
+      vision: true,
+    }),
     documentationUrl: "https://docs.perplexity.ai/api-reference/chat-completions-post",
     envApiBase: "PERPLEXITY_BASE_URL",
     envApiKey: "PERPLEXITY_API_KEY",
@@ -312,7 +372,12 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
   },
   {
     apiBase: "https://api.portkey.ai/v1",
-    capabilities: capabilities({ moderation: true, pdfInput: true, reasoning: true, vision: true }),
+    capabilities: capabilities({
+      moderation: true,
+      pdfInput: true,
+      reasoning: true,
+      vision: true,
+    }),
     documentationUrl: "https://portkey.ai/docs/api-reference/inference-api/introduction",
     envApiBase: "PORTKEY_API_BASE",
     envApiKey: "PORTKEY_API_KEY",
@@ -321,7 +386,12 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
   },
   {
     apiBase: "https://api.qnaigc.com/v1",
-    capabilities: capabilities({ embedding: true, moderation: true, reasoning: true, vision: true }),
+    capabilities: capabilities({
+      embedding: true,
+      moderation: true,
+      reasoning: true,
+      vision: true,
+    }),
     documentationUrl: "https://developer.qiniu.com/aitokenapi",
     envApiBase: "QINIU_API_BASE",
     envApiKey: "QINIU_API_KEY",
@@ -329,7 +399,12 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
   },
   {
     apiBase: "https://router.requesty.ai/v1",
-    capabilities: capabilities({ embedding: true, pdfInput: true, reasoning: true, vision: true }),
+    capabilities: capabilities({
+      embedding: true,
+      pdfInput: true,
+      reasoning: true,
+      vision: true,
+    }),
     documentationUrl: "https://docs.requesty.ai/",
     envApiBase: "REQUESTY_API_BASE",
     envApiKey: "REQUESTY_API_KEY",
@@ -341,7 +416,12 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
   },
   {
     apiBase: "https://api.sambanova.ai/v1",
-    capabilities: capabilities({ embedding: true, moderation: true, reasoning: true, vision: true }),
+    capabilities: capabilities({
+      embedding: true,
+      moderation: true,
+      reasoning: true,
+      vision: true,
+    }),
     documentationUrl: "https://docs.sambanova.ai/cloud/docs/api-reference/overview",
     envApiBase: "SAMBANOVA_API_BASE",
     envApiKey: "SAMBANOVA_API_KEY",
@@ -350,7 +430,11 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
   },
   {
     apiBase: "https://api.telnyx.com/v2/ai",
-    capabilities: capabilities({ moderation: true, reasoning: true, vision: true }),
+    capabilities: capabilities({
+      moderation: true,
+      reasoning: true,
+      vision: true,
+    }),
     documentationUrl: "https://developers.telnyx.com/docs/inference/getting-started",
     envApiBase: "TELNYX_API_BASE",
     envApiKey: "TELNYX_API_KEY",
@@ -358,7 +442,12 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
   },
   {
     apiBase: "http://localhost:8000/v1",
-    capabilities: capabilities({ embedding: true, moderation: true, reasoning: true, vision: true }),
+    capabilities: capabilities({
+      embedding: true,
+      moderation: true,
+      reasoning: true,
+      vision: true,
+    }),
     documentationUrl: "https://docs.vllm.ai/en/latest/serving/openai_compatible_server/",
     envApiBase: "VLLM_API_BASE",
     envApiKey: "VLLM_API_KEY",
@@ -397,29 +486,24 @@ function metadataFromConfig(config: OpenAIProviderConfig): ProviderMetadata {
     documentationUrl: config.documentationUrl,
     name: config.name,
     promptCacheKeySupport:
-      config.promptCacheKeySupport ??
-      providerPromptCacheKeySupport(config.name),
+      config.promptCacheKeySupport ?? providerPromptCacheKeySupport(config.name),
     requiresApiKey: config.requiresApiKey !== false,
     tier: providerTier(config.name),
-    ...(config.apiBase === undefined ? {} : { apiBase: config.apiBase }),
-    ...(config.envApiBase === undefined ? {} : { envApiBase: config.envApiBase }),
-    ...(config.envApiKey === undefined ? {} : { envApiKey: config.envApiKey }),
+    ...includeWhen(!(config.apiBase === undefined), { apiBase: config.apiBase }),
+    ...includeWhen(!(config.envApiBase === undefined), { envApiBase: config.envApiBase }),
+    ...includeWhen(!(config.envApiKey === undefined), { envApiKey: config.envApiKey }),
   };
 }
 
 const registrations = new Map<string, ProviderRegistration>();
 
-function addBuiltIn(
-  name: string,
-  registration: BuiltInProviderRegistration,
-): void {
+function addBuiltIn(name: string, registration: BuiltInProviderRegistration): void {
   registrations.set(name, {
     create: registration.create,
     metadata: {
       ...registration.metadata,
       promptCacheKeySupport:
-        registration.metadata.promptCacheKeySupport ??
-        providerPromptCacheKeySupport(name),
+        registration.metadata.promptCacheKeySupport ?? providerPromptCacheKeySupport(name),
       tier: registration.metadata.tier ?? providerTier(name),
     },
   });
@@ -451,7 +535,12 @@ addBuiltIn("openai", {
 addBuiltIn("anthropic", {
   create: (options) => new AnthropicProvider(options),
   metadata: {
-    capabilities: capabilities({ batch: true, pdfInput: true, reasoning: true, vision: true }),
+    capabilities: capabilities({
+      batch: true,
+      pdfInput: true,
+      reasoning: true,
+      vision: true,
+    }),
     documentationUrl: "https://docs.anthropic.com/en/api/",
     envApiBase: "ANTHROPIC_BASE_URL",
     envApiKey: "ANTHROPIC_API_KEY",
@@ -463,8 +552,14 @@ addBuiltIn("anthropic", {
 addBuiltIn("azureanthropic", {
   create: (options) => new AzureAnthropicProvider(options),
   metadata: {
-    capabilities: capabilities({ listModels: false, pdfInput: true, reasoning: true, vision: true }),
-    documentationUrl: "https://learn.microsoft.com/azure/ai-foundry/model-inference/concepts/models",
+    capabilities: capabilities({
+      listModels: false,
+      pdfInput: true,
+      reasoning: true,
+      vision: true,
+    }),
+    documentationUrl:
+      "https://learn.microsoft.com/azure/ai-foundry/model-inference/concepts/models",
     envApiBase: "AZURE_ANTHROPIC_API_BASE",
     envApiKey: "AZURE_ANTHROPIC_API_KEY",
     name: "azureanthropic",
@@ -475,8 +570,14 @@ addBuiltIn("azureanthropic", {
 addBuiltIn("vertexaianthropic", {
   create: (options) => new VertexAIAnthropicProvider(options),
   metadata: {
-    capabilities: capabilities({ listModels: false, pdfInput: true, reasoning: true, vision: true }),
-    documentationUrl: "https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/use-claude",
+    capabilities: capabilities({
+      listModels: false,
+      pdfInput: true,
+      reasoning: true,
+      vision: true,
+    }),
+    documentationUrl:
+      "https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/use-claude",
     envApiBase: "VERTEXAI_ANTHROPIC_API_BASE",
     envApiKey: "GOOGLE_CLOUD_PROJECT",
     name: "vertexaianthropic",
@@ -487,7 +588,12 @@ addBuiltIn("vertexaianthropic", {
 addBuiltIn("bedrock", {
   create: (options) => new BedrockProvider(options),
   metadata: {
-    capabilities: capabilities({ batch: true, embedding: true, reasoning: true, vision: true }),
+    capabilities: capabilities({
+      batch: true,
+      embedding: true,
+      reasoning: true,
+      vision: true,
+    }),
     documentationUrl: "https://aws.amazon.com/bedrock/",
     envApiBase: "AWS_ENDPOINT_URL_BEDROCK_RUNTIME",
     envApiKey: "AWS_BEARER_TOKEN_BEDROCK",
@@ -517,7 +623,11 @@ addBuiltIn("sagemaker", {
 addBuiltIn("watsonx", {
   create: (options) => new WatsonxProvider(options),
   metadata: {
-    capabilities: capabilities({ listModels: true, reasoning: false, vision: true }),
+    capabilities: capabilities({
+      listModels: true,
+      reasoning: false,
+      vision: true,
+    }),
     documentationUrl: "https://www.ibm.com/watsonx",
     envApiBase: "WATSONX_URL",
     envApiKey: "WATSONX_API_KEY",
@@ -566,7 +676,12 @@ addBuiltIn("mistral", {
   create: (options) => new MistralProvider(options),
   metadata: {
     apiBase: "https://api.mistral.ai/v1",
-    capabilities: capabilities({ batch: true, embedding: true, moderation: true, reasoning: true }),
+    capabilities: capabilities({
+      batch: true,
+      embedding: true,
+      moderation: true,
+      reasoning: true,
+    }),
     documentationUrl: "https://docs.mistral.ai/api/",
     envApiBase: "MISTRAL_API_BASE",
     envApiKey: "MISTRAL_API_KEY",
@@ -579,7 +694,12 @@ addBuiltIn("together", {
   create: (options) => new TogetherProvider(options),
   metadata: {
     apiBase: "https://api.together.xyz/v1",
-    capabilities: capabilities({ batch: true, embedding: true, reasoning: true, vision: true }),
+    capabilities: capabilities({
+      batch: true,
+      embedding: true,
+      reasoning: true,
+      vision: true,
+    }),
     documentationUrl: "https://docs.together.ai/reference/",
     envApiBase: "TOGETHER_API_BASE",
     envApiKey: "TOGETHER_API_KEY",
@@ -592,7 +712,12 @@ addBuiltIn("cohere", {
   create: (options) => new CohereProvider(options),
   metadata: {
     apiBase: "https://api.cohere.com/compatibility/v1",
-    capabilities: capabilities({ embedding: true, rerank: true, reasoning: true, vision: true }),
+    capabilities: capabilities({
+      embedding: true,
+      rerank: true,
+      reasoning: true,
+      vision: true,
+    }),
     documentationUrl: "https://docs.cohere.com/",
     envApiBase: "COHERE_BASE_URL",
     envApiKey: "COHERE_API_KEY",
@@ -647,7 +772,11 @@ addBuiltIn("github", {
   create: (options) => new GitHubProvider(options),
   metadata: {
     apiBase: "https://models.github.ai/inference",
-    capabilities: capabilities({ embedding: true, reasoning: false, vision: false }),
+    capabilities: capabilities({
+      embedding: true,
+      reasoning: false,
+      vision: false,
+    }),
     documentationUrl: "https://docs.github.com/en/github-models",
     envApiBase: "GITHUB_MODELS_API_BASE",
     envApiKey: "GITHUB_TOKEN",
@@ -678,7 +807,12 @@ addBuiltIn("meta", {
 addBuiltIn("huggingface", {
   create: (options) => new HuggingFaceProvider(options),
   metadata: {
-    capabilities: capabilities({ listModels: true, reasoning: false, responses: true, vision: false }),
+    capabilities: capabilities({
+      listModels: true,
+      reasoning: false,
+      responses: true,
+      vision: false,
+    }),
     documentationUrl: "https://huggingface.co/docs/huggingface.js/inference/README",
     envApiBase: "HUGGINGFACE_API_BASE",
     envApiKey: "HF_TOKEN",
@@ -710,8 +844,13 @@ addBuiltIn("azureopenai", {
 addBuiltIn("azure", {
   create: (options) => new AzureProvider(options),
   metadata: {
-    capabilities: capabilities({ embedding: true, listModels: true, vision: false }),
-    documentationUrl: "https://learn.microsoft.com/azure/foundry/foundry-models/concepts/models-sold-directly-by-azure",
+    capabilities: capabilities({
+      embedding: true,
+      listModels: true,
+      vision: false,
+    }),
+    documentationUrl:
+      "https://learn.microsoft.com/azure/foundry/foundry-models/concepts/models-sold-directly-by-azure",
     envApiBase: "AZURE_AI_CHAT_ENDPOINT",
     envApiKey: "AZURE_API_KEY",
     name: "azure",
@@ -730,13 +869,22 @@ function normalizeName(name: string): string {
   return name.trim().toLowerCase();
 }
 
-export function registerProvider(name: string, factory: ProviderFactory, options: RegisterProviderOptions): void {
+export function registerProvider(
+  name: string,
+  factory: ProviderFactory,
+  options: RegisterProviderOptions,
+): void {
   const key = normalizeName(name);
   if (key.length === 0) throw new TypeError("Provider names cannot be empty.");
   if (registrations.has(key) && options.override !== true) {
-    throw new TypeError(`Provider "${key}" is already registered. Pass override: true to replace it.`);
+    throw new TypeError(
+      `Provider "${key}" is already registered. Pass override: true to replace it.`,
+    );
   }
-  registrations.set(key, { create: factory, metadata: { ...options.metadata, name: key } });
+  registrations.set(key, {
+    create: factory,
+    metadata: { ...options.metadata, name: key },
+  });
 }
 
 export function createProvider(name: string, options: ProviderOptions = {}): BaseProvider {

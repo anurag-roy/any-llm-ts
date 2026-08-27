@@ -7,7 +7,11 @@ import type {
 } from "openai/resources/responses/responses";
 
 export type JsonPrimitive = boolean | number | string | null;
-export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
+export type JsonValue = JsonObject | JsonPrimitive | JsonValue[];
+
+export interface JsonObject {
+  [key: string]: JsonValue | undefined;
+}
 
 export type MessageRole = "assistant" | "developer" | "system" | "tool" | "user";
 
@@ -43,7 +47,7 @@ export type MessageContentPart =
   | ImageUrlContentPart
   | InputAudioContentPart
   | TextContentPart
-  | { type: string; [key: string]: unknown };
+  | ({ type: string } & JsonObject);
 
 export interface FunctionCall {
   arguments: string;
@@ -54,7 +58,7 @@ export interface ToolCall {
   function: FunctionCall;
   id: string;
   type: "function";
-  extraContent?: Record<string, unknown>;
+  extraContent?: JsonObject;
 }
 
 export interface ChatMessage {
@@ -66,22 +70,30 @@ export interface ChatMessage {
   refusal?: string | null;
   toolCallId?: string;
   toolCalls?: ToolCall[];
-  extraContent?: Record<string, unknown>;
+  extraContent?: JsonObject;
 }
 
 export interface FunctionTool {
   function: {
     description?: string;
     name: string;
-    parameters?: Record<string, unknown>;
+    parameters?: JsonObject;
     strict?: boolean;
   };
   type: "function";
 }
 
-export type Tool = FunctionTool | Record<string, unknown>;
+export type Tool = FunctionTool | JsonObject;
 
-export type ReasoningEffort = "auto" | "high" | "low" | "max" | "medium" | "minimal" | "none" | "xhigh";
+export type ReasoningEffort =
+  | "auto"
+  | "high"
+  | "low"
+  | "max"
+  | "medium"
+  | "minimal"
+  | "none"
+  | "xhigh";
 
 export interface CompletionParams {
   messages: ChatMessage[];
@@ -95,18 +107,18 @@ export interface CompletionParams {
   parallelToolCalls?: boolean;
   presencePenalty?: number;
   promptCacheKey?: string;
-  providerOptions?: Record<string, unknown>;
+  providerOptions?: JsonObject;
   reasoningEffort?: ReasoningEffort;
-  responseFormat?: Record<string, unknown>;
+  responseFormat?: JsonObject;
   seed?: number;
   serviceTier?: string;
   stop?: string | string[];
   stream?: boolean;
-  streamOptions?: Record<string, unknown>;
+  streamOptions?: JsonObject;
   temperature?: number;
   /** Per-request timeout in seconds. */
   timeout?: number;
-  toolChoice?: Record<string, unknown> | string;
+  toolChoice?: JsonObject | string;
   tools?: Tool[];
   topLogprobs?: number;
   topP?: number;
@@ -116,7 +128,7 @@ export interface CompletionParams {
 export interface DirectCompletionParams extends CompletionParams {
   apiBase?: string;
   apiKey?: string;
-  clientOptions?: Record<string, unknown>;
+  clientOptions?: JsonObject;
   provider?: string;
 }
 
@@ -125,18 +137,24 @@ export interface CompletionUsage {
   promptTokens: number;
   totalTokens: number;
   completionTime?: number;
-  completionTokensDetails?: Record<string, unknown>;
+  completionTokensDetails?: JsonObject;
   evalDuration?: number;
   loadDuration?: number;
   promptEvalDuration?: number;
   promptTime?: number;
-  promptTokensDetails?: Record<string, unknown>;
+  promptTokensDetails?: JsonObject;
   queueTime?: number;
   totalDuration?: number;
   totalTime?: number;
 }
 
-export type FinishReason = "content_filter" | "function_call" | "length" | "stop" | "tool_calls" | null;
+export type FinishReason =
+  | "content_filter"
+  | "function_call"
+  | "length"
+  | "stop"
+  | "tool_calls"
+  | null;
 
 export interface ChatCompletionChoice {
   finishReason: FinishReason;
@@ -159,9 +177,9 @@ export interface ChatCompletion {
 }
 
 export interface StructuredOutputFormat<T> {
-  jsonSchema: Record<string, unknown>;
+  jsonSchema: JsonObject;
   name: string;
-  parse: (value: unknown) => T;
+  parse: <Value>(value: Value) => T;
   strict?: boolean;
 }
 
@@ -188,7 +206,7 @@ export interface ToolCallDelta {
   id?: string;
   index: number;
   type?: "function";
-  extraContent?: Record<string, unknown>;
+  extraContent?: JsonObject;
 }
 
 export interface ChatCompletionDelta {
@@ -197,7 +215,7 @@ export interface ChatCompletionDelta {
   refusal?: string | null;
   role?: "assistant";
   toolCalls?: ToolCallDelta[];
-  extraContent?: Record<string, unknown>;
+  extraContent?: JsonObject;
 }
 
 export interface ChatCompletionChunkChoice {
@@ -243,7 +261,7 @@ export interface EmbeddingParams {
   model: string;
   dimensions?: number;
   encodingFormat?: "base64" | "float";
-  providerOptions?: Record<string, unknown>;
+  providerOptions?: JsonObject;
   user?: string;
 }
 
@@ -259,8 +277,8 @@ export interface ResponsesParams {
   input: ResponseInput;
   model: string;
   background?: boolean;
-  contextManagement?: Record<string, unknown>[];
-  conversation?: Record<string, unknown> | string;
+  contextManagement?: JsonObject[];
+  conversation?: JsonObject | string;
   frequencyPenalty?: number;
   include?: string[];
   instructions?: string;
@@ -272,20 +290,20 @@ export interface ResponsesParams {
   previousResponseId?: string;
   promptCacheKey?: string;
   promptCacheRetention?: string;
-  providerOptions?: Record<string, unknown>;
-  reasoning?: Record<string, unknown>;
-  responseFormat?: Record<string, unknown>;
+  providerOptions?: JsonObject;
+  reasoning?: JsonObject;
+  responseFormat?: JsonObject;
   safetyIdentifier?: string;
   serviceTier?: string;
   store?: boolean;
   stream?: boolean;
-  streamOptions?: Record<string, unknown>;
+  streamOptions?: JsonObject;
   temperature?: number;
-  text?: Record<string, unknown>;
+  text?: JsonObject;
   /** Per-request timeout in seconds. */
   timeout?: number;
-  toolChoice?: Record<string, unknown> | string;
-  tools?: Record<string, unknown>[];
+  toolChoice?: JsonObject | string;
+  tools?: JsonObject[];
   topLogprobs?: number;
   topP?: number;
   truncation?: string;
@@ -297,7 +315,7 @@ export type ParsedResponse<T> = OpenAIParsedResponse<T>;
 export type ResponseInputItem = OpenAIResponseInput;
 export type ResponseOutputMessage = OpenAIResponseOutputMessage;
 export type ResponseStreamEvent = OpenAIResponseStreamEvent;
-export type ResponseInput = string | Record<string, unknown>[] | ResponseInputItem;
+export type ResponseInput = string | JsonObject[] | ResponseInputItem;
 
 export type StructuredResponsesParams<T> = Omit<ResponsesParams, "responseFormat" | "stream"> & {
   responseFormat: StructuredOutputFormat<T>;
@@ -310,7 +328,7 @@ export interface ImageGenerationParams {
   background?: "auto" | "opaque" | "transparent";
   n?: number;
   outputFormat?: "jpeg" | "png" | "webp";
-  providerOptions?: Record<string, unknown>;
+  providerOptions?: JsonObject;
   quality?: string;
   responseFormat?: "b64_json" | "url";
   size?: string;
@@ -334,7 +352,7 @@ export interface TranscriptionParams {
   model: string;
   language?: string;
   prompt?: string;
-  providerOptions?: Record<string, unknown>;
+  providerOptions?: JsonObject;
   responseFormat?: "json" | "srt" | "text" | "verbose_json" | "vtt";
   temperature?: number;
   timestampGranularities?: ("segment" | "word")[];
@@ -351,21 +369,21 @@ export interface SpeechParams {
   model: string;
   voice: string;
   instructions?: string;
-  providerOptions?: Record<string, unknown>;
+  providerOptions?: JsonObject;
   responseFormat?: "aac" | "flac" | "mp3" | "opus" | "pcm" | "wav";
   speed?: number;
 }
 
 export interface ModerationInputPart {
   type: string;
-  [key: string]: unknown;
+  [key: string]: JsonValue;
 }
 
 export interface ModerationParams {
   input: ModerationInputPart[] | string | string[];
   model?: string;
   includeRaw?: boolean;
-  providerOptions?: Record<string, unknown>;
+  providerOptions?: JsonObject;
 }
 
 export interface ModerationResult {
@@ -373,7 +391,7 @@ export interface ModerationResult {
   categoryScores: Record<string, number>;
   flagged: boolean;
   categoryAppliedInputTypes?: Record<string, string[]>;
-  providerRaw?: Record<string, unknown>;
+  providerRaw?: JsonObject;
 }
 
 export interface ModerationResponse {
@@ -421,7 +439,7 @@ export interface Batch {
   model?: string;
   outputFileId?: string | null;
   requestCounts?: BatchRequestCounts;
-  usage?: Record<string, unknown>;
+  usage?: JsonObject;
   raw?: unknown;
 }
 
@@ -430,13 +448,13 @@ export interface CreateBatchParams {
   inputFilePath: string;
   completionWindow?: string;
   metadata?: Record<string, string>;
-  providerOptions?: Record<string, unknown>;
+  providerOptions?: JsonObject;
 }
 
 export interface ListBatchesParams {
   after?: string;
   limit?: number;
-  providerOptions?: Record<string, unknown>;
+  providerOptions?: JsonObject;
 }
 
 export interface BatchResultError {
@@ -459,7 +477,7 @@ export interface RerankParams {
   model: string;
   query: string;
   maxTokensPerDoc?: number;
-  providerOptions?: Record<string, unknown>;
+  providerOptions?: JsonObject;
   returnDocuments?: boolean;
   topN?: number;
 }
@@ -489,7 +507,7 @@ export interface RerankResponse {
 export interface MessagesTextBlock {
   text: string;
   type: "text";
-  cacheControl?: Record<string, unknown>;
+  cacheControl?: JsonObject;
 }
 
 export interface MessagesThinkingBlock {
@@ -500,7 +518,7 @@ export interface MessagesThinkingBlock {
 
 export interface MessagesToolUseBlock {
   id: string;
-  input: unknown;
+  input: JsonValue;
   name: string;
   type: "tool_use";
 }
@@ -528,7 +546,7 @@ export type MessagesInputContentBlock =
   | MessagesThinkingBlock
   | MessagesToolResultBlock
   | MessagesToolUseBlock
-  | { type: string; [key: string]: unknown };
+  | ({ type: string } & JsonObject);
 
 export interface MessagesInputMessage {
   content: MessagesInputContentBlock[] | string;
@@ -536,10 +554,10 @@ export interface MessagesInputMessage {
 }
 
 export interface MessagesTool {
-  inputSchema: Record<string, unknown>;
+  inputSchema: JsonObject;
   name: string;
   description?: string;
-  cacheControl?: Record<string, unknown>;
+  cacheControl?: JsonObject;
 }
 
 export interface MessagesParams {
@@ -547,21 +565,21 @@ export interface MessagesParams {
   messages: MessagesInputMessage[];
   model: string;
   betas?: string[];
-  cacheControl?: Record<string, unknown>;
-  contextManagement?: Record<string, unknown>;
-  metadata?: Record<string, unknown>;
-  outputFormat?: Record<string, unknown>;
+  cacheControl?: JsonObject;
+  contextManagement?: JsonObject;
+  metadata?: JsonObject;
+  outputFormat?: JsonObject;
   promptCacheKey?: string;
-  providerOptions?: Record<string, unknown>;
+  providerOptions?: JsonObject;
   serviceTier?: string;
   stopSequences?: string[];
   stream?: boolean;
   system?: MessagesTextBlock[] | string;
   temperature?: number;
-  thinking?: Record<string, unknown>;
+  thinking?: JsonObject;
   /** Per-request timeout in seconds. */
   timeout?: number;
-  toolChoice?: Record<string, unknown>;
+  toolChoice?: JsonObject;
   tools?: MessagesTool[];
   topK?: number;
   topP?: number;
@@ -581,7 +599,7 @@ export type MessageContentBlock =
   | MessagesTextBlock
   | MessagesThinkingBlock
   | MessagesToolUseBlock
-  | { type: string; [key: string]: unknown };
+  | ({ type: string } & JsonObject);
 
 export interface MessageUsage {
   inputTokens: number;
@@ -632,7 +650,7 @@ export interface ContentBlockDeltaEvent {
     | { text: string; type: "text_delta" }
     | { thinking: string; type: "thinking_delta" }
     | { signature: string; type: "signature_delta" }
-    | { type: string; [key: string]: unknown };
+    | ({ type: string } & JsonObject);
   index: number;
   type: "content_block_delta";
 }
@@ -705,7 +723,7 @@ export interface ProviderMetadata {
 export interface ProviderOptions {
   apiBase?: string;
   apiKey?: string;
-  clientOptions?: Record<string, unknown>;
+  clientOptions?: object;
 }
 
 export interface OpenAICompatibleOptions extends ProviderOptions {
@@ -718,5 +736,9 @@ export interface OpenAICompatibleOptions extends ProviderOptions {
 }
 
 export type AsyncResult<T> = Promise<AsyncIterable<T>>;
-export type CompletionResult<T extends boolean | undefined> = T extends true ? AsyncIterable<ChatCompletionChunk> : ChatCompletion;
-export type ResponseResult<T extends boolean | undefined> = T extends true ? AsyncIterable<ResponseStreamEvent> : Response;
+export type CompletionResult<T extends boolean | undefined> = T extends true
+  ? AsyncIterable<ChatCompletionChunk>
+  : ChatCompletion;
+export type ResponseResult<T extends boolean | undefined> = T extends true
+  ? AsyncIterable<ResponseStreamEvent>
+  : Response;

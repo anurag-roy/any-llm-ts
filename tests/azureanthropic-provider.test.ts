@@ -1,4 +1,4 @@
-import type { AnthropicFoundry } from "@anthropic-ai/foundry-sdk";
+import { AnthropicFoundry } from "@anthropic-ai/foundry-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -10,9 +10,9 @@ import {
 import type { ChatCompletion } from "../src/types.js";
 
 function fakeFoundry(create: ReturnType<typeof vi.fn>): AnthropicFoundry {
-  return {
+  return Object.assign(new AnthropicFoundry({ apiKey: "test", baseURL: "https://example.test" }), {
     messages: { create },
-  } as unknown as AnthropicFoundry;
+  });
 }
 
 afterEach(() => {
@@ -23,15 +23,19 @@ afterEach(() => {
 
 describe("Azure Anthropic provider", () => {
   it("requires a Foundry API key unless an Entra token provider is supplied", () => {
-    expect(() =>
-      new AzureAnthropicProvider({ apiBase: "https://example.test/anthropic/" }),
+    expect(
+      () =>
+        new AzureAnthropicProvider({
+          apiBase: "https://example.test/anthropic/",
+        }),
     ).toThrow(MissingApiKeyError);
 
-    expect(() =>
-      new AzureAnthropicProvider({
-        apiBase: "https://example.test/anthropic/",
-        clientOptions: { azureADTokenProvider: async () => "token" },
-      }),
+    expect(
+      () =>
+        new AzureAnthropicProvider({
+          apiBase: "https://example.test/anthropic/",
+          clientOptions: { azureADTokenProvider: async () => "token" },
+        }),
     ).not.toThrow();
   });
 
@@ -59,6 +63,7 @@ describe("Azure Anthropic provider", () => {
     });
     const provider = new AzureAnthropicProvider({}, fakeFoundry(create));
 
+    // SAFETY: This test double implements the provider surface exercised by this test.
     const result = (await provider.completion({
       maxTokens: 100,
       messages: [{ content: "Hello", role: "user" }],
@@ -82,9 +87,7 @@ describe("Azure Anthropic provider", () => {
   it("reports operations that Microsoft Foundry does not expose", async () => {
     const provider = new AzureAnthropicProvider({}, fakeFoundry(vi.fn()));
 
-    await expect(provider.listModels()).rejects.toBeInstanceOf(
-      UnsupportedOperationError,
-    );
+    await expect(provider.listModels()).rejects.toBeInstanceOf(UnsupportedOperationError);
     await expect(
       provider.createBatch({
         endpoint: "/v1/chat/completions",

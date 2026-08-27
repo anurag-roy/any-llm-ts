@@ -1,3 +1,8 @@
+import { includeWhen } from "../utils.js";
+import type { JsonValue } from "../types.js";
+import { parseJsonObject, parseJsonValue, parseOptionalJsonObject } from "../utils.js";
+import type { JsonObject } from "../types.js";
+import { isNumber, isObject, isString } from "../utils.js";
 import {
   BedrockClient,
   CreateModelInvocationJobCommand,
@@ -14,11 +19,7 @@ import {
   InvokeModelCommand,
   type BedrockRuntimeClientConfig,
 } from "@aws-sdk/client-bedrock-runtime";
-import {
-  GetObjectCommand,
-  S3Client,
-  type S3ClientConfig,
-} from "@aws-sdk/client-s3";
+import { GetObjectCommand, S3Client, type S3ClientConfig } from "@aws-sdk/client-s3";
 
 import {
   BatchNotCompleteError,
@@ -57,21 +58,20 @@ import {
 import { BaseProvider } from "./base.js";
 import { completeProviderMetadata } from "../provider-metadata.js";
 
-export interface BedrockClientLike {
-  send(command: unknown, options?: { abortSignal?: AbortSignal }): Promise<unknown>;
-}
+export type BedrockClientLike = Pick<BedrockRuntimeClient, "send">;
+export type BedrockControlClientLike = Pick<BedrockClient, "send">;
+export type BedrockS3ClientLike = Pick<S3Client, "send">;
 
 export interface BedrockProviderClients {
-  control?: BedrockClientLike;
+  control?: BedrockControlClientLike;
   runtime?: BedrockClientLike;
-  s3?: BedrockClientLike;
+  s3?: BedrockS3ClientLike;
 }
 
 export interface BedrockProviderClientOptions {
   control?: BedrockClientConfig;
   runtime?: BedrockRuntimeClientConfig;
   s3?: S3ClientConfig;
-  [key: string]: unknown;
 }
 
 const bedrockCapabilities: ProviderCapabilities = {
@@ -107,9 +107,7 @@ function createClients(
   options: ProviderOptions,
   injected: BedrockProviderClients,
 ): Required<BedrockProviderClients> {
-  const raw = {
-    ...(options.clientOptions as BedrockProviderClientOptions | undefined),
-  };
+  const raw: BedrockProviderClientOptions = { ...options.clientOptions };
   const { control, runtime, s3 } = raw;
   const shared = Object.fromEntries(
     Object.entries(raw).filter(
@@ -117,8 +115,7 @@ function createClients(
         !["authSchemePreference", "control", "endpoint", "runtime", "s3", "token"].includes(key),
     ),
   );
-  const apiKey =
-    options.apiKey ?? getEnvironmentVariable("AWS_BEARER_TOKEN_BEDROCK");
+  const apiKey = options.apiKey ?? getEnvironmentVariable("AWS_BEARER_TOKEN_BEDROCK");
   const bearer =
     apiKey === undefined
       ? {}
@@ -126,10 +123,9 @@ function createClients(
           authSchemePreference: ["smithy.api#httpBearerAuth"],
           token: { token: apiKey },
         };
-  const endpoint =
-    options.apiBase ??
-    getEnvironmentVariable("AWS_ENDPOINT_URL_BEDROCK_RUNTIME");
+  const endpoint = options.apiBase ?? getEnvironmentVariable("AWS_ENDPOINT_URL_BEDROCK_RUNTIME");
 
+  // SAFETY: The provider contract establishes the asserted representation at this boundary.
   return {
     control:
       injected.control ??
@@ -144,7 +140,7 @@ function createClients(
         ...(shared as BedrockRuntimeClientConfig),
         ...runtime,
         ...bearer,
-        ...(endpoint === undefined ? {} : { endpoint }),
+        ...includeWhen(!(endpoint === undefined), { endpoint }),
       }),
     s3:
       injected.s3 ??
@@ -159,22 +155,15 @@ function invalidRequest(message: string): InvalidRequestError {
   return new InvalidRequestError(message, { provider: "bedrock" });
 }
 
-function dataImage(value: string): {
-  format: "gif" | "jpeg" | "png" | "webp";
-  source: { bytes: Uint8Array };
-} {
-  const match = /^data:image\/(gif|jpeg|jpg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/u.exec(
-    value,
-  );
+function dataImage(value: string) {
+  const match = /^data:image\/(gif|jpeg|jpg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/u.exec(value);
   if (match === null) {
     if (!value.startsWith("data:")) {
       throw invalidRequest(
         `URL-based images are not supported by Bedrock. Provide a base64 data URI instead: ${value.slice(0, 100)}`,
       );
     }
-    throw invalidRequest(
-      `Malformed or unsupported Bedrock image data URI: ${value.slice(0, 100)}`,
-    );
+    throw invalidRequest(`Malformed or unsupported Bedrock image data URI: ${value.slice(0, 100)}`);
   }
   const rawFormat = match[1];
   const encoded = match[2];
@@ -197,38 +186,48 @@ function dataImage(value: string): {
   };
 }
 
-function userContent(content: ChatMessage["content"]): Record<string, unknown>[] {
-  if (typeof content === "string") return [{ text: content }];
+type BedrockContentBlock =
+  | { image: ReturnType<typeof dataImage> }
+  | { text: string }
+  | { toolResult: { content: JsonObject[]; toolUseId: string } }
+  | { toolUse: { input: JsonValue; name: string; toolUseId: string } };
+
+interface BedrockMessage {
+  content: BedrockContentBlock[];
+  role: "assistant" | "user";
+}
+
+function userContent(content: ChatMessage["content"]): BedrockContentBlock[] {
+  if (isString(content)) return [{ text: content }];
   if (content === null) return [{ text: "" }];
-  return content.flatMap((part): Record<string, unknown>[] => {
-    if (part.type === "text" && "text" in part) {
-      return [{ text: String(part.text) }];
+  return content.flatMap((part): BedrockContentBlock[] => {
+    if (part.type === "text" && "text" in part && isString(part.text)) {
+      return [{ text: part.text }];
     }
     if (part.type === "image_url" && "image_url" in part) {
+      // SAFETY: The provider contract establishes the asserted representation at this boundary.
       const image = part.image_url as string | { url: string };
-      return [{ image: dataImage(typeof image === "string" ? image : image.url) }];
+      return [{ image: dataImage(isString(image) ? image : image.url) }];
     }
     return [];
   });
 }
 
-function assistantMessage(message: ChatMessage): Record<string, unknown> | undefined {
-  const content: Record<string, unknown>[] = [];
-  if (typeof message.content === "string" && message.content.length > 0) {
+function assistantMessage(message: ChatMessage): BedrockMessage | undefined {
+  const content: BedrockContentBlock[] = [];
+  if (isString(message.content) && message.content.length > 0) {
     content.push({ text: message.content });
   } else if (Array.isArray(message.content)) {
     content.push(
-      ...message.content.flatMap((part): Record<string, unknown>[] =>
-        part.type === "text" && "text" in part
-          ? [{ text: String(part.text) }]
-          : [],
+      ...message.content.flatMap((part) =>
+        part.type === "text" && "text" in part && isString(part.text) ? [{ text: part.text }] : [],
       ),
     );
   }
   for (const toolCall of message.toolCalls ?? []) {
-    let input: unknown;
+    let input: JsonValue;
     try {
-      input = JSON.parse(toolCall.function.arguments) as unknown;
+      input = parseJsonValue(JSON.parse(toolCall.function.arguments), "Bedrock tool input");
     } catch {
       input = toolCall.function.arguments;
     }
@@ -243,17 +242,14 @@ function assistantMessage(message: ChatMessage): Record<string, unknown> | undef
   return content.length === 0 ? undefined : { content, role: "assistant" };
 }
 
-function toolResult(message: ChatMessage): Record<string, unknown> {
+function toolResult(message: ChatMessage) {
   if (message.toolCallId === undefined) {
     throw invalidRequest("Tool result messages must include toolCallId.");
   }
-  const text =
-    typeof message.content === "string"
-      ? message.content
-      : JSON.stringify(message.content);
-  let content: Record<string, unknown>;
+  const text = isString(message.content) ? message.content : JSON.stringify(message.content);
+  let content: JsonObject;
   try {
-    content = { json: JSON.parse(text) as unknown };
+    content = { json: parseJsonValue(JSON.parse(text), "Bedrock tool result") };
   } catch {
     content = { text };
   }
@@ -262,21 +258,14 @@ function toolResult(message: ChatMessage): Record<string, unknown> {
   };
 }
 
-function convertMessages(messages: ChatMessage[]): {
-  messages: Record<string, unknown>[];
-  system?: Record<string, string>[];
-} {
+function convertMessages(messages: ChatMessage[]) {
   const system = messages
-    .filter(
-      (message) => message.role === "system" || message.role === "developer",
-    )
+    .filter((message) => message.role === "system" || message.role === "developer")
     .flatMap((message) =>
-      typeof message.content === "string" && message.content.length > 0
-        ? [{ text: message.content }]
-        : [],
+      isString(message.content) && message.content.length > 0 ? [{ text: message.content }] : [],
     );
-  const converted: Record<string, unknown>[] = [];
-  let pendingToolResults: Record<string, unknown>[] = [];
+  const converted: BedrockMessage[] = [];
+  let pendingToolResults: BedrockContentBlock[] = [];
   const flushTools = (): void => {
     if (pendingToolResults.length === 0) return;
     converted.push({ content: pendingToolResults, role: "user" });
@@ -300,13 +289,14 @@ function convertMessages(messages: ChatMessage[]): {
   flushTools();
   return {
     messages: converted,
-    ...(system.length === 0 ? {} : { system }),
+    ...includeWhen(!(system.length === 0), { system }),
   };
 }
 
-function configuredTools(params: CompletionParams): Record<string, unknown>[] {
-  return (params.tools ?? []).flatMap((tool): Record<string, unknown>[] => {
+function configuredTools(params: CompletionParams) {
+  return (params.tools ?? []).flatMap((tool) => {
     if (tool.type !== "function" || !("function" in tool)) return [];
+    // SAFETY: The provider contract establishes the asserted representation at this boundary.
     const functionTool = tool as FunctionTool;
     if (functionTool.function.name === structuredOutputToolName) {
       throw invalidRequest(
@@ -318,8 +308,10 @@ function configuredTools(params: CompletionParams): Record<string, unknown>[] {
         toolSpec: {
           description: functionTool.function.description ?? " ",
           inputSchema: {
-            json:
-              functionTool.function.parameters ?? { properties: {}, type: "object" },
+            json: functionTool.function.parameters ?? {
+              properties: {},
+              type: "object",
+            },
           },
           name: functionTool.function.name,
         },
@@ -328,13 +320,11 @@ function configuredTools(params: CompletionParams): Record<string, unknown>[] {
   });
 }
 
-function objectRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : undefined;
+function objectRecord(value: JsonValue | undefined) {
+  return isObject(value) && !Array.isArray(value) ? parseJsonObject(value) : undefined;
 }
 
-function structuredOutputTool(responseFormat: Record<string, unknown>): Record<string, unknown> {
+function structuredOutputTool(responseFormat: JsonObject) {
   if (responseFormat.type === "json_object") {
     throw new UnsupportedParameterError(
       "responseFormat with type json_object",
@@ -343,15 +333,12 @@ function structuredOutputTool(responseFormat: Record<string, unknown>): Record<s
     );
   }
   if (responseFormat.type !== "json_schema") {
-    throw new TypeError(
-      `Unsupported Bedrock responseFormat type: ${String(responseFormat.type)}.`,
-    );
+    const type = isString(responseFormat.type) ? responseFormat.type : "unknown";
+    throw new TypeError(`Unsupported Bedrock responseFormat type: ${type}.`);
   }
   const schema = objectRecord(objectRecord(responseFormat.json_schema)?.schema);
   if (schema === undefined) {
-    throw new TypeError(
-      "Bedrock responseFormat.json_schema.schema must be an object.",
-    );
+    throw new TypeError("Bedrock responseFormat.json_schema.schema must be an object.");
   }
   return {
     toolSpec: {
@@ -364,7 +351,7 @@ function structuredOutputTool(responseFormat: Record<string, unknown>): Record<s
   };
 }
 
-function toolConfiguration(params: CompletionParams): Record<string, unknown> | undefined {
+function toolConfiguration(params: CompletionParams) {
   const tools = configuredTools(params);
   if (params.responseFormat !== undefined) {
     if (!params.model.includes("anthropic.")) {
@@ -402,31 +389,29 @@ function toolConfiguration(params: CompletionParams): Record<string, unknown> | 
   const toolChoice =
     params.toolChoice === "required"
       ? { any: {} }
-      : typeof params.toolChoice === "object" &&
+      : isObject(params.toolChoice) &&
           "function" in params.toolChoice &&
-          typeof params.toolChoice.function === "object" &&
-          params.toolChoice.function !== null &&
+          isObject(params.toolChoice.function) &&
           "name" in params.toolChoice.function &&
-          typeof params.toolChoice.function.name === "string"
+          isString(params.toolChoice.function.name)
         ? { tool: { name: params.toolChoice.function.name } }
         : undefined;
-  return { tools, ...(toolChoice === undefined ? {} : { toolChoice }) };
+  return { tools, ...includeWhen(!(toolChoice === undefined), { toolChoice }) };
 }
 
-function completionRequest(params: CompletionParams): Record<string, unknown> {
+function completionRequest(params: CompletionParams) {
   const converted = convertMessages(params.messages);
   const inferenceConfig = compactObject({
     maxTokens: params.maxTokens ?? params.maxCompletionTokens,
-    stopSequences:
-      typeof params.stop === "string" ? [params.stop] : params.stop,
+    stopSequences: isString(params.stop) ? [params.stop] : params.stop,
     temperature: params.temperature,
     topP: params.topP,
   });
   const configuredFields = params.providerOptions?.additionalModelRequestFields;
-  const additionalModelRequestFields =
-    typeof configuredFields === "object" && configuredFields !== null
-      ? { ...(configuredFields as Record<string, unknown>) }
-      : {};
+  const configuredFieldsObject: JsonObject = isObject(configuredFields)
+    ? parseJsonObject(configuredFields)
+    : {};
+  const additionalModelRequestFields = { ...configuredFieldsObject };
   if (
     params.reasoningEffort !== undefined &&
     params.reasoningEffort !== "auto" &&
@@ -445,16 +430,15 @@ function completionRequest(params: CompletionParams): Record<string, unknown> {
       Object.keys(additionalModelRequestFields).length === 0
         ? undefined
         : additionalModelRequestFields,
-    inferenceConfig:
-      Object.keys(inferenceConfig).length === 0 ? undefined : inferenceConfig,
+    inferenceConfig: Object.keys(inferenceConfig).length === 0 ? undefined : inferenceConfig,
     modelId: params.model,
     toolConfig,
   });
 }
 
-function normalizedUsage(value: unknown): CompletionUsage | undefined {
-  if (typeof value !== "object" || value === null) return undefined;
-  const usage = value as Record<string, unknown>;
+function normalizedUsage(value: JsonValue | undefined): CompletionUsage | undefined {
+  if (!isObject(value)) return undefined;
+  const usage = parseJsonObject(value);
   const cacheRead = Number(usage.cacheReadInputTokens ?? 0);
   const cacheWrite = Number(usage.cacheWriteInputTokens ?? 0);
   const input = Number(usage.inputTokens ?? 0);
@@ -464,13 +448,11 @@ function normalizedUsage(value: unknown): CompletionUsage | undefined {
     completionTokens: output,
     promptTokens: prompt,
     totalTokens: prompt + output,
-    ...(cacheRead === 0
-      ? {}
-      : { promptTokensDetails: { cachedTokens: cacheRead } }),
+    ...includeWhen(!(cacheRead === 0), { promptTokensDetails: { cachedTokens: cacheRead } }),
   };
 }
 
-function bedrockFinishReason(value: unknown, hasTools = false): FinishReason {
+function bedrockFinishReason(value: JsonValue | undefined, hasTools = false): FinishReason {
   if (value === "max_tokens") return "length";
   if (value === "tool_use" || hasTools) return "tool_calls";
   if (value === "content_filtered" || value === "guardrail_intervened") {
@@ -479,35 +461,30 @@ function bedrockFinishReason(value: unknown, hasTools = false): FinishReason {
   return value === undefined || value === null ? null : "stop";
 }
 
-function normalizeCompletion(value: unknown, model: string): ChatCompletion {
-  const response = value as Record<string, unknown>;
-  const output = (response.output ?? {}) as Record<string, unknown>;
-  const message = (output.message ?? {}) as Record<string, unknown>;
+function normalizeCompletion<Value>(value: Value, model: string): ChatCompletion {
+  const response = parseJsonObject(value);
+  const output = parseJsonObject(response.output ?? {});
+  const message = parseJsonObject(output.message ?? {});
   const blocks = Array.isArray(message.content) ? message.content : [];
   let content = "";
   let reasoning = "";
   const toolCalls: ToolCall[] = [];
   for (const entry of blocks) {
-    const block = entry as Record<string, unknown>;
-    if (typeof block.text === "string") content += block.text;
-    const reasoningContent = block.reasoningContent as
-      | Record<string, unknown>
-      | undefined;
-    const reasoningText = reasoningContent?.reasoningText as
-      | Record<string, unknown>
-      | undefined;
-    if (typeof reasoningText?.text === "string") {
+    const block = parseJsonObject(entry);
+    if (isString(block.text)) content += block.text;
+    const reasoningContent = parseOptionalJsonObject(block.reasoningContent);
+    const reasoningText = parseOptionalJsonObject(reasoningContent?.reasoningText);
+    if (isString(reasoningText?.text)) {
       reasoning += reasoningText.text;
     }
-    const toolUse = block.toolUse as Record<string, unknown> | undefined;
+    const toolUse = parseOptionalJsonObject(block.toolUse);
     if (toolUse !== undefined) {
       toolCalls.push({
         function: {
           arguments: JSON.stringify(toolUse.input ?? {}),
-          name: typeof toolUse.name === "string" ? toolUse.name : "",
+          name: isString(toolUse.name) ? toolUse.name : "",
         },
-        id:
-          typeof toolUse.toolUseId === "string" ? toolUse.toolUseId : "",
+        id: isString(toolUse.toolUseId) ? toolUse.toolUseId : "",
         type: "function",
       });
     }
@@ -528,38 +505,35 @@ function normalizeCompletion(value: unknown, model: string): ChatCompletion {
             : "stop",
         index: 0,
         message: {
-          content:
-            structuredOutput?.function.arguments ??
-            (content.length === 0 ? null : content),
+          content: structuredOutput?.function.arguments ?? (content.length === 0 ? null : content),
           role: "assistant",
-          ...(reasoning.length === 0 ? {} : { reasoning }),
-          ...(toolCalls.length === 0 || structuredOutput !== undefined
-            ? {}
-            : { toolCalls }),
+          ...includeWhen(!(reasoning.length === 0), { reasoning }),
+          ...includeWhen(!(toolCalls.length === 0 || structuredOutput !== undefined), {
+            toolCalls,
+          }),
         },
       },
     ],
-    created:
-      typeof response.created === "number"
-        ? response.created
-        : unixTimestamp(),
-    id:
-      typeof response.id === "string"
-        ? response.id
-        : `bedrock-${unixTimestamp()}`,
-    model: typeof response.model === "string" ? response.model : model,
+    created: isNumber(response.created) ? response.created : unixTimestamp(),
+    id: isString(response.id) ? response.id : `bedrock-${unixTimestamp()}`,
+    model: isString(response.model) ? response.model : model,
     object: "chat.completion",
     provider: "bedrock",
     raw: value,
-    ...(usage === undefined ? {} : { usage }),
+    ...includeWhen(!(usage === undefined), { usage }),
   };
 }
 
-function streamChunk(
-  value: unknown,
-  state: { created: number; id: string; model: string; toolIndices: Map<number, number> },
+function streamChunk<Value>(
+  value: Value,
+  state: {
+    created: number;
+    id: string;
+    model: string;
+    toolIndices: Map<number, number>;
+  },
 ): ChatCompletionChunk | undefined {
-  const event = value as Record<string, unknown>;
+  const event = parseJsonObject(value);
   const delta: ChatCompletionChunk["choices"][number]["delta"] = {
     role: "assistant",
   };
@@ -569,22 +543,22 @@ function streamChunk(
   if (event.messageStart !== undefined) {
     delta.content = "";
   } else if (event.contentBlockStart !== undefined) {
-    const block = event.contentBlockStart as Record<string, unknown>;
-    const start = (block.start ?? {}) as Record<string, unknown>;
+    const block = parseJsonObject(event.contentBlockStart);
+    const start = parseJsonObject(block.start ?? {});
     const blockIndex = Number(block.contentBlockIndex ?? 0);
     if (start.reasoningContent !== undefined) {
       delta.reasoning = "";
     } else if (start.toolUse !== undefined) {
-      const tool = start.toolUse as Record<string, unknown>;
+      const tool = parseJsonObject(start.toolUse);
       const toolIndex = state.toolIndices.size;
       state.toolIndices.set(blockIndex, toolIndex);
       delta.toolCalls = [
         {
           function: {
             arguments: "",
-            name: typeof tool.name === "string" ? tool.name : "",
+            name: isString(tool.name) ? tool.name : "",
           },
-          id: typeof tool.toolUseId === "string" ? tool.toolUseId : "",
+          id: isString(tool.toolUseId) ? tool.toolUseId : "",
           index: toolIndex,
           type: "function",
         },
@@ -593,28 +567,28 @@ function streamChunk(
       delta.content = "";
     }
   } else if (event.contentBlockDelta !== undefined) {
-    const block = event.contentBlockDelta as Record<string, unknown>;
-    const rawDelta = (block.delta ?? {}) as Record<string, unknown>;
-    if (typeof rawDelta.text === "string") {
+    const block = parseJsonObject(event.contentBlockDelta);
+    const rawDelta = parseJsonObject(block.delta ?? {});
+    if (isString(rawDelta.text)) {
       delta.content = rawDelta.text;
     } else if (rawDelta.reasoningContent !== undefined) {
-      const reasoning = rawDelta.reasoningContent as Record<string, unknown>;
-      delta.reasoning = typeof reasoning.text === "string" ? reasoning.text : "";
+      const reasoning = parseJsonObject(rawDelta.reasoningContent);
+      delta.reasoning = isString(reasoning.text) ? reasoning.text : "";
     } else if (rawDelta.toolUse !== undefined) {
-      const tool = rawDelta.toolUse as Record<string, unknown>;
+      const tool = parseJsonObject(rawDelta.toolUse);
       const toolCall: ToolCallDelta = {
         function: {
-          arguments: typeof tool.input === "string" ? tool.input : "",
+          arguments: isString(tool.input) ? tool.input : "",
         },
         index: state.toolIndices.get(Number(block.contentBlockIndex ?? 0)) ?? 0,
       };
       delta.toolCalls = [toolCall];
     }
   } else if (event.messageStop !== undefined) {
-    const stop = event.messageStop as Record<string, unknown>;
+    const stop = parseJsonObject(event.messageStop);
     finishReason = bedrockFinishReason(stop.stopReason);
   } else if (event.metadata !== undefined) {
-    const metadata = event.metadata as Record<string, unknown>;
+    const metadata = parseJsonObject(event.metadata);
     usage = normalizedUsage(metadata.usage);
   } else {
     return undefined;
@@ -628,12 +602,12 @@ function streamChunk(
     object: "chat.completion.chunk",
     provider: "bedrock",
     raw: value,
-    ...(usage === undefined ? {} : { usage }),
+    ...includeWhen(!(usage === undefined), { usage }),
   };
 }
 
-async function* normalizeStream(
-  stream: AsyncIterable<unknown>,
+async function* normalizeStream<Event>(
+  stream: AsyncIterable<Event>,
   model: string,
 ): AsyncIterable<ChatCompletionChunk> {
   const state = {
@@ -648,7 +622,7 @@ async function* normalizeStream(
   }
 }
 
-const batchStatuses: Record<string, BatchStatus> = {
+const batchStatuses = {
   Completed: "completed",
   Expired: "expired",
   Failed: "failed",
@@ -659,61 +633,67 @@ const batchStatuses: Record<string, BatchStatus> = {
   Stopping: "cancelling",
   Submitted: "validating",
   Validating: "validating",
-};
+} satisfies Record<string, BatchStatus>;
 
-function timestamp(value: unknown): number {
+function timestamp<Value>(value: Value): number {
   if (value instanceof Date) return Math.floor(value.getTime() / 1_000);
-  if (typeof value === "string") {
+  if (isString(value)) {
     const parsed = Date.parse(value);
     return Number.isNaN(parsed) ? 0 : Math.floor(parsed / 1_000);
   }
   return 0;
 }
 
-function nestedString(
-  value: unknown,
-  ...path: string[]
-): string | undefined {
-  let current = value;
+function nestedString<Value>(value: Value, ...path: string[]): string | undefined {
+  let current: unknown = value;
   for (const key of path) {
-    if (typeof current !== "object" || current === null) return undefined;
-    current = (current as Record<string, unknown>)[key];
+    if (!isObject(current) || !(key in current)) return undefined;
+    // SAFETY: The key-in check establishes that this object contains the requested path segment.
+    current = (current as JsonObject)[key];
   }
-  return typeof current === "string" ? current : undefined;
+  return isString(current) ? current : undefined;
 }
 
-function normalizeBatch(value: unknown): Batch {
-  const job = value as Record<string, unknown>;
+function normalizeBatch<Value>(value: Value): Batch {
+  const job = parseJsonObject(value);
   const status =
-    typeof job.status === "string"
-      ? batchStatuses[job.status] ?? "in_progress"
+    job.status === "Completed" ||
+    job.status === "Expired" ||
+    job.status === "Failed" ||
+    job.status === "InProgress" ||
+    job.status === "PartiallyCompleted" ||
+    job.status === "Scheduled" ||
+    job.status === "Stopped" ||
+    job.status === "Stopping" ||
+    job.status === "Submitted" ||
+    job.status === "Validating"
+      ? batchStatuses[job.status]
       : "in_progress";
-  return {
+  const batch: Batch = {
     completionWindow: "24h",
     createdAt: timestamp(job.submitTime),
     endpoint: "/v1/chat/completions",
-    id: typeof job.jobArn === "string" ? job.jobArn : "",
+    id: isString(job.jobArn) ? job.jobArn : "",
     object: "batch",
     provider: "bedrock",
     status,
     raw: value,
-    inputFileId:
-      nestedString(job.inputDataConfig, "s3InputDataConfig", "s3Uri") ?? "",
-    outputFileId:
-      nestedString(job.outputDataConfig, "s3OutputDataConfig", "s3Uri") ?? null,
+    inputFileId: nestedString(job.inputDataConfig, "s3InputDataConfig", "s3Uri") ?? "",
+    outputFileId: nestedString(job.outputDataConfig, "s3OutputDataConfig", "s3Uri") ?? null,
     requestCounts: {
       completed: Number(job.successRecordCount ?? 0),
       failed: Number(job.errorRecordCount ?? 0),
       total: Number(job.totalRecordCount ?? 0),
     },
-    ...(typeof job.jobName === "string" && job.jobName.length > 0
-      ? { metadata: { jobName: job.jobName } }
-      : {}),
-    ...(typeof job.modelId === "string" ? { model: job.modelId } : {}),
   };
+  if (isString(job.jobName) && job.jobName.length > 0) {
+    batch.metadata = { jobName: job.jobName };
+  }
+  if (isString(job.modelId)) batch.model = job.modelId;
+  return batch;
 }
 
-function parseS3Uri(value: string): { bucket: string; key: string } {
+function parseS3Uri(value: string) {
   if (!value.startsWith("s3://")) {
     throw invalidRequest(`Expected an S3 URI starting with "s3://", got: ${value}`);
   }
@@ -730,21 +710,17 @@ function parseS3Uri(value: string): { bucket: string; key: string } {
   return { bucket, key };
 }
 
-function optionString(
-  options: Record<string, unknown>,
-  camel: string,
-  snake: string,
-): string | undefined {
+function optionString(options: JsonObject, camel: string, snake: string): string | undefined {
   const value = options[camel] ?? options[snake];
-  return typeof value === "string" && value.length > 0 ? value : undefined;
+  return isString(value) && value.length > 0 ? value : undefined;
 }
 
-async function bodyText(value: unknown): Promise<string> {
-  if (typeof value === "string") return value;
+async function bodyText<Value>(value: Value): Promise<string> {
+  if (isString(value)) return value;
   if (value instanceof Uint8Array) return new TextDecoder().decode(value);
-  if (typeof value === "object" && value !== null) {
-    const transform = (value as { transformToString?: () => Promise<string> })
-      .transformToString;
+  if (isObject(value)) {
+    // SAFETY: The provider contract establishes the asserted representation at this boundary.
+    const transform = (value as { transformToString?: () => Promise<string> }).transformToString;
     if (transform !== undefined) return transform.call(value);
   }
   throw new TypeError("AWS returned an unreadable response body.");
@@ -754,29 +730,28 @@ function batchResults(text: string, model: string): BatchResult {
   const results: BatchResult["results"] = [];
   for (const line of text.split("\n")) {
     if (line.trim().length === 0) continue;
-    let record: Record<string, unknown>;
+    let record: JsonObject;
     try {
-      record = JSON.parse(line) as Record<string, unknown>;
+      record = parseJsonObject(JSON.parse(line));
     } catch {
       continue;
     }
-    const customId = typeof record.recordId === "string" ? record.recordId : "";
-    if (typeof record.error === "object" && record.error !== null) {
-      const error = record.error as Record<string, unknown>;
+    const customId = isString(record.recordId) ? record.recordId : "";
+    if (isObject(record.error)) {
+      const error = parseJsonObject(record.error);
       results.push({
         customId,
         error: {
-          code:
-            typeof error.errorCode === "string" ? error.errorCode : "unknown",
-          message:
-            typeof error.errorMessage === "string"
-              ? error.errorMessage
-              : "Unknown error",
+          code: isString(error.errorCode) ? error.errorCode : "unknown",
+          message: isString(error.errorMessage) ? error.errorMessage : "Unknown error",
         },
       });
     } else if (record.modelOutput !== undefined) {
       try {
-        results.push({ customId, result: normalizeCompletion(record.modelOutput, model) });
+        results.push({
+          customId,
+          result: normalizeCompletion(record.modelOutput, model),
+        });
       } catch (error) {
         results.push({
           customId,
@@ -802,22 +777,17 @@ function batchResults(text: string, model: string): BatchResult {
 /** AWS Bedrock adapter using Converse, model invocation, control-plane, and S3 APIs. */
 export class BedrockProvider extends BaseProvider {
   readonly metadata: ProviderMetadata;
-  private readonly control: BedrockClientLike;
+  private readonly control: BedrockControlClientLike;
   private readonly runtime: BedrockClientLike;
-  private readonly s3: BedrockClientLike;
+  private readonly s3: BedrockS3ClientLike;
 
-  constructor(
-    options: ProviderOptions = {},
-    clients: BedrockProviderClients = {},
-  ) {
+  constructor(options: ProviderOptions = {}, clients: BedrockProviderClients = {}) {
     super();
     const resolved = createClients(options, clients);
     this.control = resolved.control;
     this.runtime = resolved.runtime;
     this.s3 = resolved.s3;
-    const apiBase =
-      options.apiBase ??
-      getEnvironmentVariable("AWS_ENDPOINT_URL_BEDROCK_RUNTIME");
+    const apiBase = options.apiBase ?? getEnvironmentVariable("AWS_ENDPOINT_URL_BEDROCK_RUNTIME");
     this.metadata = completeProviderMetadata({
       capabilities: { ...bedrockCapabilities },
       documentationUrl: "https://aws.amazon.com/bedrock/",
@@ -825,7 +795,7 @@ export class BedrockProvider extends BaseProvider {
       envApiKey: "AWS_BEARER_TOKEN_BEDROCK",
       name: "bedrock",
       requiresApiKey: false,
-      ...(apiBase === undefined ? {} : { apiBase }),
+      ...includeWhen(!(apiBase === undefined), { apiBase }),
     });
   }
 
@@ -839,48 +809,42 @@ export class BedrockProvider extends BaseProvider {
     return this.execute(async () => {
       const requestOptions = timeoutAbortOptions(params.timeout);
       if (params.stream === true) {
+        // SAFETY: The provider contract establishes the asserted representation at this boundary.
         const command = new ConverseStreamCommand(request as never);
-        const response = (await (requestOptions === undefined
+        const response = await (requestOptions === undefined
           ? this.runtime.send(command)
-          : this.runtime.send(command, requestOptions))) as Record<string, unknown>;
+          : this.runtime.send(command, requestOptions));
         if (!isAsyncIterable(response.stream)) {
           throw new TypeError("Bedrock returned an empty Converse stream.");
         }
-        return this.protectStream(
-          normalizeStream(response.stream, params.model),
-        );
+        return this.protectStream(normalizeStream(response.stream, params.model));
       }
+      // SAFETY: The provider contract establishes the asserted representation at this boundary.
       const command = new ConverseCommand(request as never);
-      const response = requestOptions === undefined
-        ? await this.runtime.send(command)
-        : await this.runtime.send(command, requestOptions);
+      const response =
+        requestOptions === undefined
+          ? await this.runtime.send(command)
+          : await this.runtime.send(command, requestOptions);
       return normalizeCompletion(response, params.model);
     });
   }
 
   override embedding(params: EmbeddingParams): Promise<EmbeddingResponse> {
     const input = params.input;
-    if (
-      typeof input !== "string" &&
-      !(Array.isArray(input) && input.every((value) => typeof value === "string"))
-    ) {
+    if (!isString(input) && !(Array.isArray(input) && input.every((value) => isString(value)))) {
       return Promise.reject(
-        new TypeError(
-          "Bedrock embeddings require a string or an array of strings.",
-        ),
+        new TypeError("Bedrock embeddings require a string or an array of strings."),
       );
     }
     if (params.encodingFormat === "base64") {
-      return Promise.reject(
-        new TypeError("Bedrock embeddings do not support base64 encoding."),
-      );
+      return Promise.reject(new TypeError("Bedrock embeddings do not support base64 encoding."));
     }
-    const texts = typeof input === "string" ? [input] : input;
+    const texts = isString(input) ? [input] : input;
     return this.execute(async () => {
       const data: EmbeddingResponse["data"] = [];
       let totalTokens = 0;
       for (const [index, text] of texts.entries()) {
-        const response = (await this.runtime.send(
+        const response = await this.runtime.send(
           new InvokeModelCommand({
             body: JSON.stringify(
               compactObject({
@@ -892,16 +856,15 @@ export class BedrockProvider extends BaseProvider {
             contentType: "application/json",
             modelId: params.model,
           }),
-        )) as Record<string, unknown>;
-        const parsed = JSON.parse(await bodyText(response.body)) as Record<
-          string,
-          unknown
-        >;
+        );
+        const decoded: JsonValue = parseJsonValue(
+          JSON.parse(await bodyText(response.body)),
+          "Bedrock embedding response",
+        );
+        const parsed = parseJsonObject(decoded);
         data.push({
           embedding: Array.isArray(parsed.embedding)
-            ? parsed.embedding.filter(
-                (value): value is number => typeof value === "number",
-              )
+            ? parsed.embedding.filter((value): value is number => isNumber(value))
             : [],
           index,
           object: "embedding",
@@ -918,19 +881,15 @@ export class BedrockProvider extends BaseProvider {
     });
   }
 
-  override listModels(
-    providerOptions: Record<string, unknown> = {},
-  ): Promise<Model[]> {
+  override listModels(providerOptions: JsonObject = {}): Promise<Model[]> {
     return this.execute(async () => {
-      const response = (await this.control.send(
-        new ListFoundationModelsCommand(providerOptions),
-      )) as Record<string, unknown>;
-      const summaries = Array.isArray(response.modelSummaries)
-        ? response.modelSummaries
-        : [];
+      const response = parseJsonObject(
+        await this.control.send(new ListFoundationModelsCommand(providerOptions)),
+      );
+      const summaries = Array.isArray(response.modelSummaries) ? response.modelSummaries : [];
       return summaries.flatMap((entry): Model[] => {
-        const model = entry as Record<string, unknown>;
-        return typeof model.modelId === "string"
+        const model = parseJsonObject(entry);
+        return isString(model.modelId)
           ? [
               {
                 created: 0,
@@ -965,7 +924,7 @@ export class BedrockProvider extends BaseProvider {
     parseS3Uri(params.inputFilePath);
     parseS3Uri(outputS3Uri);
     return this.execute(async () => {
-      const created = (await this.control.send(
+      const created = await this.control.send(
         new CreateModelInvocationJobCommand({
           inputDataConfig: {
             s3InputDataConfig: { s3Uri: params.inputFilePath },
@@ -977,17 +936,15 @@ export class BedrockProvider extends BaseProvider {
             s3OutputDataConfig: { s3Uri: outputS3Uri },
           },
           roleArn,
-          ...(params.metadata === undefined
-            ? {}
-            : {
-                tags: Object.entries(params.metadata).map(([key, value]) => ({
-                  key,
-                  value,
-                })),
-              }),
+          ...includeWhen(!(params.metadata === undefined), {
+            tags: Object.entries(params.metadata ?? {}).map(([key, value]) => ({
+              key,
+              value,
+            })),
+          }),
         }),
-      )) as Record<string, unknown>;
-      if (typeof created.jobArn !== "string") {
+      );
+      if (!isString(created.jobArn)) {
         throw new TypeError("Bedrock did not return a batch job ARN.");
       }
       const job = await this.control.send(
@@ -1000,35 +957,29 @@ export class BedrockProvider extends BaseProvider {
   override retrieveBatch(batchId: string): Promise<Batch> {
     return this.execute(async () =>
       normalizeBatch(
-        await this.control.send(
-          new GetModelInvocationJobCommand({ jobIdentifier: batchId }),
-        ),
+        await this.control.send(new GetModelInvocationJobCommand({ jobIdentifier: batchId })),
       ),
     );
   }
 
   override cancelBatch(batchId: string): Promise<Batch> {
     return this.execute(async () => {
-      await this.control.send(
-        new StopModelInvocationJobCommand({ jobIdentifier: batchId }),
-      );
+      await this.control.send(new StopModelInvocationJobCommand({ jobIdentifier: batchId }));
       return normalizeBatch(
-        await this.control.send(
-          new GetModelInvocationJobCommand({ jobIdentifier: batchId }),
-        ),
+        await this.control.send(new GetModelInvocationJobCommand({ jobIdentifier: batchId })),
       );
     });
   }
 
   override listBatches(params: ListBatchesParams = {}): Promise<Batch[]> {
     return this.execute(async () => {
-      const response = (await this.control.send(
+      const response = await this.control.send(
         new ListModelInvocationJobsCommand({
           maxResults: params.limit,
           nextToken: params.after,
           ...params.providerOptions,
         }),
-      )) as Record<string, unknown>;
+      );
       return Array.isArray(response.invocationJobSummaries)
         ? response.invocationJobSummaries.map(normalizeBatch)
         : [];
@@ -1037,45 +988,30 @@ export class BedrockProvider extends BaseProvider {
 
   override retrieveBatchResults(batchId: string): Promise<BatchResult> {
     return this.execute(async () => {
-      const job = (await this.control.send(
+      const job = await this.control.send(
         new GetModelInvocationJobCommand({ jobIdentifier: batchId }),
-      )) as Record<string, unknown>;
+      );
       if (job.status !== "Completed" && job.status !== "PartiallyCompleted") {
-        throw new BatchNotCompleteError(
-          batchId,
-          normalizeBatch(job).status,
-          "bedrock",
-        );
+        throw new BatchNotCompleteError(batchId, normalizeBatch(job).status, "bedrock");
       }
-      const outputUri = nestedString(
-        job.outputDataConfig,
-        "s3OutputDataConfig",
-        "s3Uri",
-      );
-      const inputUri = nestedString(
-        job.inputDataConfig,
-        "s3InputDataConfig",
-        "s3Uri",
-      );
+      const outputUri = nestedString(job.outputDataConfig, "s3OutputDataConfig", "s3Uri");
+      const inputUri = nestedString(job.inputDataConfig, "s3InputDataConfig", "s3Uri");
       if (outputUri === undefined || inputUri === undefined) {
         throw invalidRequest("Bedrock batch job is missing its S3 input or output URI.");
       }
       const input = parseS3Uri(inputUri);
       const output = parseS3Uri(outputUri);
       const filename = input.key.split("/").at(-1) ?? input.key;
-      const jobArn = typeof job.jobArn === "string" ? job.jobArn : batchId;
+      const jobArn = isString(job.jobArn) ? job.jobArn : batchId;
       const jobId = jobArn.split("/").at(-1) ?? jobArn;
       const prefix = output.key.endsWith("/") ? output.key : `${output.key}/`;
-      const object = (await this.s3.send(
+      const object = await this.s3.send(
         new GetObjectCommand({
           Bucket: output.bucket,
           Key: `${prefix}${jobId}/${filename}.out`,
         }),
-      )) as Record<string, unknown>;
-      return batchResults(
-        await bodyText(object.Body),
-        typeof job.modelId === "string" ? job.modelId : "",
       );
+      return batchResults(await bodyText(object.Body), isString(job.modelId) ? job.modelId : "");
     });
   }
 }

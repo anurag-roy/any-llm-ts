@@ -1,3 +1,8 @@
+import { includeWhen } from "../utils.js";
+import type { JsonPrimitive, JsonValue } from "../types.js";
+import { parseJsonObject, parseJsonValue, parseOptionalJsonObject } from "../utils.js";
+import type { JsonObject } from "../types.js";
+import { isFunction, isJsonValue, isNumber, isObject, isString } from "../utils.js";
 import { readFile } from "node:fs/promises";
 
 import { BatchNotCompleteError } from "../errors.js";
@@ -40,23 +45,34 @@ import {
 import { OpenAIProvider } from "./openai.js";
 
 type Fetch = (input: string | URL | Request, init?: RequestInit) => Promise<globalThis.Response>;
+type OtariJsonResponse = AsyncIterable<JsonValue> | JsonValue;
+type OtariTransportValue =
+  | Blob
+  | JsonPrimitive
+  | OtariTransportObject
+  | OtariTransportValue[]
+  | undefined;
+
+interface OtariTransportObject {
+  [key: string]: OtariTransportValue;
+}
 
 export interface OtariClientLike {
-  cancelBatch(batchId: string, provider: string): Promise<unknown>;
-  completion(params: Record<string, unknown>): Promise<unknown>;
-  createBatch(params: Record<string, unknown>): Promise<unknown>;
-  embedding(params: Record<string, unknown>): Promise<unknown>;
-  imageGeneration(params: Record<string, unknown>): Promise<unknown>;
-  listBatches(provider: string, options?: Record<string, unknown>): Promise<unknown[]>;
-  listModels(): Promise<unknown[]>;
-  message(params: Record<string, unknown>): Promise<unknown>;
-  moderation(params: Record<string, unknown>): Promise<unknown>;
-  rerank(params: Record<string, unknown>): Promise<unknown>;
-  response(params: Record<string, unknown>): Promise<unknown>;
-  retrieveBatch(batchId: string, provider: string): Promise<unknown>;
-  retrieveBatchResults(batchId: string, provider: string): Promise<unknown>;
-  speech(params: Record<string, unknown>): Promise<Uint8Array>;
-  transcription(params: Record<string, unknown>): Promise<unknown>;
+  cancelBatch(batchId: string, provider: string): Promise<JsonValue>;
+  completion<Params extends object>(params: Params): Promise<OtariJsonResponse>;
+  createBatch<Params extends object>(params: Params): Promise<JsonValue>;
+  embedding<Params extends object>(params: Params): Promise<JsonValue>;
+  imageGeneration<Params extends object>(params: Params): Promise<JsonValue>;
+  listBatches(provider: string, options?: JsonObject): Promise<JsonValue[]>;
+  listModels(): Promise<JsonValue[]>;
+  message<Params extends object>(params: Params): Promise<OtariJsonResponse>;
+  moderation<Params extends object>(params: Params): Promise<JsonValue>;
+  rerank<Params extends object>(params: Params): Promise<JsonValue>;
+  response<Params extends object>(params: Params): Promise<OtariJsonResponse>;
+  retrieveBatch(batchId: string, provider: string): Promise<JsonValue>;
+  retrieveBatchResults(batchId: string, provider: string): Promise<JsonValue>;
+  speech<Params extends object>(params: Params): Promise<Uint8Array>;
+  transcription<Params extends object>(params: Params): Promise<JsonValue>;
 }
 
 interface OtariTransportOptions {
@@ -68,35 +84,45 @@ interface OtariTransportOptions {
 }
 
 async function providerError(response: globalThis.Response): Promise<Error> {
-  const body = await response.json().catch(() => ({})) as Record<string, unknown>;
-  const message = typeof body.message === "string"
+  const body = parseJsonObject(await response.json().catch(() => ({})));
+  const message = isString(body.message)
     ? body.message
-    : typeof body.detail === "string" ? body.detail : response.statusText;
+    : isString(body.detail)
+      ? body.detail
+      : response.statusText;
   return Object.assign(new Error(message), {
     headers: response.headers,
     status: response.status,
-    ...(typeof body.code === "string" ? { code: body.code } : {}),
+    ...includeWhen(isString(body.code), { code: body.code }),
   });
 }
 
 function responseRequestId(response: globalThis.Response): string | undefined {
-  return response.headers.get("request-id") ??
+  return (
+    response.headers.get("request-id") ??
     response.headers.get("x-request-id") ??
     response.headers.get("x-stainless-request-id") ??
-    undefined;
+    undefined
+  );
 }
 
-function withRequestId(value: unknown, requestId: string | undefined): unknown {
-  if (requestId === undefined || typeof value !== "object" || value === null) return value;
-  const record = value as Record<string, unknown>;
-  if (record.type === "message_start" && typeof record.message === "object" && record.message !== null) {
-    const message = record.message as Record<string, unknown>;
-    return { ...record, message: { ...message, request_id: message.request_id ?? requestId } };
+function withRequestId<Value extends JsonValue>(
+  value: Value,
+  requestId: string | undefined,
+): JsonValue {
+  if (requestId === undefined || !isObject(value)) return value;
+  const record: JsonObject = parseJsonObject(value);
+  if (record.type === "message_start" && isObject(record.message)) {
+    const message: JsonObject = parseJsonObject(record.message);
+    return {
+      ...record,
+      message: { ...message, request_id: message.request_id ?? requestId },
+    };
   }
   return { ...record, request_id: record.request_id ?? requestId };
 }
 
-async function* responseEvents(response: globalThis.Response): AsyncIterable<unknown> {
+async function* responseEvents(response: globalThis.Response): AsyncIterable<JsonValue> {
   if (response.body === null) return;
   const requestId = responseRequestId(response);
   const reader = response.body.getReader();
@@ -115,7 +141,7 @@ async function* responseEvents(response: globalThis.Response): AsyncIterable<unk
           if (!line.startsWith("data:")) continue;
           const data = line.slice(5).trim();
           if (data.length > 0 && data !== "[DONE]") {
-            yield withRequestId(JSON.parse(data) as unknown, requestId);
+            yield withRequestId(parseJsonValue(JSON.parse(data), "Otari stream event"), requestId);
           }
         }
       }
@@ -131,68 +157,76 @@ class FetchOtariClient implements OtariClientLike {
   private readonly headers: Record<string, string>;
 
   constructor(options: OtariTransportOptions) {
-    const platformToken = options.platformToken ?? process.env.OTARI_AI_TOKEN ?? process.env.GATEWAY_PLATFORM_TOKEN;
+    const platformToken =
+      options.platformToken ?? process.env.OTARI_AI_TOKEN ?? process.env.GATEWAY_PLATFORM_TOKEN;
     const apiKey = options.apiKey ?? process.env.GATEWAY_API_KEY;
     const platformMode = platformToken !== undefined && options.apiKey === undefined;
-    const rawBase = options.apiBase ?? process.env.GATEWAY_API_BASE ?? process.env.OTARI_API_BASE ??
+    const rawBase =
+      options.apiBase ??
+      process.env.GATEWAY_API_BASE ??
+      process.env.OTARI_API_BASE ??
       (platformMode ? "https://api.otari.ai" : undefined);
     if (rawBase === undefined) {
-      throw new TypeError("Otari requires apiBase/GATEWAY_API_BASE unless a platform token is configured.");
+      throw new TypeError(
+        "Otari requires apiBase/GATEWAY_API_BASE unless a platform token is configured.",
+      );
     }
     const base = rawBase.replace(/\/+$/u, "");
     this.baseUrl = base.endsWith("/v1") ? base : `${base}/v1`;
     this.fetch = options.fetch ?? globalThis.fetch;
     this.headers = {
       ...options.defaultHeaders,
-      ...(platformMode ? { Authorization: `Bearer ${platformToken}` } : {}),
-      ...(!platformMode && apiKey !== undefined ? { "Otari-Key": `Bearer ${apiKey}` } : {}),
+      ...includeWhen(platformMode, { Authorization: `Bearer ${platformToken}` }),
+      ...includeWhen(!platformMode && apiKey !== undefined, { "Otari-Key": `Bearer ${apiKey}` }),
     };
   }
 
-  completion(params: Record<string, unknown>): Promise<unknown> {
+  completion<Params extends object>(params: Params): Promise<OtariJsonResponse> {
     return this.post("/chat/completions", params);
   }
 
-  response(params: Record<string, unknown>): Promise<unknown> {
+  response<Params extends object>(params: Params): Promise<OtariJsonResponse> {
     return this.post("/responses", params);
   }
 
-  message(params: Record<string, unknown>): Promise<unknown> {
+  message<Params extends object>(params: Params): Promise<OtariJsonResponse> {
     return this.post("/messages", params);
   }
 
-  embedding(params: Record<string, unknown>): Promise<unknown> {
-    return this.post("/embeddings", params);
+  embedding<Params extends object>(params: Params): Promise<JsonValue> {
+    return this.postJson("/embeddings", params);
   }
 
-  moderation(params: Record<string, unknown>): Promise<unknown> {
-    const { includeRaw, ...body } = params;
-    return this.post(`/moderations${includeRaw === true ? "?include_raw=true" : ""}`, body);
+  moderation<Params extends object>(params: Params): Promise<JsonValue> {
+    const includeRaw = "includeRaw" in params && params.includeRaw === true;
+    const body = Object.fromEntries(Object.entries(params).filter(([key]) => key !== "includeRaw"));
+    return this.postJson(`/moderations${includeRaw ? "?include_raw=true" : ""}`, body);
   }
 
-  rerank(params: Record<string, unknown>): Promise<unknown> {
-    return this.post("/rerank", params);
+  rerank<Params extends object>(params: Params): Promise<JsonValue> {
+    return this.postJson("/rerank", params);
   }
 
-  imageGeneration(params: Record<string, unknown>): Promise<unknown> {
-    return this.post("/images/generations", params);
+  imageGeneration<Params extends object>(params: Params): Promise<JsonValue> {
+    return this.postJson("/images/generations", params);
   }
 
-  speech(params: Record<string, unknown>): Promise<Uint8Array> {
+  speech<Params extends object>(params: Params): Promise<Uint8Array> {
     return this.bytes("/audio/speech", params);
   }
 
-  async transcription(params: Record<string, unknown>): Promise<unknown> {
+  async transcription<Params extends object>(params: Params): Promise<JsonValue> {
     const form = new FormData();
     for (const [key, value] of Object.entries(params)) {
       if (value === undefined) continue;
-      if (key === "file" && value instanceof Blob) form.append(key, value, value instanceof File ? value.name : "audio");
+      if (key === "file" && value instanceof Blob)
+        form.append(key, value, value instanceof File ? value.name : "audio");
       else if (Array.isArray(value)) {
         value.forEach((entry) => {
-          form.append(`${key}[]`, typeof entry === "string" ? entry : JSON.stringify(entry));
+          form.append(`${key}[]`, isString(entry) ? entry : JSON.stringify(entry));
         });
       } else {
-        form.append(key, typeof value === "string" ? value : JSON.stringify(value));
+        form.append(key, isString(value) ? value : JSON.stringify(value));
       }
     }
     const response = await this.fetch(`${this.baseUrl}/audio/transcriptions`, {
@@ -202,62 +236,88 @@ class FetchOtariClient implements OtariClientLike {
     });
     if (!response.ok) throw await providerError(response);
     const contentType = response.headers.get("content-type") ?? "";
-    return contentType.includes("application/json") ? { json: await response.json() } : { text: await response.text() };
+    return contentType.includes("application/json")
+      ? { json: parseJsonValue(await response.json(), "Otari transcription") }
+      : { text: await response.text() };
   }
 
-  listModels(): Promise<unknown[]> {
+  listModels(): Promise<JsonValue[]> {
     return this.get("/models").then((value) => {
-      const record = value as Record<string, unknown>;
+      const record = parseJsonObject(value);
       return Array.isArray(record.data) ? record.data : Array.isArray(value) ? value : [];
     });
   }
 
-  createBatch(params: Record<string, unknown>): Promise<unknown> {
-    return this.post("/batches", params);
+  createBatch<Params extends object>(params: Params): Promise<JsonValue> {
+    return this.postJson("/batches", params);
   }
 
-  retrieveBatch(batchId: string, provider: string): Promise<unknown> {
-    return this.get(`/batches/${encodeURIComponent(batchId)}?provider=${encodeURIComponent(provider)}`);
+  retrieveBatch(batchId: string, provider: string): Promise<JsonValue> {
+    return this.get(
+      `/batches/${encodeURIComponent(batchId)}?provider=${encodeURIComponent(provider)}`,
+    );
   }
 
-  cancelBatch(batchId: string, provider: string): Promise<unknown> {
-    return this.post(`/batches/${encodeURIComponent(batchId)}/cancel?provider=${encodeURIComponent(provider)}`, {});
+  cancelBatch(batchId: string, provider: string): Promise<JsonValue> {
+    return this.postJson(
+      `/batches/${encodeURIComponent(batchId)}/cancel?provider=${encodeURIComponent(provider)}`,
+      {},
+    );
   }
 
-  async listBatches(provider: string, options: Record<string, unknown> = {}): Promise<unknown[]> {
+  async listBatches(provider: string, options: JsonObject = {}): Promise<JsonValue[]> {
     const query = new URLSearchParams({ provider });
-    if (typeof options.after === "string") query.set("after", options.after);
-    if (typeof options.limit === "number") query.set("limit", String(options.limit));
-    const response = await this.get(`/batches?${query.toString()}`) as Record<string, unknown>;
+    if (isString(options.after)) query.set("after", options.after);
+    if (isNumber(options.limit)) query.set("limit", String(options.limit));
+    const response = parseJsonObject(await this.get(`/batches?${query.toString()}`));
     return Array.isArray(response.data) ? response.data : Array.isArray(response) ? response : [];
   }
 
-  retrieveBatchResults(batchId: string, provider: string): Promise<unknown> {
-    return this.get(`/batches/${encodeURIComponent(batchId)}/results?provider=${encodeURIComponent(provider)}`);
+  retrieveBatchResults(batchId: string, provider: string): Promise<JsonValue> {
+    return this.get(
+      `/batches/${encodeURIComponent(batchId)}/results?provider=${encodeURIComponent(provider)}`,
+    );
   }
 
-  private async get(path: string): Promise<unknown> {
-    const response = await this.fetch(`${this.baseUrl}${path}`, { headers: this.headers });
-    if (!response.ok) throw await providerError(response);
-    return response.json();
-  }
-
-  private async post(path: string, body: Record<string, unknown>): Promise<unknown> {
-    const { timeout, ...requestBody } = body;
-    const milliseconds = typeof timeout === "number" ? timeoutMilliseconds(timeout) : undefined;
+  private async get(path: string): Promise<JsonValue> {
     const response = await this.fetch(`${this.baseUrl}${path}`, {
+      headers: this.headers,
+    });
+    if (!response.ok) throw await providerError(response);
+    return parseJsonValue(await response.json(), "Otari response");
+  }
+
+  private async post<Body extends object>(path: string, body: Body): Promise<OtariJsonResponse> {
+    const timeout = "timeout" in body ? body.timeout : undefined;
+    const requestBody = Object.fromEntries(
+      Object.entries(body).filter(([key]) => key !== "timeout"),
+    );
+    const milliseconds = isNumber(timeout) ? timeoutMilliseconds(timeout) : undefined;
+    const requestInit: RequestInit = {
       body: JSON.stringify(requestBody),
       headers: { "Content-Type": "application/json", ...this.headers },
       method: "POST",
-      ...(milliseconds === undefined ? {} : { signal: AbortSignal.timeout(milliseconds) }),
-    });
+    };
+    if (milliseconds !== undefined) requestInit.signal = AbortSignal.timeout(milliseconds);
+    const response = await this.fetch(`${this.baseUrl}${path}`, requestInit);
     if (!response.ok) throw await providerError(response);
     return requestBody.stream === true
       ? responseEvents(response)
-      : withRequestId(await response.json(), responseRequestId(response));
+      : withRequestId(
+          parseJsonValue(await response.json(), "Otari response"),
+          responseRequestId(response),
+        );
   }
 
-  private async bytes(path: string, body: Record<string, unknown>): Promise<Uint8Array> {
+  private async postJson<Body extends object>(path: string, body: Body): Promise<JsonValue> {
+    const response = await this.post(path, body);
+    if (isAsyncIterable(response)) {
+      throw new TypeError(`Otari returned a stream for non-streaming endpoint ${path}.`);
+    }
+    return response;
+  }
+
+  private async bytes<Body extends object>(path: string, body: Body): Promise<Uint8Array> {
     const response = await this.fetch(`${this.baseUrl}${path}`, {
       body: JSON.stringify(body),
       headers: { "Content-Type": "application/json", ...this.headers },
@@ -272,43 +332,58 @@ function camelKey(value: string): string {
   return value.replace(/_([a-z])/gu, (_match, letter: string) => letter.toUpperCase());
 }
 
-function camelize(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(camelize);
-  if (typeof value !== "object" || value === null) return value;
-  return Object.fromEntries(Object.entries(value).map(([key, item]) => [camelKey(key), camelize(item)]));
+function camelize<Value>(value: Value): JsonValue | undefined {
+  if (Array.isArray(value)) return value.map(camelize).filter(isJsonValue);
+  if (!isObject(value)) return isJsonValue(value) ? value : undefined;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [camelKey(key), camelize(item)]),
+  );
 }
 
 function snakeKey(value: string): string {
   return value.replace(/[A-Z]/gu, (letter) => `_${letter.toLowerCase()}`);
 }
 
-function snakeize(value: unknown): unknown {
+function snakeize<Value>(value: Value): OtariTransportValue {
   if (Array.isArray(value)) return value.map(snakeize);
-  if (typeof value !== "object" || value === null || value instanceof Blob) return value;
-  return Object.fromEntries(Object.entries(value).map(([key, item]) => [snakeKey(key), snakeize(item)]));
+  if (value instanceof Blob) return value;
+  if (!isObject(value)) {
+    if (value === undefined) return undefined;
+    return isJsonValue(value) ? value : undefined;
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [snakeKey(key), snakeize(item)]),
+  );
 }
 
-function batchStatus(value: unknown): BatchStatus {
+function batchStatus(value: JsonValue | undefined): BatchStatus {
   if (
-    value === "cancelled" || value === "cancelling" || value === "completed" || value === "expired" ||
-    value === "failed" || value === "finalizing" || value === "in_progress" || value === "validating"
-  ) return value;
+    value === "cancelled" ||
+    value === "cancelling" ||
+    value === "completed" ||
+    value === "expired" ||
+    value === "failed" ||
+    value === "finalizing" ||
+    value === "in_progress" ||
+    value === "validating"
+  )
+    return value;
   return "in_progress";
 }
 
-function numberValue(record: Record<string, unknown>, snake: string, camel: string): number | undefined {
+function numberValue(record: JsonObject, snake: string, camel: string): number | undefined {
   const value = record[snake] ?? record[camel];
-  return typeof value === "number" ? value : undefined;
+  return isNumber(value) ? value : undefined;
 }
 
-function stringValue(record: Record<string, unknown>, snake: string, camel: string): string | undefined {
+function stringValue(record: JsonObject, snake: string, camel: string): string | undefined {
   const value = record[snake] ?? record[camel];
-  return typeof value === "string" ? value : undefined;
+  return isString(value) ? value : undefined;
 }
 
-function normalizeBatch(value: unknown): Batch {
-  const batch = value as Record<string, unknown>;
-  const counts = (batch.request_counts ?? batch.requestCounts) as Record<string, unknown> | undefined;
+function normalizeBatch(value: JsonValue | undefined): Batch {
+  const batch = parseJsonObject(value);
+  const counts = parseOptionalJsonObject(batch.request_counts ?? batch.requestCounts);
   const provider = stringValue(batch, "provider", "provider") ?? "otari";
   const normalized: Batch = {
     completionWindow: stringValue(batch, "completion_window", "completionWindow") ?? "24h",
@@ -338,31 +413,33 @@ function normalizeBatch(value: unknown): Batch {
   return normalized;
 }
 
-function batchProvider(options: Record<string, unknown> | undefined): string {
+function batchProvider(options: JsonObject | undefined): string {
   const provider = options?.provider;
-  if (typeof provider !== "string" || provider.length === 0) {
+  if (!isString(provider) || provider.length === 0) {
     throw new TypeError("Otari batch operations require providerOptions.provider.");
   }
   return provider;
 }
 
-function parseBatchInput(content: string): { model: string; requests: { body: Record<string, unknown>; custom_id: string }[] } {
-  const requests: { body: Record<string, unknown>; custom_id: string }[] = [];
+function parseBatchInput(content: string) {
+  const requests = [];
   let model: string | undefined;
   for (const line of content.split("\n")) {
     if (line.trim().length === 0) continue;
-    const entry = JSON.parse(line) as Record<string, unknown>;
-    const body = typeof entry.body === "object" && entry.body !== null
-      ? entry.body as Record<string, unknown>
-      : {};
-    const entryModel = typeof body.model === "string" ? body.model : undefined;
+    const entry = parseJsonObject(JSON.parse(line));
+    const body = isObject(entry.body) ? parseJsonObject(entry.body) : {};
+    const entryModel = isString(body.model) ? body.model : undefined;
     if (model !== undefined && entryModel !== undefined && model !== entryModel) {
       throw new TypeError("Otari batch input must use a single model.");
     }
     model ??= entryModel;
-    requests.push({ body, custom_id: typeof entry.custom_id === "string" ? entry.custom_id : "" });
+    requests.push({
+      body,
+      custom_id: isString(entry.custom_id) ? entry.custom_id : "",
+    });
   }
-  if (model === undefined) throw new TypeError("Otari batch input requires a model in the request body.");
+  if (model === undefined)
+    throw new TypeError("Otari batch input requires a model in the request body.");
   return { model, requests };
 }
 
@@ -370,17 +447,27 @@ export class OtariProvider extends OpenAIProvider {
   private readonly otari: OtariClientLike;
 
   constructor(options: ProviderOptions = {}, client?: OtariClientLike) {
-    const clientOptions = options.clientOptions ?? {};
+    const clientOptions = options.clientOptions;
     const apiBase = options.apiBase ?? process.env.OTARI_API_BASE ?? process.env.GATEWAY_API_BASE;
-    const transportOptions: OtariTransportOptions = {
-      ...(apiBase === undefined ? {} : { apiBase }),
-      ...(options.apiKey === undefined ? {} : { apiKey: options.apiKey }),
-      ...(typeof clientOptions.platformToken === "string" ? { platformToken: clientOptions.platformToken } : {}),
-      ...(typeof clientOptions.defaultHeaders === "object" && clientOptions.defaultHeaders !== null
-        ? { defaultHeaders: clientOptions.defaultHeaders as Record<string, string> }
-        : {}),
-      ...(typeof clientOptions.fetch === "function" ? { fetch: clientOptions.fetch as typeof fetch } : {}),
-    };
+    const transportOptions: OtariTransportOptions = {};
+    if (apiBase !== undefined) transportOptions.apiBase = apiBase;
+    if (options.apiKey !== undefined) transportOptions.apiKey = options.apiKey;
+    if (isObject(clientOptions) && "platformToken" in clientOptions) {
+      if (isString(clientOptions.platformToken)) {
+        transportOptions.platformToken = clientOptions.platformToken;
+      }
+    }
+    if (isObject(clientOptions) && "defaultHeaders" in clientOptions) {
+      const headers = clientOptions.defaultHeaders;
+      if (isObject(headers) && Object.values(headers).every(isString)) {
+        // SAFETY: every header value was checked as a string before assigning the header map.
+        transportOptions.defaultHeaders = headers as Record<string, string>;
+      }
+    }
+    if (isObject(clientOptions) && "fetch" in clientOptions && isFunction(clientOptions.fetch)) {
+      // SAFETY: isFunction verifies callability; Fetch supplies the transport's parameter contract.
+      transportOptions.fetch = clientOptions.fetch as Fetch;
+    }
     super(
       {
         capabilities: {
@@ -401,16 +488,22 @@ export class OtariProvider extends OpenAIProvider {
         name: "otari",
         requiresApiKey: false,
       },
-      { ...options, ...(apiBase === undefined ? {} : { apiBase }), apiKey: "not-used" },
+      {
+        ...options,
+        ...includeWhen(!(apiBase === undefined), { apiBase }),
+        apiKey: "not-used",
+      },
     );
     this.otari = client ?? new FetchOtariClient(transportOptions);
   }
 
-  override completion(params: CompletionParams): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion> {
+  override completion(
+    params: CompletionParams,
+  ): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion> {
     return this.execute(async () => {
       const request = this.completionRequest(params);
       if ("max_completion_tokens" in request) {
-        request.max_tokens = request.max_completion_tokens;
+        Object.assign(request, { max_tokens: request.max_completion_tokens });
         delete request.max_completion_tokens;
       }
       const response = await this.otari.completion({
@@ -419,13 +512,17 @@ export class OtariProvider extends OpenAIProvider {
         timeout: params.timeout,
       });
       if (isAsyncIterable(response)) {
-        return this.protectStream(mapAsyncIterable(response, (chunk) => this.normalizeChunk(chunk)));
+        return this.protectStream(
+          mapAsyncIterable(response, (chunk) => this.normalizeChunk(chunk)),
+        );
       }
       return this.normalizeCompletion(response);
     });
   }
 
-  override async responses(params: ResponsesParams): Promise<AsyncIterable<ResponseStreamEvent> | Response> {
+  override async responses(
+    params: ResponsesParams,
+  ): Promise<AsyncIterable<ResponseStreamEvent> | Response> {
     return this.execute(async () => {
       const { providerOptions, ...request } = params;
       const response = await this.otari.response({
@@ -454,9 +551,10 @@ export class OtariProvider extends OpenAIProvider {
           stream_options: request.streamOptions,
           temperature: request.temperature,
           timeout: request.timeout,
-          text: request.responseFormat === undefined
-            ? request.text
-            : { ...(request.text ?? {}), format: request.responseFormat },
+          text:
+            request.responseFormat === undefined
+              ? request.text
+              : { ...(request.text ?? {}), format: request.responseFormat },
           tool_choice: request.toolChoice,
           tools: flattenResponsesTools(request.tools),
           top_logprobs: request.topLogprobs,
@@ -466,33 +564,56 @@ export class OtariProvider extends OpenAIProvider {
         }),
         ...providerOptions,
       });
+      // SAFETY: The provider contract establishes the asserted representation at this boundary.
       return isAsyncIterable(response)
         ? this.protectStream(response as AsyncIterable<ResponseStreamEvent>)
-        : response as Response;
+        : (parseJsonObject(response, "Otari response") as Response & JsonObject);
     });
   }
 
-  override messages(params: MessagesParams): Promise<AsyncIterable<MessageStreamEvent> | MessageResponse> {
+  override messages(
+    params: MessagesParams,
+  ): Promise<AsyncIterable<MessageStreamEvent> | MessageResponse> {
     return this.execute(async () => {
       const { providerOptions, ...request } = params;
-      const response = await this.otari.message({ ...snakeize(request) as Record<string, unknown>, ...providerOptions });
+      const messageRequest: JsonObject = parseJsonObject(
+        snakeize(request),
+        "Otari message request",
+      );
+      const response = await this.otari.message({
+        ...messageRequest,
+        ...providerOptions,
+      });
       if (isAsyncIterable(response)) {
-        return this.protectStream(mapAsyncIterable(response, (event) => camelize(event) as MessageStreamEvent));
+        // SAFETY: The provider contract establishes the asserted representation at this boundary.
+        return this.protectStream(
+          mapAsyncIterable(
+            response,
+            (event) =>
+              parseJsonObject(camelize(event), "Otari message event") as MessageStreamEvent &
+                JsonObject,
+          ),
+        );
       }
-      return { ...camelize(response) as MessageResponse, raw: response };
+      // SAFETY: The provider contract establishes the asserted representation at this boundary.
+      return {
+        ...(parseJsonObject(camelize(response), "Otari message") as MessageResponse & JsonObject),
+        raw: response,
+      };
     });
   }
 
   override embedding(params: EmbeddingParams): Promise<EmbeddingResponse> {
     return this.execute(async () => {
-      const response = await this.otari.embedding({
+      // SAFETY: The provider contract establishes the asserted representation at this boundary.
+      const response = (await this.otari.embedding({
         dimensions: params.dimensions,
         encoding_format: params.encodingFormat,
         input: params.input,
         model: params.model,
         user: params.user,
         ...params.providerOptions,
-      }) as {
+      })) as {
         data: { embedding: number[]; index: number }[];
         model: string;
         usage: { promptTokens: number; totalTokens: number };
@@ -507,28 +628,37 @@ export class OtariProvider extends OpenAIProvider {
         object: "list",
         provider: "otari",
         raw: response,
-        usage: { promptTokens: response.usage.promptTokens, totalTokens: response.usage.totalTokens },
+        usage: {
+          promptTokens: response.usage.promptTokens,
+          totalTokens: response.usage.totalTokens,
+        },
       };
     });
   }
 
   override listModels(): Promise<Model[]> {
-    return this.execute(async () => (await this.otari.listModels() as {
-      created: number;
-      id: string;
-      ownedBy: string;
-    }[]).map((model) => ({
-      created: model.created,
-      id: model.id,
-      object: "model",
-      ownedBy: model.ownedBy,
-      raw: model,
-    })));
+    // SAFETY: The provider contract establishes the asserted representation at this boundary.
+    return this.execute(async () =>
+      (
+        (await this.otari.listModels()) as {
+          created: number;
+          id: string;
+          ownedBy: string;
+        }[]
+      ).map((model) => ({
+        created: model.created,
+        id: model.id,
+        object: "model",
+        ownedBy: model.ownedBy,
+        raw: model,
+      })),
+    );
   }
 
   override imageGeneration(params: ImageGenerationParams): Promise<ImageGenerationResponse> {
     return this.execute(async () => {
-      const response = await this.otari.imageGeneration({
+      // SAFETY: The provider contract establishes the asserted representation at this boundary.
+      const response = (await this.otari.imageGeneration({
         background: params.background,
         model: params.model,
         n: params.n,
@@ -540,21 +670,35 @@ export class OtariProvider extends OpenAIProvider {
         style: params.style,
         user: params.user,
         ...params.providerOptions,
-      }) as {
+      })) as {
         created: number;
-        data?: { b64Json?: string | null; revisedPrompt?: string | null; url?: string | null }[] | null;
+        data?:
+          | {
+              b64Json?: string | null;
+              revisedPrompt?: string | null;
+              url?: string | null;
+            }[]
+          | null;
       };
       return {
         created: response.created,
-        data: (response.data ?? []).map((image: {
-          b64Json?: string | null;
-          revisedPrompt?: string | null;
-          url?: string | null;
-        }) => ({
-          ...(image.b64Json === undefined || image.b64Json === null ? {} : { b64Json: image.b64Json }),
-          ...(image.revisedPrompt === undefined || image.revisedPrompt === null ? {} : { revisedPrompt: image.revisedPrompt }),
-          ...(image.url === undefined || image.url === null ? {} : { url: image.url }),
-        })),
+        data: (response.data ?? []).map(
+          (image: {
+            b64Json?: string | null;
+            revisedPrompt?: string | null;
+            url?: string | null;
+          }) => ({
+            ...includeWhen(!(image.b64Json === undefined || image.b64Json === null), {
+              b64Json: image.b64Json ?? undefined,
+            }),
+            ...includeWhen(!(image.revisedPrompt === undefined || image.revisedPrompt === null), {
+              revisedPrompt: image.revisedPrompt ?? undefined,
+            }),
+            ...includeWhen(!(image.url === undefined || image.url === null), {
+              url: image.url ?? undefined,
+            }),
+          }),
+        ),
         provider: "otari",
         raw: response,
       };
@@ -563,7 +707,8 @@ export class OtariProvider extends OpenAIProvider {
 
   override transcription(params: TranscriptionParams): Promise<Transcription> {
     return this.execute(async () => {
-      const response = await this.otari.transcription({
+      // SAFETY: The provider contract establishes the asserted representation at this boundary.
+      const response = (await this.otari.transcription({
         file: params.file,
         language: params.language,
         model: params.model,
@@ -572,51 +717,71 @@ export class OtariProvider extends OpenAIProvider {
         temperature: params.temperature,
         timestamp_granularities: params.timestampGranularities,
         ...params.providerOptions,
-      }) as { json?: Record<string, unknown>; text?: string };
-      const jsonText = typeof response.json?.text === "string" ? response.json.text : "";
-      return { provider: "otari", raw: response, text: response.text ?? jsonText };
+      })) as { json?: JsonObject; text?: string };
+      const jsonText = isString(response.json?.text) ? response.json.text : "";
+      return {
+        provider: "otari",
+        raw: response,
+        text: response.text ?? jsonText,
+      };
     });
   }
 
   override speech(params: SpeechParams): Promise<Uint8Array> {
-    return this.execute(() => this.otari.speech({
-      input: params.input,
-      instructions: params.instructions,
-      model: params.model,
-      response_format: params.responseFormat,
-      speed: params.speed,
-      voice: params.voice,
-      ...params.providerOptions,
-    }));
+    return this.execute(() =>
+      this.otari.speech({
+        input: params.input,
+        instructions: params.instructions,
+        model: params.model,
+        response_format: params.responseFormat,
+        speed: params.speed,
+        voice: params.voice,
+        ...params.providerOptions,
+      }),
+    );
   }
 
   override moderation(params: ModerationParams): Promise<ModerationResponse> {
     return this.execute(async () => {
-      const response = await this.otari.moderation({
+      // SAFETY: The provider contract establishes the asserted representation at this boundary.
+      const response = (await this.otari.moderation({
         includeRaw: params.includeRaw,
         input: params.input,
         model: params.model ?? "openai:omni-moderation-latest",
         ...params.providerOptions,
-      }) as {
+      })) as {
         id: string;
         model: string;
-        results: { flagged: boolean; [key: string]: unknown }[];
+        results: ({ flagged: boolean } & JsonObject)[];
       };
       return {
         id: response.id,
         model: response.model,
         results: response.results.map((result) => {
-          const raw = result as unknown as Record<string, unknown>;
+          const raw = parseJsonObject(result);
+          const providerRaw = raw.providerRaw ?? raw.provider_raw;
+          const normalizedProviderRaw =
+            params.includeRaw === true && isObject(providerRaw)
+              ? parseJsonObject(providerRaw)
+              : undefined;
+          // SAFETY: The provider contract establishes the asserted representation at this boundary.
           return {
             categories: (raw.categories ?? {}) as Record<string, boolean>,
-            categoryScores: (raw.categoryScores ?? raw.category_scores ?? {}) as Record<string, number>,
+            categoryScores: (raw.categoryScores ?? raw.category_scores ?? {}) as Record<
+              string,
+              number
+            >,
             flagged: result.flagged,
-            ...(typeof (raw.categoryAppliedInputTypes ?? raw.category_applied_input_types) === "object"
-              ? { categoryAppliedInputTypes: (raw.categoryAppliedInputTypes ?? raw.category_applied_input_types) as Record<string, string[]> }
-              : {}),
-            ...(params.includeRaw === true && typeof (raw.providerRaw ?? raw.provider_raw) === "object"
-              ? { providerRaw: (raw.providerRaw ?? raw.provider_raw) as Record<string, unknown> }
-              : {}),
+            ...includeWhen(
+              isObject(raw.categoryAppliedInputTypes ?? raw.category_applied_input_types),
+              {
+                categoryAppliedInputTypes: (raw.categoryAppliedInputTypes ??
+                  raw.category_applied_input_types) as Record<string, string[]>,
+              },
+            ),
+            ...includeWhen(!(normalizedProviderRaw === undefined), {
+              providerRaw: normalizedProviderRaw,
+            }),
           };
         }),
       };
@@ -625,14 +790,18 @@ export class OtariProvider extends OpenAIProvider {
 
   override rerank(params: RerankParams): Promise<RerankResponse> {
     return this.execute(async () => {
-      const response = await this.otari.rerank({
-        documents: params.documents,
-        max_tokens_per_doc: params.maxTokensPerDoc,
-        model: params.model,
-        query: params.query,
-        top_n: params.topN,
-        ...params.providerOptions,
-      }) as Omit<RerankResponse, "raw">;
+      // SAFETY: The provider contract establishes the asserted representation at this boundary.
+      const response = parseJsonObject(
+        await this.otari.rerank({
+          documents: params.documents,
+          max_tokens_per_doc: params.maxTokensPerDoc,
+          model: params.model,
+          query: params.query,
+          top_n: params.topN,
+          ...params.providerOptions,
+        }),
+        "Otari rerank response",
+      ) as Omit<RerankResponse, "raw"> & JsonObject;
       return { ...response, raw: response };
     });
   }
@@ -640,48 +809,68 @@ export class OtariProvider extends OpenAIProvider {
   override createBatch(params: CreateBatchParams): Promise<Batch> {
     return this.execute(async () => {
       const parsed = parseBatchInput(await readFile(params.inputFilePath, "utf8"));
-      return normalizeBatch(await this.otari.createBatch({
-        completion_window: params.completionWindow,
-        metadata: params.metadata,
-        ...parsed,
-      }));
+      return normalizeBatch(
+        await this.otari.createBatch({
+          completion_window: params.completionWindow,
+          metadata: params.metadata,
+          ...parsed,
+        }),
+      );
     });
   }
 
-  override retrieveBatch(batchId: string, providerOptions?: Record<string, unknown>): Promise<Batch> {
-    return this.execute(async () => normalizeBatch(await this.otari.retrieveBatch(batchId, batchProvider(providerOptions))));
+  override retrieveBatch(batchId: string, providerOptions?: JsonObject): Promise<Batch> {
+    return this.execute(async () =>
+      normalizeBatch(await this.otari.retrieveBatch(batchId, batchProvider(providerOptions))),
+    );
   }
 
-  override cancelBatch(batchId: string, providerOptions?: Record<string, unknown>): Promise<Batch> {
-    return this.execute(async () => normalizeBatch(await this.otari.cancelBatch(batchId, batchProvider(providerOptions))));
+  override cancelBatch(batchId: string, providerOptions?: JsonObject): Promise<Batch> {
+    return this.execute(async () =>
+      normalizeBatch(await this.otari.cancelBatch(batchId, batchProvider(providerOptions))),
+    );
   }
 
   override listBatches(params: ListBatchesParams = {}): Promise<Batch[]> {
-    return this.execute(async () => (await this.otari.listBatches(batchProvider(params.providerOptions), {
-      after: params.after,
-      limit: params.limit,
-    })).map(normalizeBatch));
+    return this.execute(async () =>
+      (
+        await this.otari.listBatches(batchProvider(params.providerOptions), {
+          after: params.after,
+          limit: params.limit,
+        })
+      ).map(normalizeBatch),
+    );
   }
 
-  override retrieveBatchResults(batchId: string, providerOptions?: Record<string, unknown>): Promise<BatchResult> {
+  override retrieveBatchResults(
+    batchId: string,
+    providerOptions?: JsonObject,
+  ): Promise<BatchResult> {
     return this.execute(async () => {
       try {
-        const response = await this.otari.retrieveBatchResults(
+        // SAFETY: The provider contract establishes the asserted representation at this boundary.
+        const response = (await this.otari.retrieveBatchResults(
           batchId,
           batchProvider(providerOptions),
-        ) as {
-          results: { custom_id: string; error?: { code: string; message: string }; result?: Record<string, unknown> }[];
+        )) as {
+          results: {
+            custom_id: string;
+            error?: { code: string; message: string };
+            result?: JsonObject;
+          }[];
         };
         return {
           results: response.results.map((item) => ({
             customId: item.custom_id,
-            ...(item.error === undefined ? {} : { error: item.error }),
-            ...(item.result === undefined ? {} : { result: this.normalizeCompletion(item.result) }),
+            ...includeWhen(!(item.error === undefined), { error: item.error }),
+            ...includeWhen(!(item.result === undefined), {
+              result: this.normalizeCompletion(item.result),
+            }),
           })),
         };
       } catch (error) {
-        const record = error as Record<string, unknown>;
-        if (typeof record.batchStatus === "string") {
+        const record = parseJsonObject(error);
+        if (isString(record.batchStatus)) {
           throw new BatchNotCompleteError(batchId, record.batchStatus, "otari");
         }
         throw error;

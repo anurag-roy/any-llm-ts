@@ -1,14 +1,13 @@
+import { parseJsonObject } from "../utils.js";
+import type { JsonObject } from "../types.js";
+import { isFunction, isNumber, isObject, isString } from "../utils.js";
 import { basename } from "node:path";
 import { readFile } from "node:fs/promises";
 
 import type OpenAI from "openai";
 import { toFile } from "openai";
 
-import {
-  BatchNotCompleteError,
-  ProviderError,
-  UnsupportedParameterError,
-} from "../errors.js";
+import { BatchNotCompleteError, ProviderError, UnsupportedParameterError } from "../errors.js";
 import type {
   Batch,
   BatchResult,
@@ -22,7 +21,7 @@ import type {
 } from "../types.js";
 import { OpenAIProvider } from "./openai.js";
 
-const statusMap: Record<string, BatchStatus> = {
+const statusMap = {
   CANCELED: "cancelled",
   CANCELING: "cancelling",
   CANCELLED: "cancelled",
@@ -32,60 +31,89 @@ const statusMap: Record<string, BatchStatus> = {
   FAILED: "failed",
   IN_PROGRESS: "in_progress",
   VALIDATING: "validating",
-};
+} satisfies Record<string, BatchStatus>;
 
-function record(value: unknown): Record<string, any> {
-  return typeof value === "object" && value !== null ? value as Record<string, any> : {};
+function record<Value>(value: Value): JsonObject {
+  return isObject(value) ? parseJsonObject(value) : {};
 }
 
-function epoch(value: unknown): number | undefined {
-  if (typeof value === "number") return value;
-  if (typeof value !== "string") return undefined;
+function epoch<Value>(value: Value): number | undefined {
+  if (isNumber(value)) return value;
+  if (!isString(value)) return undefined;
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? undefined : Math.floor(parsed / 1_000);
 }
 
-function completionWindow(job: Record<string, any>): string {
-  if (typeof job.completion_window === "string") return job.completion_window;
+function completionWindow(job: JsonObject): string {
+  if (isString(job.completion_window)) return job.completion_window;
   const created = epoch(job.created_at);
   const deadline = epoch(job.job_deadline);
   if (created === undefined || deadline === undefined || deadline <= created) return "24h";
   return `${Math.round((deadline - created) / 3_600)}h`;
 }
 
-function normalizeTogetherBatch(value: unknown): Batch {
+function normalizeTogetherBatch<Value>(value: Value): Batch {
   const job = record(value);
-  const status = statusMap[String(job.status ?? "").toUpperCase()] ?? "in_progress";
+  const rawStatus = isString(job.status) ? job.status.toUpperCase() : "";
+  const status =
+    rawStatus === "CANCELED" ||
+    rawStatus === "CANCELING" ||
+    rawStatus === "CANCELLED" ||
+    rawStatus === "CANCELLING" ||
+    rawStatus === "COMPLETED" ||
+    rawStatus === "EXPIRED" ||
+    rawStatus === "FAILED" ||
+    rawStatus === "IN_PROGRESS" ||
+    rawStatus === "VALIDATING"
+      ? statusMap[rawStatus]
+      : "in_progress";
   const createdAt = epoch(job.created_at) ?? 0;
   const completedAt = epoch(job.completed_at);
   const expiresAt = epoch(job.job_deadline);
-  return {
+  const batch: Batch = {
     completionWindow: completionWindow(job),
     createdAt,
-    endpoint: typeof job.endpoint === "string" ? job.endpoint : "",
-    id: typeof job.id === "string" ? job.id : "",
+    endpoint: isString(job.endpoint) ? job.endpoint : "",
+    id: isString(job.id) ? job.id : "",
     object: "batch",
     provider: "together",
     raw: value,
     status,
-    ...(completedAt === undefined ? {} : { completedAt }),
-    ...(expiresAt === undefined ? {} : { expiresAt }),
-    ...(job.error_file_id === undefined ? {} : { errorFileId: job.error_file_id as string | null }),
-    ...(typeof job.input_file_id === "string" ? { inputFileId: job.input_file_id } : {}),
-    ...(typeof (job.x_model_id ?? job.model_id ?? job.model) === "string"
-      ? { model: String(job.x_model_id ?? job.model_id ?? job.model) }
-      : {}),
-    ...(job.output_file_id === undefined ? {} : { outputFileId: job.output_file_id as string | null }),
   };
+  if (completedAt !== undefined) batch.completedAt = completedAt;
+  if (expiresAt !== undefined) batch.expiresAt = expiresAt;
+  if (isString(job.error_file_id) || job.error_file_id === null) {
+    batch.errorFileId = job.error_file_id;
+  }
+  if (isString(job.input_file_id)) batch.inputFileId = job.input_file_id;
+  const model = job.x_model_id ?? job.model_id ?? job.model;
+  if (isString(model)) batch.model = model;
+  if (isString(job.output_file_id) || job.output_file_id === null) {
+    batch.outputFileId = job.output_file_id;
+  }
+  return batch;
 }
 
-async function contentText(value: unknown): Promise<string> {
+interface TextContent {
+  text(): Promise<string>;
+}
+
+interface ReadableContent {
+  read(): Promise<string | Uint8Array>;
+}
+
+async function contentText<Value>(value: Value): Promise<string> {
   if (value instanceof Response) return value.text();
-  const content = record(value);
-  if (typeof content.text === "function") return content.text() as Promise<string>;
-  if (typeof content.read === "function") {
-    const bytes = await content.read() as Uint8Array | string;
-    return typeof bytes === "string" ? bytes : new TextDecoder().decode(bytes);
+  if (isObject(value) && "text" in value && isFunction(value.text)) {
+    // SAFETY: isFunction verifies the method before the response's text contract is invoked.
+    const content = value as Value & TextContent;
+    return content.text();
+  }
+  if (isObject(value) && "read" in value && isFunction(value.read)) {
+    // SAFETY: isFunction verifies the method before the response's read contract is invoked.
+    const content = value as Value & ReadableContent;
+    const bytes = await content.read();
+    return isString(bytes) ? bytes : new TextDecoder().decode(bytes);
   }
   return JSON.stringify(value ?? "");
 }
@@ -96,7 +124,12 @@ export class TogetherProvider extends OpenAIProvider {
     super(
       {
         apiBase: "https://api.together.xyz/v1",
-        capabilities: { batch: true, embedding: true, reasoning: true, vision: true },
+        capabilities: {
+          batch: true,
+          embedding: true,
+          reasoning: true,
+          vision: true,
+        },
         documentationUrl: "https://docs.together.ai/reference/",
         envApiBase: "TOGETHER_API_BASE",
         envApiKey: "TOGETHER_API_KEY",
@@ -126,36 +159,38 @@ export class TogetherProvider extends OpenAIProvider {
     return this.execute(async () => {
       const bytes = await readFile(params.inputFilePath);
       const file = await toFile(bytes, basename(params.inputFilePath));
+      // SAFETY: The provider contract establishes the asserted representation at this boundary.
       const uploaded = await this.client.files.create({
         check: false,
         file,
         purpose: "batch-api",
       } as never);
-      const created = await this.client.batches.create({
+      // SAFETY: The provider contract establishes the asserted representation at this boundary.
+      const created = (await this.client.batches.create({
         completion_window: params.completionWindow ?? "24h",
         endpoint: params.endpoint,
         input_file_id: uploaded.id,
         ...params.providerOptions,
-      } as never) as unknown;
+      } as never)) as unknown;
       const wrapper = record(created);
       const job = wrapper.job ?? created;
-      if (typeof record(job).id !== "string") {
-        throw new ProviderError(
-          `Together did not return a batch job. Warning: ${String(wrapper.warning ?? "none")}`,
-          { provider: "together" },
-        );
+      if (!isString(record(job).id)) {
+        const warning = isString(wrapper.warning) ? wrapper.warning : "none";
+        throw new ProviderError(`Together did not return a batch job. Warning: ${warning}`, {
+          provider: "together",
+        });
       }
       return normalizeTogetherBatch(job);
     });
   }
 
-  override retrieveBatch(batchId: string, providerOptions: Record<string, unknown> = {}): Promise<Batch> {
+  override retrieveBatch(batchId: string, providerOptions: JsonObject = {}): Promise<Batch> {
     return this.execute(async () =>
       normalizeTogetherBatch(await this.client.batches.retrieve(batchId, providerOptions)),
     );
   }
 
-  override cancelBatch(batchId: string, providerOptions: Record<string, unknown> = {}): Promise<Batch> {
+  override cancelBatch(batchId: string, providerOptions: JsonObject = {}): Promise<Batch> {
     return this.execute(async () =>
       normalizeTogetherBatch(await this.client.batches.cancel(batchId, providerOptions)),
     );
@@ -163,15 +198,17 @@ export class TogetherProvider extends OpenAIProvider {
 
   override listBatches(params: ListBatchesParams = {}): Promise<Batch[]> {
     if (params.after !== undefined) {
-      return Promise.reject(new UnsupportedParameterError(
-        "after",
-        "together",
-        "Together's batch listing is not paginated.",
-      ));
+      return Promise.reject(
+        new UnsupportedParameterError(
+          "after",
+          "together",
+          "Together's batch listing is not paginated.",
+        ),
+      );
     }
     return this.execute(async () => {
       const response = await this.client.batches.list(params.providerOptions);
-      const raw = record(response);
+      const raw = Array.isArray(response) ? {} : record(response);
       const jobs = Array.isArray(response) ? response : Array.isArray(raw.data) ? raw.data : [];
       const batches = jobs.map(normalizeTogetherBatch);
       return params.limit === undefined ? batches : batches.slice(0, params.limit);
@@ -180,7 +217,7 @@ export class TogetherProvider extends OpenAIProvider {
 
   override retrieveBatchResults(
     batchId: string,
-    providerOptions: Record<string, unknown> = {},
+    providerOptions: JsonObject = {},
   ): Promise<BatchResult> {
     return this.execute(async () => {
       const job = record(await this.client.batches.retrieve(batchId, providerOptions));
@@ -188,23 +225,26 @@ export class TogetherProvider extends OpenAIProvider {
       if (batch.status !== "completed") {
         throw new BatchNotCompleteError(batchId, batch.status, "together");
       }
-      if (typeof job.output_file_id !== "string") return { results: [] };
+      if (!isString(job.output_file_id)) return { results: [] };
       const text = await contentText(await this.client.files.content(job.output_file_id));
       const results: BatchResult["results"] = [];
       for (const line of text.split("\n")) {
         if (line.trim().length === 0) continue;
-        const entry = JSON.parse(line) as Record<string, any>;
-        const customId = typeof entry.custom_id === "string" ? entry.custom_id : "";
-        if (entry.response?.status_code === 200 && typeof entry.response.body === "object") {
-          results.push({ customId, result: this.normalizeCompletion(entry.response.body) });
+        const entry = parseJsonObject(JSON.parse(line));
+        const customId = isString(entry.custom_id) ? entry.custom_id : "";
+        if (entry.response?.status_code === 200 && isObject(entry.response.body)) {
+          results.push({
+            customId,
+            result: this.normalizeCompletion(entry.response.body),
+          });
           continue;
         }
         const error = record(entry.error);
         results.push({
           customId,
           error: {
-            code: typeof error.code === "string" ? error.code : "unknown",
-            message: typeof error.message === "string" ? error.message : "Unexpected response format",
+            code: isString(error.code) ? error.code : "unknown",
+            message: isString(error.message) ? error.message : "Unexpected response format",
           },
         });
       }

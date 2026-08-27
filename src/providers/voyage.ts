@@ -1,9 +1,8 @@
+import { includeWhen } from "../utils.js";
+import { isString } from "../utils.js";
 import { VoyageAIClient } from "voyageai";
 
-import {
-  MissingApiKeyError,
-  UnsupportedOperationError,
-} from "../errors.js";
+import { MissingApiKeyError, UnsupportedOperationError } from "../errors.js";
 import type {
   ChatCompletion,
   ChatCompletionChunk,
@@ -44,30 +43,21 @@ const voyageCapabilities: ProviderCapabilities = {
 };
 
 function createVoyageClient(options: ProviderOptions): VoyageAIClient {
-  const apiKey =
-    options.apiKey ?? getEnvironmentVariable("VOYAGE_API_KEY");
+  const apiKey = options.apiKey ?? getEnvironmentVariable("VOYAGE_API_KEY");
   if (apiKey === undefined) {
     throw new MissingApiKeyError("voyage", "VOYAGE_API_KEY");
   }
-  const baseUrl =
-    options.apiBase ?? getEnvironmentVariable("VOYAGE_API_BASE");
+  const baseUrl = options.apiBase ?? getEnvironmentVariable("VOYAGE_API_BASE");
+  // SAFETY: The provider contract establishes the asserted representation at this boundary.
   return new VoyageAIClient({
-    ...(options.clientOptions as ConstructorParameters<
-      typeof VoyageAIClient
-    >[0]),
+    ...options.clientOptions,
     apiKey,
-    ...(baseUrl === undefined ? {} : { baseUrl }),
+    ...includeWhen(!(baseUrl === undefined), { baseUrl }),
   });
 }
 
-function isStringInput(
-  input: EmbeddingParams["input"],
-): input is string | string[] {
-  return (
-    typeof input === "string" ||
-    (Array.isArray(input) &&
-      input.every((value) => typeof value === "string"))
-  );
+function isStringInput(input: EmbeddingParams["input"]): input is string | string[] {
+  return isString(input) || (Array.isArray(input) && input.every((value) => isString(value)));
 }
 
 /** Embedding-only adapter for Voyage AI. */
@@ -75,13 +65,9 @@ export class VoyageProvider extends BaseProvider {
   readonly metadata: ProviderMetadata;
   private readonly client: VoyageAIClientLike;
 
-  constructor(
-    options: ProviderOptions = {},
-    client?: VoyageAIClientLike,
-  ) {
+  constructor(options: ProviderOptions = {}, client?: VoyageAIClientLike) {
     super();
-    const apiBase =
-      options.apiBase ?? getEnvironmentVariable("VOYAGE_API_BASE");
+    const apiBase = options.apiBase ?? getEnvironmentVariable("VOYAGE_API_BASE");
     this.client = client ?? createVoyageClient(options);
     this.metadata = completeProviderMetadata({
       capabilities: { ...voyageCapabilities },
@@ -90,25 +76,21 @@ export class VoyageProvider extends BaseProvider {
       envApiKey: "VOYAGE_API_KEY",
       name: "voyage",
       requiresApiKey: true,
-      ...(apiBase === undefined ? {} : { apiBase }),
+      ...includeWhen(!(apiBase === undefined), { apiBase }),
     });
   }
 
   override completion(
     _params: CompletionParams,
   ): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion> {
-    return Promise.reject(
-      new UnsupportedOperationError("completions", "voyage"),
-    );
+    return Promise.reject(new UnsupportedOperationError("completions", "voyage"));
   }
 
   override embedding(params: EmbeddingParams): Promise<EmbeddingResponse> {
     const input = params.input;
     if (!isStringInput(input)) {
       return Promise.reject(
-        new TypeError(
-          "Voyage embeddings require a string or an array of strings.",
-        ),
+        new TypeError("Voyage embeddings require a string or an array of strings."),
       );
     }
     if (params.encodingFormat === "base64") {
@@ -118,22 +100,18 @@ export class VoyageProvider extends BaseProvider {
         ),
       );
     }
-    const texts = typeof input === "string" ? [input] : input;
+    const texts = isString(input) ? [input] : input;
 
     return this.execute(async () => {
       const response = await this.client.embed({
         input: texts,
         model: params.model,
-        ...(params.dimensions === undefined
-          ? {}
-          : { outputDimension: params.dimensions }),
+        ...includeWhen(!(params.dimensions === undefined), { outputDimension: params.dimensions }),
         ...params.providerOptions,
       });
       const data = (response.data ?? []).map((item, index) => {
         if (!Array.isArray(item.embedding)) {
-          throw new TypeError(
-            `Voyage embedding ${index} did not contain a numeric vector.`,
-          );
+          throw new TypeError(`Voyage embedding ${index} did not contain a numeric vector.`);
         }
         return {
           embedding: item.embedding,

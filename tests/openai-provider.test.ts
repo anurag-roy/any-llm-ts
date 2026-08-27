@@ -1,4 +1,5 @@
-import type OpenAI from "openai";
+import { parseJsonObject } from "../src/utils.js";
+import OpenAI from "openai";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -20,13 +21,30 @@ const config = {
   name: "test-openai",
 };
 
-function fakeClient(overrides: Record<string, unknown> = {}): OpenAI {
-  return {
+interface OpenAITestOverrides {
+  audio?: object;
+  batches?: object;
+  chat?: object;
+  embeddings?: object;
+  files?: object;
+  images?: object;
+  models?: object;
+  moderations?: object;
+  responses?: object;
+}
+
+function fakeClient(overrides: OpenAITestOverrides = {}): OpenAI {
+  return Object.assign(new OpenAI({ apiKey: "test" }), {
     audio: {
       speech: { create: vi.fn() },
       transcriptions: { create: vi.fn() },
     },
-    batches: { cancel: vi.fn(), create: vi.fn(), list: vi.fn(), retrieve: vi.fn() },
+    batches: {
+      cancel: vi.fn(),
+      create: vi.fn(),
+      list: vi.fn(),
+      retrieve: vi.fn(),
+    },
     chat: { completions: { create: vi.fn() } },
     embeddings: { create: vi.fn() },
     files: { content: vi.fn(), create: vi.fn() },
@@ -35,10 +53,10 @@ function fakeClient(overrides: Record<string, unknown> = {}): OpenAI {
     moderations: { create: vi.fn() },
     responses: { create: vi.fn() },
     ...overrides,
-  } as unknown as OpenAI;
+  });
 }
 
-function completionResponse(): Record<string, unknown> {
+function completionResponse() {
   return {
     choices: [
       {
@@ -88,7 +106,11 @@ afterEach(() => {
 describe("OpenAI-compatible provider", () => {
   it("normalizes non-streaming completions and request parameters", async () => {
     const create = vi.fn().mockResolvedValue(completionResponse());
-    const provider = new OpenAIProvider(config, {}, fakeClient({ chat: { completions: { create } } }));
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
     const response = await provider.completion({
       frequencyPenalty: 0.2,
       maxTokens: 200,
@@ -131,7 +153,7 @@ describe("OpenAI-compatible provider", () => {
         temperature: 0.4,
       }),
     );
-    const request = create.mock.calls[0]?.[0] as Record<string, any>;
+    const request = parseJsonObject(create.mock.calls[0]?.[0]);
     expect(request.messages[1].tool_calls[0].function.name).toBe("old_call");
     expect(request.messages[2].tool_call_id).toBe("old-1");
     expect(response).toMatchObject({
@@ -161,7 +183,11 @@ describe("OpenAI-compatible provider", () => {
 
   it("maps per-request timeout seconds to OpenAI request milliseconds", async () => {
     const create = vi.fn().mockResolvedValue(completionResponse());
-    const provider = new OpenAIProvider(config, {}, fakeClient({ chat: { completions: { create } } }));
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
     await provider.completion({
       messages: [{ content: "hello", role: "user" }],
       model: "model-a",
@@ -174,7 +200,7 @@ describe("OpenAI-compatible provider", () => {
   });
 
   it("normalizes completion streams and protects iteration errors", async () => {
-    async function* chunks(): AsyncIterable<Record<string, unknown>> {
+    async function* chunks() {
       yield {
         choices: [
           {
@@ -203,12 +229,17 @@ describe("OpenAI-compatible provider", () => {
     }
 
     const create = vi.fn().mockResolvedValue(chunks());
-    const provider = new OpenAIProvider(config, {}, fakeClient({ chat: { completions: { create } } }));
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
     const result = await provider.completion({
       messages: [{ content: "Hi", role: "user" }],
       model: "model-a",
       stream: true,
     });
+    // SAFETY: This test double implements the provider surface exercised by this test.
     const iterator = (result as AsyncIterable<ChatCompletionChunk>)[Symbol.asyncIterator]();
     const first = await iterator.next();
     expect(first.value).toMatchObject({
@@ -230,35 +261,47 @@ describe("OpenAI-compatible provider", () => {
 
   it("preserves OpenAI-typed safety refusals", async () => {
     const create = vi.fn().mockResolvedValue({
-      choices: [{
-        finish_reason: "content_filter",
-        index: 0,
-        message: {
-          content: null,
-          refusal: "I can't help with that.",
-          role: "assistant",
+      choices: [
+        {
+          finish_reason: "content_filter",
+          index: 0,
+          message: {
+            content: null,
+            refusal: "I can't help with that.",
+            role: "assistant",
+          },
         },
-      }],
+      ],
       created: 100,
       id: "chat-refused",
       model: "model-a",
     });
-    const provider = new OpenAIProvider(config, {}, fakeClient({ chat: { completions: { create } } }));
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
     const response = await provider.completion({
       messages: [{ content: "Hi", role: "user" }],
       model: "model-a",
     });
     expect(response).toMatchObject({
-      choices: [{
-        finishReason: "content_filter",
-        message: { content: null, refusal: "I can't help with that." },
-      }],
+      choices: [
+        {
+          finishReason: "content_filter",
+          message: { content: null, refusal: "I can't help with that." },
+        },
+      ],
     });
   });
 
   it("rejects empty conversations before making a request", async () => {
     const create = vi.fn();
-    const provider = new OpenAIProvider(config, {}, fakeClient({ chat: { completions: { create } } }));
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
     await expect(provider.completion({ messages: [], model: "model-a" })).rejects.toThrow(
       "messages array cannot be empty",
     );
@@ -269,7 +312,10 @@ describe("OpenAI-compatible provider", () => {
     async function* events(): AsyncIterable<{ type: string }> {
       yield { type: "response.output_text.delta" };
     }
-    const create = vi.fn().mockResolvedValueOnce({ id: "response-1" }).mockResolvedValueOnce(events());
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce({ id: "response-1" })
+      .mockResolvedValueOnce(events());
     const provider = new OpenAIProvider(config, {}, fakeClient({ responses: { create } }));
     await expect(
       provider.responses({
@@ -277,24 +323,55 @@ describe("OpenAI-compatible provider", () => {
         maxOutputTokens: 123,
         model: "model-a",
         previousResponseId: "response-0",
-        responseFormat: { name: "answer", schema: { type: "object" }, type: "json_schema" },
-        tools: [{
-          function: { description: "Get weather", name: "weather", parameters: { type: "object" } },
-          type: "function",
-        }],
+        responseFormat: {
+          name: "answer",
+          schema: { type: "object" },
+          type: "json_schema",
+        },
+        tools: [
+          {
+            function: {
+              description: "Get weather",
+              name: "weather",
+              parameters: { type: "object" },
+            },
+            type: "function",
+          },
+        ],
         topP: 0.8,
       }),
     ).resolves.toEqual({ id: "response-1" });
-    expect(create).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      max_output_tokens: 123,
-      previous_response_id: "response-0",
-      stream: false,
-      text: { format: { name: "answer", schema: { type: "object" }, type: "json_schema" } },
-      tools: [{ description: "Get weather", name: "weather", parameters: { type: "object" }, type: "function" }],
-      top_p: 0.8,
-    }));
-    const stream = await provider.responses({ input: "hello", model: "model-a", stream: true });
+    expect(create).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        max_output_tokens: 123,
+        previous_response_id: "response-0",
+        stream: false,
+        text: {
+          format: {
+            name: "answer",
+            schema: { type: "object" },
+            type: "json_schema",
+          },
+        },
+        tools: [
+          {
+            description: "Get weather",
+            name: "weather",
+            parameters: { type: "object" },
+            type: "function",
+          },
+        ],
+        top_p: 0.8,
+      }),
+    );
+    const stream = await provider.responses({
+      input: "hello",
+      model: "model-a",
+      stream: true,
+    });
     const values = [];
+    // SAFETY: This test double implements the provider surface exercised by this test.
     for await (const event of stream as AsyncIterable<unknown>) values.push(event);
     expect(values).toEqual([{ type: "response.output_text.delta" }]);
   });
@@ -307,7 +384,9 @@ describe("OpenAI-compatible provider", () => {
       usage: { prompt_tokens: 2, total_tokens: 2 },
     });
     const provider = new OpenAIProvider(config, {}, fakeClient({ embeddings: { create } }));
-    await expect(provider.embedding({ dimensions: 2, input: "hello", model: "embed-a" })).resolves.toMatchObject({
+    await expect(
+      provider.embedding({ dimensions: 2, input: "hello", model: "embed-a" }),
+    ).resolves.toMatchObject({
       data: [{ embedding: [0.1, 0.2], index: 0 }],
       provider: "test-openai",
       usage: { promptTokens: 2, totalTokens: 2 },
@@ -317,10 +396,19 @@ describe("OpenAI-compatible provider", () => {
   it("normalizes model pages", async () => {
     const page = {
       async *[Symbol.asyncIterator]() {
-        yield { created: 123, id: "model-a", object: "model", owned_by: "provider" };
+        yield {
+          created: 123,
+          id: "model-a",
+          object: "model",
+          owned_by: "provider",
+        };
       },
     };
-    const provider = new OpenAIProvider(config, {}, fakeClient({ models: { list: vi.fn().mockResolvedValue(page) } }));
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ models: { list: vi.fn().mockResolvedValue(page) } }),
+    );
     await expect(provider.listModels({ limit: 1 })).resolves.toMatchObject([
       { created: 123, id: "model-a", ownedBy: "provider" },
     ]);
@@ -329,7 +417,13 @@ describe("OpenAI-compatible provider", () => {
   it("normalizes image, transcription, speech, and moderation operations", async () => {
     const image = vi.fn().mockResolvedValue({
       created: 123,
-      data: [{ b64_json: "abc", revised_prompt: "better", url: "https://example.com/image.png" }],
+      data: [
+        {
+          b64_json: "abc",
+          revised_prompt: "better",
+          url: "https://example.com/image.png",
+        },
+      ],
     });
     const transcription = vi.fn().mockResolvedValue({ text: "transcribed" });
     const speech = vi.fn().mockResolvedValue(new Response(new Uint8Array([1, 2, 3])));
@@ -349,34 +443,43 @@ describe("OpenAI-compatible provider", () => {
       config,
       {},
       fakeClient({
-        audio: { speech: { create: speech }, transcriptions: { create: transcription } },
+        audio: {
+          speech: { create: speech },
+          transcriptions: { create: transcription },
+        },
         images: { generate: image },
         moderations: { create: moderation },
       }),
     );
 
-    await expect(provider.imageGeneration({
-      model: "image-a",
-      prompt: "cat",
-      responseFormat: "b64_json",
-      style: "vivid",
-      user: "user-1",
-    })).resolves.toMatchObject({
+    await expect(
+      provider.imageGeneration({
+        model: "image-a",
+        prompt: "cat",
+        responseFormat: "b64_json",
+        style: "vivid",
+        user: "user-1",
+      }),
+    ).resolves.toMatchObject({
       data: [{ b64Json: "abc", revisedPrompt: "better" }],
       provider: "test-openai",
     });
-    await expect(provider.transcription({ file: new Blob(["audio"]), model: "whisper" })).resolves.toMatchObject({
+    await expect(
+      provider.transcription({ file: new Blob(["audio"]), model: "whisper" }),
+    ).resolves.toMatchObject({
       provider: "test-openai",
       text: "transcribed",
     });
-    await expect(provider.speech({ input: "hello", model: "tts", voice: "alloy" })).resolves.toEqual(
-      new Uint8Array([1, 2, 3]),
+    await expect(
+      provider.speech({ input: "hello", model: "tts", voice: "alloy" }),
+    ).resolves.toEqual(new Uint8Array([1, 2, 3]));
+    expect(image).toHaveBeenCalledWith(
+      expect.objectContaining({
+        response_format: "b64_json",
+        style: "vivid",
+        user: "user-1",
+      }),
     );
-    expect(image).toHaveBeenCalledWith(expect.objectContaining({
-      response_format: "b64_json",
-      style: "vivid",
-      user: "user-1",
-    }));
     await expect(provider.moderation({ includeRaw: true, input: "hello" })).resolves.toMatchObject({
       id: "mod-1",
       model: "omni-moderation-latest",
@@ -396,9 +499,16 @@ describe("OpenAI-compatible provider", () => {
     const provider = new OpenAIProvider(
       config,
       {},
-      fakeClient({ audio: { speech: { create: vi.fn() }, transcriptions: { create: vi.fn().mockResolvedValue("ok") } } }),
+      fakeClient({
+        audio: {
+          speech: { create: vi.fn() },
+          transcriptions: { create: vi.fn().mockResolvedValue("ok") },
+        },
+      }),
     );
-    await expect(provider.transcription({ file: new Blob(), model: "whisper" })).resolves.toMatchObject({ text: "ok" });
+    await expect(
+      provider.transcription({ file: new Blob(), model: "whisper" }),
+    ).resolves.toMatchObject({ text: "ok" });
   });
 
   it("supports the OpenAI batch lifecycle and normalizes batch objects", async () => {
@@ -426,7 +536,10 @@ describe("OpenAI-compatible provider", () => {
       status: "completed",
       usage: { input_tokens: 10 },
     };
-    const files = { content: vi.fn(), create: vi.fn().mockResolvedValue({ id: "file-input" }) };
+    const files = {
+      content: vi.fn(),
+      create: vi.fn().mockResolvedValue({ id: "file-input" }),
+    };
     const batches = {
       cancel: vi.fn().mockResolvedValue({ ...rawBatch, status: "cancelling" }),
       create: vi.fn().mockResolvedValue(rawBatch),
@@ -453,13 +566,19 @@ describe("OpenAI-compatible provider", () => {
       status: "completed",
     });
     expect(files.create).toHaveBeenCalledWith(expect.objectContaining({ purpose: "batch" }));
-    expect(batches.create).toHaveBeenCalledWith(expect.objectContaining({
-      endpoint: "/v1/chat/completions",
-      extra: true,
-      input_file_id: "file-input",
-    }));
-    await expect(provider.retrieveBatch("batch-1", { request: true })).resolves.toMatchObject({ id: "batch-1" });
-    await expect(provider.cancelBatch("batch-1")).resolves.toMatchObject({ status: "cancelling" });
+    expect(batches.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        endpoint: "/v1/chat/completions",
+        extra: true,
+        input_file_id: "file-input",
+      }),
+    );
+    await expect(provider.retrieveBatch("batch-1", { request: true })).resolves.toMatchObject({
+      id: "batch-1",
+    });
+    await expect(provider.cancelBatch("batch-1")).resolves.toMatchObject({
+      status: "cancelling",
+    });
     await expect(provider.listBatches({ after: "batch-0", limit: 5 })).resolves.toMatchObject([
       { id: "batch-1" },
       {
@@ -481,12 +600,19 @@ describe("OpenAI-compatible provider", () => {
       fakeClient(),
     );
     await expect(
-      provider.createBatch({ endpoint: "/v1/chat/completions", inputFilePath: "input.jsonl" }),
+      provider.createBatch({
+        endpoint: "/v1/chat/completions",
+        inputFilePath: "input.jsonl",
+      }),
     ).rejects.toBeInstanceOf(UnsupportedOperationError);
-    await expect(provider.retrieveBatch("batch-1")).rejects.toBeInstanceOf(UnsupportedOperationError);
+    await expect(provider.retrieveBatch("batch-1")).rejects.toBeInstanceOf(
+      UnsupportedOperationError,
+    );
     await expect(provider.cancelBatch("batch-1")).rejects.toBeInstanceOf(UnsupportedOperationError);
     await expect(provider.listBatches()).rejects.toBeInstanceOf(UnsupportedOperationError);
-    await expect(provider.retrieveBatchResults("batch-1")).rejects.toBeInstanceOf(UnsupportedOperationError);
+    await expect(provider.retrieveBatchResults("batch-1")).rejects.toBeInstanceOf(
+      UnsupportedOperationError,
+    );
   });
 
   it("retrieves normalized OpenAI batch results and reports incomplete batches", async () => {
@@ -495,14 +621,20 @@ describe("OpenAI-compatible provider", () => {
         custom_id: "ok",
         response: { body: completionResponse(), status_code: 200 },
       }),
-      JSON.stringify({ custom_id: "bad", error: { code: "invalid", message: "Bad request" } }),
+      JSON.stringify({
+        custom_id: "bad",
+        error: { code: "invalid", message: "Bad request" },
+      }),
       JSON.stringify({ custom_id: "unexpected" }),
       "",
     ].join("\n");
     const content = vi.fn().mockResolvedValue(new Response(output));
     const retrieve = vi
       .fn()
-      .mockResolvedValueOnce({ output_file_id: "output-1", status: "completed" })
+      .mockResolvedValueOnce({
+        output_file_id: "output-1",
+        status: "completed",
+      })
       .mockResolvedValueOnce({ status: "in_progress" })
       .mockResolvedValueOnce({ status: "completed" });
     const provider = new OpenAIProvider(
@@ -518,19 +650,33 @@ describe("OpenAI-compatible provider", () => {
       results: [
         { customId: "ok", result: { id: "chat-1", provider: "test-openai" } },
         { customId: "bad", error: { code: "invalid", message: "Bad request" } },
-        { customId: "unexpected", error: { code: "unknown", message: "Unexpected response format" } },
+        {
+          customId: "unexpected",
+          error: { code: "unknown", message: "Unexpected response format" },
+        },
       ],
     });
-    await expect(provider.retrieveBatchResults("batch-2")).rejects.toBeInstanceOf(BatchNotCompleteError);
-    await expect(provider.retrieveBatchResults("batch-3")).resolves.toEqual({ results: [] });
+    await expect(provider.retrieveBatchResults("batch-2")).rejects.toBeInstanceOf(
+      BatchNotCompleteError,
+    );
+    await expect(provider.retrieveBatchResults("batch-3")).resolves.toEqual({
+      results: [],
+    });
     expect(content).toHaveBeenCalledWith("output-1");
   });
 
   it("normalizes request failures", async () => {
     const create = vi.fn().mockRejectedValue({ message: "server down", status: 500 });
-    const provider = new OpenAIProvider(config, {}, fakeClient({ chat: { completions: { create } } }));
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
     await expect(
-      provider.completion({ messages: [{ content: "Hi", role: "user" }], model: "model-a" }),
+      provider.completion({
+        messages: [{ content: "Hi", role: "user" }],
+        model: "model-a",
+      }),
     ).rejects.toBeInstanceOf(ProviderError);
   });
 

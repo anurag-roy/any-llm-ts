@@ -137,12 +137,12 @@ Set `requiresApiKey: false` for a keyless local endpoint.
 
 The port registers the same 53 provider names as the tracked Python source revision.
 
-| Adapter | Providers |
-| --- | --- |
-| OpenAI and OpenAI-compatible | `openai`, `azureopenai`, plus the data-driven compatible-provider registry |
-| Anthropic | `anthropic`, `azureanthropic`, `vertexaianthropic` |
-| Google Gen AI | `gemini`, `vertexai` |
-| AWS | `bedrock`, `sagemaker` |
+| Adapter                         | Providers                                                                                               |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| OpenAI and OpenAI-compatible    | `openai`, `azureopenai`, plus the data-driven compatible-provider registry                              |
+| Anthropic                       | `anthropic`, `azureanthropic`, `vertexaianthropic`                                                      |
+| Google Gen AI                   | `gemini`, `vertexai`                                                                                    |
+| AWS                             | `bedrock`, `sagemaker`                                                                                  |
 | Other native SDKs and protocols | `azure`, `cohere`, `github`, `huggingface`, `meta`, `mistral`, `otari`, `together`, `voyage`, `watsonx` |
 
 Registry metadata is intentionally conservative. Inspect capabilities at runtime instead of assuming every provider implements every OpenAI endpoint:
@@ -220,7 +220,7 @@ npm install
 npm run check
 ```
 
-`npm run check` runs strict type-checking, ESLint, unit tests with coverage gates, and the dual ESM/CommonJS build.
+`npm run check` runs Oxfmt verification, Oxlint, strict type-checking, unit tests with coverage gates, and the dual ESM/CommonJS build.
 
 ## Attribution and license
 

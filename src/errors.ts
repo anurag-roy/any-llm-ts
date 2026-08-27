@@ -1,3 +1,4 @@
+import { isNumber, isObject, isString } from "./utils.js";
 import type { ParsedChatCompletion } from "./types.js";
 
 interface AnyLLMErrorOptions {
@@ -63,7 +64,9 @@ export class UnsupportedProviderError extends AnyLLMError {
   readonly supportedProviders: string[];
 
   constructor(providerKey: string, supportedProviders: string[]) {
-    super(`Unsupported provider "${providerKey}". Supported providers: ${supportedProviders.join(", ")}.`);
+    super(
+      `Unsupported provider "${providerKey}". Supported providers: ${supportedProviders.join(", ")}.`,
+    );
     this.providerKey = providerKey;
     this.supportedProviders = supportedProviders;
   }
@@ -73,7 +76,9 @@ export class UnsupportedOperationError extends AnyLLMError {
   readonly operation: string;
 
   constructor(operation: string, provider: string) {
-    super(`The ${provider} provider does not support ${operation}.`, { provider });
+    super(`The ${provider} provider does not support ${operation}.`, {
+      provider,
+    });
     this.operation = operation;
   }
 }
@@ -110,7 +115,10 @@ export class LengthFinishReasonError<T = unknown> extends FinishReasonError<T> {
 
 export class ContentFilterFinishReasonError<T = unknown> extends FinishReasonError<T> {
   constructor(completion: ParsedChatCompletion<T>) {
-    super("Could not parse response content because the request was rejected by a content filter.", completion);
+    super(
+      "Could not parse response content because the request was rejected by a content filter.",
+      completion,
+    );
   }
 }
 
@@ -129,34 +137,45 @@ export class BatchNotCompleteError extends AnyLLMError {
   }
 }
 
-type ErrorRecord = Record<string, unknown>;
-
-function asRecord(value: unknown): ErrorRecord | undefined {
-  return typeof value === "object" && value !== null ? (value as ErrorRecord) : undefined;
+interface ErrorRecord {
+  "retry-after"?: string;
+  code?: string;
+  error?: ErrorRecord;
+  headers?: Headers | ErrorRecord;
+  message?: string;
+  param?: string;
+  status?: number;
+  statusCode?: number;
+  type?: string;
 }
 
-function stringValue(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
+function asRecord(cause: unknown): ErrorRecord | undefined {
+  // SAFETY: Consumers read only the optional provider-error fields declared above.
+  return isObject(cause) ? cause : undefined;
 }
 
-function numberValue(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+function stringValue(value: string | undefined): string | undefined {
+  return isString(value) && value.length > 0 ? value : undefined;
 }
 
-function headerValue(headers: unknown, name: string): string | undefined {
+function numberValue(value: number | undefined): number | undefined {
+  return isNumber(value) && Number.isFinite(value) ? value : undefined;
+}
+
+function retryAfterHeader(headers: ErrorRecord["headers"]): string | undefined {
   if (headers instanceof Headers) {
-    return headers.get(name) ?? undefined;
+    return headers.get("retry-after") ?? undefined;
   }
   const record = asRecord(headers);
-  return stringValue(record?.[name]) ?? stringValue(record?.[name.toLowerCase()]);
+  return stringValue(record?.["retry-after"]);
 }
 
-export function normalizeProviderError(error: unknown, provider: string): AnyLLMError {
-  if (error instanceof AnyLLMError) {
-    return error;
+export function normalizeProviderError(cause: unknown, provider: string): AnyLLMError {
+  if (cause instanceof AnyLLMError) {
+    return cause;
   }
 
-  const record = asRecord(error);
+  const record = asRecord(cause);
   const nested = asRecord(record?.error);
   const statusCode =
     numberValue(record?.status) ?? numberValue(record?.statusCode) ?? numberValue(nested?.status);
@@ -166,8 +185,8 @@ export function normalizeProviderError(error: unknown, provider: string): AnyLLM
   const message =
     stringValue(nested?.message) ??
     stringValue(record?.message) ??
-    (error instanceof Error ? error.message : "The provider request failed.");
-  const options: AnyLLMErrorOptions = { cause: error, provider };
+    (cause instanceof Error ? cause.message : "The provider request failed.");
+  const options: AnyLLMErrorOptions = { cause, provider };
   if (code !== undefined) options.code = code;
   if (errorType !== undefined) options.errorType = errorType;
   if (param !== undefined) options.param = param;
@@ -183,8 +202,11 @@ export function normalizeProviderError(error: unknown, provider: string): AnyLLM
     return new ModelNotFoundError(message, options);
   }
   if (statusCode === 429) {
-    const retryAfter = headerValue(record?.headers, "retry-after");
-    return new RateLimitError(message, retryAfter === undefined ? options : { ...options, retryAfter });
+    const retryAfter = retryAfterHeader(record?.headers);
+    return new RateLimitError(
+      message,
+      retryAfter === undefined ? options : { ...options, retryAfter },
+    );
   }
   if (statusCode === 502) {
     return new UpstreamProviderError(message, options);
