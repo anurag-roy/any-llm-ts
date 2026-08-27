@@ -1,3 +1,7 @@
+import { includeWhen } from "../utils.js";
+import { parseJsonObject, parseOptionalJsonObject } from "../utils.js";
+import type { JsonObject } from "../types.js";
+import { isNumber, isObject, isString } from "../utils.js";
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 
@@ -36,16 +40,26 @@ function normalizeBatch(job: BatchJob): Batch {
     provider: "mistral",
     status: batchStatus(job.status),
     raw: job,
-    ...(job.completedAt === undefined || job.completedAt === null ? {} : { completedAt: job.completedAt }),
-    ...(job.errorFile === undefined ? {} : { errorFileId: job.errorFile }),
-    ...(job.errors.length === 0 ? {} : { errors: job.errors }),
-    ...(job.inputFiles[0] === undefined ? {} : { inputFileId: job.inputFiles[0] }),
-    ...(job.metadata === undefined || job.metadata === null
-      ? {}
-      : { metadata: Object.fromEntries(Object.entries(job.metadata).map(([key, value]) => [key, String(value)])) }),
-    ...(job.model === undefined || job.model === null ? {} : { model: job.model }),
-    ...(job.outputFile === undefined ? {} : { outputFileId: job.outputFile }),
-    ...(job.startedAt === undefined || job.startedAt === null ? {} : { inProgressAt: job.startedAt }),
+    ...includeWhen(!(job.completedAt === undefined || job.completedAt === null), {
+      completedAt: job.completedAt ?? undefined,
+    }),
+    ...includeWhen(!(job.errorFile === undefined), { errorFileId: job.errorFile }),
+    ...includeWhen(!(job.errors.length === 0), { errors: job.errors }),
+    ...includeWhen(!(job.inputFiles[0] === undefined), { inputFileId: job.inputFiles[0] }),
+    ...includeWhen(!(job.metadata === undefined || job.metadata === null), {
+      metadata: Object.fromEntries(
+        Object.entries(job.metadata ?? {}).map(([key, value]) => [key, String(value)]),
+      ),
+    }),
+    ...includeWhen(!(job.model === undefined || job.model === null), {
+      model: job.model ?? undefined,
+    }),
+    ...includeWhen(!(job.outputFile === undefined || job.outputFile === null), {
+      outputFileId: job.outputFile ?? undefined,
+    }),
+    ...includeWhen(!(job.startedAt === undefined || job.startedAt === null), {
+      inProgressAt: job.startedAt ?? undefined,
+    }),
     requestCounts: {
       completed: job.completedRequests,
       failed: job.failedRequests,
@@ -58,7 +72,9 @@ function completionWindowHours(value: string | undefined): number {
   const window = value?.trim().toLowerCase() ?? "24h";
   const match = /^(\d+)h$/u.exec(window);
   if (match?.[1] === undefined) {
-    throw new TypeError(`Invalid completionWindow "${value ?? ""}". Expected a positive number of hours such as "24h".`);
+    throw new TypeError(
+      `Invalid completionWindow "${value ?? ""}". Expected a positive number of hours such as "24h".`,
+    );
   }
   const hours = Number(match[1]);
   if (hours <= 0) throw new TypeError("completionWindow must be positive.");
@@ -70,12 +86,14 @@ function modelInBatchFile(content: string): string | undefined {
   const models = new Set<string>();
   for (const line of content.split("\n")) {
     if (line.trim().length === 0) continue;
-    const entry = JSON.parse(line) as Record<string, unknown>;
-    const body = entry.body as Record<string, unknown> | undefined;
-    if (typeof body?.model === "string" && body.model.length > 0) models.add(body.model);
+    const entry = parseJsonObject(JSON.parse(line));
+    const body = parseOptionalJsonObject(entry.body);
+    if (isString(body?.model) && body.model.length > 0) models.add(body.model);
   }
   if (models.size > 1) {
-    throw new TypeError(`Mistral batches require one model; found: ${[...models].sort().join(", ")}.`);
+    throw new TypeError(
+      `Mistral batches require one model; found: ${[...models].sort().join(", ")}.`,
+    );
   }
   return models.values().next().value;
 }
@@ -115,7 +133,7 @@ export class MistralProvider extends OpenAIProvider {
       client ??
       new Mistral({
         apiKey: resolveApiKey(options),
-        ...(serverURL === undefined ? {} : { serverURL }),
+        ...includeWhen(!(serverURL === undefined), { serverURL }),
       });
   }
 
@@ -125,18 +143,22 @@ export class MistralProvider extends OpenAIProvider {
       const content = bytes.toString("utf8");
       const fileModel = modelInBatchFile(content);
       const options = params.providerOptions ?? {};
-      const requestedModel = typeof options.model === "string" ? options.model : undefined;
+      const requestedModel = isString(options.model) ? options.model : undefined;
       if (requestedModel !== undefined && fileModel !== undefined && requestedModel !== fileModel) {
         throw new TypeError(
           `Mistral batch model mismatch: providerOptions.model is "${requestedModel}" but the file uses "${fileModel}".`,
         );
       }
       const model = requestedModel ?? fileModel;
-      if (model === undefined) throw new TypeError("Mistral batch jobs require a model in providerOptions or the JSONL body.");
+      if (model === undefined)
+        throw new TypeError(
+          "Mistral batch jobs require a model in providerOptions or the JSONL body.",
+        );
       const uploaded = await this.mistral.files.upload({
         file: new File([bytes], basename(params.inputFilePath)),
         purpose: "batch",
       });
+      // SAFETY: The provider contract establishes the asserted representation at this boundary.
       const job = await this.mistral.batch.jobs.create({
         endpoint: params.endpoint as never,
         inputFiles: [uploaded.id],
@@ -148,11 +170,13 @@ export class MistralProvider extends OpenAIProvider {
     });
   }
 
-  override retrieveBatch(batchId: string, providerOptions: Record<string, unknown> = {}): Promise<Batch> {
-    return this.execute(async () => normalizeBatch(await this.mistral.batch.jobs.get({ jobId: batchId }, providerOptions)));
+  override retrieveBatch(batchId: string, providerOptions: JsonObject = {}): Promise<Batch> {
+    return this.execute(async () =>
+      normalizeBatch(await this.mistral.batch.jobs.get({ jobId: batchId }, providerOptions)),
+    );
   }
 
-  override cancelBatch(batchId: string, providerOptions: Record<string, unknown> = {}): Promise<Batch> {
+  override cancelBatch(batchId: string, providerOptions: JsonObject = {}): Promise<Batch> {
     return this.execute(async () =>
       normalizeBatch(await this.mistral.batch.jobs.cancel({ jobId: batchId }, providerOptions)),
     );
@@ -160,12 +184,16 @@ export class MistralProvider extends OpenAIProvider {
 
   override listBatches(params: ListBatchesParams = {}): Promise<Batch[]> {
     if (params.after !== undefined) {
-      return Promise.reject(new TypeError("Mistral uses page-based pagination; pass providerOptions.page instead of after."));
+      return Promise.reject(
+        new TypeError(
+          "Mistral uses page-based pagination; pass providerOptions.page instead of after.",
+        ),
+      );
     }
     return this.execute(async () => {
       const options = params.providerOptions ?? {};
       const response = await this.mistral.batch.jobs.list({
-        page: typeof options.page === "number" ? options.page : 0,
+        page: isNumber(options.page) ? options.page : 0,
         pageSize: params.limit ?? 100,
       });
       return (response.data ?? []).map(normalizeBatch);
@@ -174,7 +202,7 @@ export class MistralProvider extends OpenAIProvider {
 
   override retrieveBatchResults(
     batchId: string,
-    providerOptions: Record<string, unknown> = {},
+    providerOptions: JsonObject = {},
   ): Promise<BatchResult> {
     return this.execute(async () => {
       const job = await this.mistral.batch.jobs.get({ jobId: batchId }, providerOptions);
@@ -183,23 +211,28 @@ export class MistralProvider extends OpenAIProvider {
         throw new BatchNotCompleteError(batchId, normalized.status, "mistral");
       }
       if (job.outputFile === undefined || job.outputFile === null) return { results: [] };
-      const stream = await this.mistral.files.download({ fileId: job.outputFile });
+      const stream = await this.mistral.files.download({
+        fileId: job.outputFile,
+      });
       const results: BatchResult["results"] = [];
       for (const line of (await new Response(stream).text()).split("\n")) {
         if (line.trim().length === 0) continue;
-        const entry = JSON.parse(line) as Record<string, any>;
-        const customId = typeof entry.custom_id === "string" ? entry.custom_id : "";
-        const response = entry.response as Record<string, any> | undefined;
-        if (response?.status_code === 200 && typeof response.body === "object" && response.body !== null) {
-          results.push({ customId, result: this.normalizeCompletion(response.body) });
+        const entry = parseJsonObject(JSON.parse(line));
+        const customId = isString(entry.custom_id) ? entry.custom_id : "";
+        const response = parseOptionalJsonObject(entry.response);
+        if (response?.status_code === 200 && isObject(response.body) && response.body !== null) {
+          results.push({
+            customId,
+            result: this.normalizeCompletion(response.body),
+          });
           continue;
         }
-        const error = entry.error as Record<string, unknown> | undefined;
+        const error = parseOptionalJsonObject(entry.error);
         results.push({
           customId,
           error: {
-            code: typeof error?.code === "string" ? error.code : "unknown",
-            message: typeof error?.message === "string" ? error.message : "Unexpected response format",
+            code: isString(error?.code) ? error.code : "unknown",
+            message: isString(error?.message) ? error.message : "Unexpected response format",
           },
         });
       }

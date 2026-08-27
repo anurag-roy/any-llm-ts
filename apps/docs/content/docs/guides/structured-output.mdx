@@ -52,9 +52,7 @@ You can also pass a provider-compatible response format through the common `resp
 ```ts
 const response = await llm.completion({
   model: "gpt-4.1-mini",
-  messages: [
-    { role: "user", content: "Extract the city from: I live in Kolkata." },
-  ],
+  messages: [{ role: "user", content: "Extract the city from: I live in Kolkata." }],
   responseFormat: {
     type: "json_schema",
     json_schema: {
@@ -103,7 +101,6 @@ Supported normalized values are `none`, `minimal`, `low`, `medium`, `high`, `xhi
 normalized to `message.reasoning` or `delta.reasoning`.
 
 <Callout title="Treat reasoning as optional">
-  A provider or model may use reasoning internally without returning it. Always
-  handle the `reasoning` field as optional and avoid making application
-  correctness depend on it.
+  A provider or model may use reasoning internally without returning it. Always handle the
+  `reasoning` field as optional and avoid making application correctness depend on it.
 </Callout>

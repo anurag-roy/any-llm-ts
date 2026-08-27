@@ -1,3 +1,13 @@
+import { includeWhen } from "../utils.js";
+import type { JsonValue } from "../types.js";
+import {
+  parseJsonObject,
+  parseJsonObjectArray,
+  parseJsonValue,
+  parseOptionalJsonObject,
+} from "../utils.js";
+import type { JsonObject } from "../types.js";
+import { isNumber, isObject, isString } from "../utils.js";
 import { readFile } from "node:fs/promises";
 
 import Anthropic from "@anthropic-ai/sdk";
@@ -17,6 +27,7 @@ import type {
   ListBatchesParams,
   MessageContentBlock,
   MessageResponse,
+  MessageStopReason,
   MessageStreamEvent,
   MessagesInputContentBlock,
   MessagesParams,
@@ -70,27 +81,29 @@ function resolveApiKey(options: ProviderOptions): string {
   return apiKey;
 }
 
-function dataUrlSource(url: string): Record<string, unknown> | undefined {
+function dataUrlSource(url: string) {
   const match = /^data:([^;,]+);base64,(.+)$/u.exec(url);
   if (match === null) return undefined;
   return { data: match[2], media_type: match[1], type: "base64" };
 }
 
-function toAnthropicContent(content: ChatMessage["content"]): string | Record<string, unknown>[] {
-  if (typeof content === "string") return content;
+function toAnthropicContent(content: ChatMessage["content"]): JsonObject[] | string {
+  if (isString(content)) return content;
   if (content === null) return [];
 
-  return content.flatMap((part): Record<string, unknown>[] => {
-    if (part.type === "text" && "text" in part && typeof part.text === "string") {
+  return content.flatMap((part): JsonObject[] => {
+    if (part.type === "text" && "text" in part && isString(part.text)) {
       return [{ text: part.text, type: "text" }];
     }
     if (part.type === "image_url" && "image_url" in part) {
+      // SAFETY: The provider contract establishes the asserted representation at this boundary.
       const imageUrl = part.image_url as string | { url: string };
-      const url = typeof imageUrl === "string" ? imageUrl : imageUrl.url;
+      const url = isString(imageUrl) ? imageUrl : imageUrl.url;
       const source = dataUrlSource(url) ?? { type: "url", url };
       return [{ source, type: "image" }];
     }
     if (part.type === "file" && "file" in part) {
+      // SAFETY: The provider contract establishes the asserted representation at this boundary.
       const file = part.file as { file_data?: string };
       if (file.file_data !== undefined) {
         const source = dataUrlSource(file.file_data);
@@ -101,62 +114,65 @@ function toAnthropicContent(content: ChatMessage["content"]): string | Record<st
   });
 }
 
-function assistantContent(message: ChatMessage): Record<string, unknown>[] | string {
-  const blocks: Record<string, unknown>[] = [];
+function assistantContent(message: ChatMessage): JsonObject[] {
+  const blocks: JsonObject[] = [];
   const anthropicExtra = message.extraContent?.anthropic;
   const signature =
-    typeof anthropicExtra === "object" &&
-    anthropicExtra !== null &&
-    typeof (anthropicExtra as Record<string, unknown>).signature === "string"
-      ? (anthropicExtra as Record<string, unknown>).signature
+    isObject(anthropicExtra) && isString(parseJsonObject(anthropicExtra).signature)
+      ? parseJsonObject(anthropicExtra).signature
       : undefined;
   if (message.reasoning !== undefined && message.reasoning !== null && signature !== undefined) {
     blocks.push({ signature, thinking: message.reasoning, type: "thinking" });
   }
   const content = toAnthropicContent(message.content);
-  if (typeof content === "string") {
+  if (isString(content)) {
     if (content.length > 0) blocks.push({ text: content, type: "text" });
   } else {
     blocks.push(...content);
   }
   for (const toolCall of message.toolCalls ?? []) {
-    let input: unknown;
+    let input: JsonValue;
     try {
-      input = JSON.parse(toolCall.function.arguments);
+      input = parseJsonValue(JSON.parse(toolCall.function.arguments), "tool arguments");
     } catch {
       input = { arguments: toolCall.function.arguments };
     }
-    blocks.push({ id: toolCall.id, input, name: toolCall.function.name, type: "tool_use" });
+    blocks.push({
+      id: toolCall.id,
+      input,
+      name: toolCall.function.name,
+      type: "tool_use",
+    });
   }
   return blocks;
 }
 
-function convertMessages(messages: ChatMessage[]): {
-  messages: Record<string, unknown>[];
-  system?: string;
-} {
+function convertMessages(messages: ChatMessage[]) {
   const system = messages
     .filter((message) => message.role === "developer" || message.role === "system")
     .map((message) =>
-      typeof message.content === "string"
+      isString(message.content)
         ? message.content
         : (message.content ?? [])
-            .filter((part) => part.type === "text" && "text" in part)
-            .map((part) => String((part as { text: unknown }).text))
+            .flatMap((part): string[] =>
+              part.type === "text" && "text" in part && isString(part.text) ? [part.text] : [],
+            )
             .join("\n"),
     )
     .filter((entry) => entry.length > 0)
     .join("\n\n");
 
-  const converted = messages.flatMap((message): Record<string, unknown>[] => {
+  const converted = messages.flatMap((message): JsonObject[] => {
     if (message.role === "developer" || message.role === "system") return [];
     if (message.role === "tool") {
       return [
         {
           content: [
             {
-              content: typeof message.content === "string" ? message.content : JSON.stringify(message.content),
-              tool_use_id: message.toolCallId,
+              content: isString(message.content)
+                ? message.content
+                : JSON.stringify(message.content),
+              tool_use_id: message.toolCallId ?? "",
               type: "tool_result",
             },
           ],
@@ -166,7 +182,10 @@ function convertMessages(messages: ChatMessage[]): {
     }
     return [
       {
-        content: message.role === "assistant" ? assistantContent(message) : toAnthropicContent(message.content),
+        content:
+          message.role === "assistant"
+            ? assistantContent(message)
+            : toAnthropicContent(message.content),
         role: message.role,
       },
     ];
@@ -174,15 +193,19 @@ function convertMessages(messages: ChatMessage[]): {
   return system.length === 0 ? { messages: converted } : { messages: converted, system };
 }
 
-function convertTools(tools: CompletionParams["tools"]): Record<string, unknown>[] | undefined {
+function convertTools(tools: CompletionParams["tools"]) {
   if (tools === undefined) return undefined;
-  const converted = tools.flatMap((tool): Record<string, unknown>[] => {
+  const converted = tools.flatMap((tool) => {
     if (tool.type !== "function" || !("function" in tool)) return [];
+    // SAFETY: The provider contract establishes the asserted representation at this boundary.
     const functionTool = tool as FunctionTool;
     return [
       {
         description: functionTool.function.description,
-        input_schema: functionTool.function.parameters ?? { additionalProperties: true, type: "object" },
+        input_schema: functionTool.function.parameters ?? {
+          additionalProperties: true,
+          type: "object",
+        },
         name: functionTool.function.name,
       },
     ];
@@ -190,20 +213,27 @@ function convertTools(tools: CompletionParams["tools"]): Record<string, unknown>
   return converted.length === 0 ? undefined : converted;
 }
 
-function convertToolChoice(value: CompletionParams["toolChoice"]): Record<string, unknown> | undefined {
+interface AnthropicToolChoice {
+  type: "any" | "auto" | "tool";
+  disable_parallel_tool_use?: boolean;
+  name?: string;
+}
+
+function convertToolChoice(value: CompletionParams["toolChoice"]): AnthropicToolChoice | undefined {
   if (value === undefined || value === "none") return undefined;
   if (value === "auto") return { type: "auto" };
   if (value === "required") return { type: "any" };
-  if (typeof value === "object") {
+  if (isObject(value)) {
     const fn = value.function;
-    if (typeof fn === "object" && fn !== null && typeof (fn as Record<string, unknown>).name === "string") {
-      return { name: (fn as Record<string, unknown>).name, type: "tool" };
+    if (isObject(fn)) {
+      const name = parseJsonObject(fn).name;
+      if (isString(name)) return { name, type: "tool" };
     }
   }
   return undefined;
 }
 
-function reasoningConfiguration(params: CompletionParams): Record<string, unknown> {
+function reasoningConfiguration(params: CompletionParams) {
   if (params.reasoningEffort === "none") {
     return { thinking: { type: "disabled" } };
   }
@@ -215,23 +245,25 @@ function reasoningConfiguration(params: CompletionParams): Record<string, unknow
   };
 }
 
-function structuredOutputConfiguration(responseFormat: Record<string, unknown> | undefined): Record<string, unknown> {
+function structuredOutputConfiguration(responseFormat: JsonObject | undefined) {
   if (responseFormat === undefined) return {};
   if (responseFormat.type !== "json_schema") {
-    throw new TypeError("Anthropic structured output requires responseFormat.type to be json_schema.");
+    throw new TypeError(
+      "Anthropic structured output requires responseFormat.type to be json_schema.",
+    );
   }
   const jsonSchema = responseFormat.json_schema;
-  if (typeof jsonSchema !== "object" || jsonSchema === null) {
+  if (!isObject(jsonSchema)) {
     throw new TypeError("responseFormat.json_schema must be an object.");
   }
-  const schema = (jsonSchema as Record<string, unknown>).schema;
-  if (typeof schema !== "object" || schema === null) {
+  const schema = parseJsonObject(jsonSchema).schema;
+  if (!isObject(schema)) {
     throw new TypeError("responseFormat.json_schema.schema must be an object.");
   }
   return { output_config: { format: { schema, type: "json_schema" } } };
 }
 
-function nativeInputBlock(block: MessagesInputContentBlock): Record<string, unknown> {
+function nativeInputBlock(block: MessagesInputContentBlock) {
   if (block.type === "tool_result" && "toolUseId" in block) {
     return {
       content: "content" in block ? block.content : undefined,
@@ -241,7 +273,7 @@ function nativeInputBlock(block: MessagesInputContentBlock): Record<string, unkn
     };
   }
   if (block.type === "image" && "source" in block) {
-    const source = block.source as Record<string, unknown>;
+    const source = parseJsonObject(block.source);
     return {
       source: {
         data: source.data,
@@ -262,14 +294,14 @@ function nativeInputBlock(block: MessagesInputContentBlock): Record<string, unkn
   return { ...block };
 }
 
-export function nativeMessagesRequest(params: MessagesParams): Record<string, unknown> {
+export function nativeMessagesRequest(params: MessagesParams) {
   return {
     betas: params.betas,
     cache_control: params.cacheControl,
     context_management: params.contextManagement,
     max_tokens: params.maxTokens,
     messages: params.messages.map((message) => ({
-      content: typeof message.content === "string" ? message.content : message.content.map(nativeInputBlock),
+      content: isString(message.content) ? message.content : message.content.map(nativeInputBlock),
       role: message.role,
     })),
     metadata: params.metadata,
@@ -278,14 +310,13 @@ export function nativeMessagesRequest(params: MessagesParams): Record<string, un
     service_tier: params.serviceTier,
     stop_sequences: params.stopSequences,
     stream: params.stream,
-    system:
-      typeof params.system === "string"
-        ? params.system
-        : params.system?.map((block) => ({
-            cache_control: block.cacheControl,
-            text: block.text,
-            type: block.type,
-          })),
+    system: isString(params.system)
+      ? params.system
+      : params.system?.map((block) => ({
+          cache_control: block.cacheControl,
+          text: block.text,
+          type: block.type,
+        })),
     temperature: params.temperature,
     thinking: params.thinking,
     tool_choice: params.toolChoice,
@@ -301,14 +332,14 @@ export function nativeMessagesRequest(params: MessagesParams): Record<string, un
   };
 }
 
-function nativeContentBlock(value: unknown): MessageContentBlock {
-  const block = value as Record<string, unknown>;
+function nativeContentBlock(value: JsonValue | undefined): MessageContentBlock {
+  const block = parseJsonObject(value);
   if (block.type === "text") return { text: stringValue(block.text), type: "text" };
   if (block.type === "thinking") {
     return {
       thinking: stringValue(block.thinking),
       type: "thinking",
-      ...(typeof block.signature === "string" ? { signature: block.signature } : {}),
+      ...includeWhen(isString(block.signature), { signature: block.signature }),
     };
   }
   if (block.type === "tool_use") {
@@ -319,40 +350,53 @@ function nativeContentBlock(value: unknown): MessageContentBlock {
       type: "tool_use",
     };
   }
+  // SAFETY: The provider contract establishes the asserted representation at this boundary.
   return block as MessageContentBlock;
 }
 
-function stringValue(value: unknown): string {
-  return typeof value === "string" ? value : "";
+function stringValue(value: JsonValue | undefined, fallback = ""): string {
+  return isString(value) ? value : fallback;
 }
 
-export function nativeMessage(value: unknown): MessageResponse {
-  const response = value as Record<string, any>;
-  const usage = (response.usage ?? {}) as Record<string, unknown>;
+function messageStopReason(value: JsonValue | undefined): MessageStopReason | null {
+  return value === "end_turn" ||
+    value === "max_tokens" ||
+    value === "refusal" ||
+    value === "stop_sequence" ||
+    value === "tool_use"
+    ? value
+    : null;
+}
+
+export function nativeMessage<Value>(value: Value): MessageResponse {
+  const response = parseJsonObject(value);
+  const usage = parseJsonObject(response.usage ?? {});
+  const normalizedUsage: MessageResponse["usage"] = {
+    inputTokens: Number(usage.input_tokens ?? 0),
+    outputTokens: Number(usage.output_tokens ?? 0),
+  };
+  if (isNumber(usage.cache_creation_input_tokens)) {
+    normalizedUsage.cacheCreationInputTokens = usage.cache_creation_input_tokens;
+  }
+  if (isNumber(usage.cache_read_input_tokens)) {
+    normalizedUsage.cacheReadInputTokens = usage.cache_read_input_tokens;
+  }
   return {
     content: Array.isArray(response.content) ? response.content.map(nativeContentBlock) : [],
-    id: String(response.id ?? ""),
-    model: String(response.model ?? ""),
+    id: stringValue(response.id),
+    model: stringValue(response.model),
     role: "assistant",
-    stopReason: response.stop_reason ?? null,
+    stopReason: messageStopReason(response.stop_reason),
     type: "message",
-    usage: {
-      inputTokens: Number(usage.input_tokens ?? 0),
-      outputTokens: Number(usage.output_tokens ?? 0),
-      ...(typeof usage.cache_creation_input_tokens === "number"
-        ? { cacheCreationInputTokens: usage.cache_creation_input_tokens }
-        : {}),
-      ...(typeof usage.cache_read_input_tokens === "number"
-        ? { cacheReadInputTokens: usage.cache_read_input_tokens }
-        : {}),
-    },
+    usage: normalizedUsage,
     raw: value,
   };
 }
 
-export function nativeMessageEvent(value: unknown): MessageStreamEvent {
-  const event = value as Record<string, any>;
-  if (event.type === "message_start") return { message: nativeMessage(event.message), type: "message_start" };
+export function nativeMessageEvent<Value>(value: Value): MessageStreamEvent {
+  const event = parseJsonObject(value);
+  if (event.type === "message_start")
+    return { message: nativeMessage(event.message), type: "message_start" };
   if (event.type === "content_block_start") {
     return {
       contentBlock: nativeContentBlock(event.content_block),
@@ -361,45 +405,59 @@ export function nativeMessageEvent(value: unknown): MessageStreamEvent {
     };
   }
   if (event.type === "content_block_delta") {
-    const delta = event.delta as Record<string, unknown>;
+    const delta = parseJsonObject(event.delta);
     const normalized =
       delta.type === "input_json_delta"
-        ? { partialJson: stringValue(delta.partial_json), type: "input_json_delta" as const }
+        ? {
+            partialJson: stringValue(delta.partial_json),
+            type: "input_json_delta" as const,
+          }
         : delta;
-    return { delta: normalized as never, index: Number(event.index), type: "content_block_delta" };
+    // SAFETY: The provider contract establishes the asserted representation at this boundary.
+    return {
+      delta: normalized as never,
+      index: Number(event.index),
+      type: "content_block_delta",
+    };
   }
   if (event.type === "content_block_stop") {
     return { index: Number(event.index), type: "content_block_stop" };
   }
   if (event.type === "message_delta") {
-    const usage = (event.usage ?? {}) as Record<string, unknown>;
+    const rawDelta = parseJsonObject(event.delta ?? {});
+    const usage = parseJsonObject(event.usage ?? {});
+    const normalizedUsage: MessageResponse["usage"] = {
+      inputTokens: Number(usage.input_tokens ?? 0),
+      outputTokens: Number(usage.output_tokens ?? 0),
+    };
+    if (isNumber(usage.cache_read_input_tokens)) {
+      normalizedUsage.cacheReadInputTokens = usage.cache_read_input_tokens;
+    }
+    const stopSequence = rawDelta.stop_sequence;
+    const normalizedDelta: Extract<MessageStreamEvent, { type: "message_delta" }>["delta"] = {
+      stopReason: messageStopReason(rawDelta.stop_reason),
+    };
+    if (isString(stopSequence) || stopSequence === null) {
+      normalizedDelta.stopSequence = stopSequence;
+    }
     return {
-      delta: {
-        stopReason: event.delta?.stop_reason ?? null,
-        ...(event.delta?.stop_sequence === undefined ? {} : { stopSequence: event.delta.stop_sequence }),
-      },
+      delta: normalizedDelta,
       type: "message_delta",
-      usage: {
-        inputTokens: Number(usage.input_tokens ?? 0),
-        outputTokens: Number(usage.output_tokens ?? 0),
-        ...(typeof usage.cache_read_input_tokens === "number"
-          ? { cacheReadInputTokens: usage.cache_read_input_tokens }
-          : {}),
-      },
+      usage: normalizedUsage,
     };
   }
   return { type: "message_stop" };
 }
 
-function timestamp(value: unknown): number | undefined {
-  if (typeof value !== "string") return undefined;
+function timestamp(value: JsonValue | undefined): number | undefined {
+  if (!isString(value)) return undefined;
   const milliseconds = Date.parse(value);
   return Number.isNaN(milliseconds) ? undefined : Math.floor(milliseconds / 1_000);
 }
 
-function normalizeAnthropicBatch(value: unknown, provider: string): Batch {
-  const batch = value as Record<string, any>;
-  const counts = batch.request_counts as Record<string, unknown> | undefined;
+function normalizeAnthropicBatch<Value>(value: Value, provider: string): Batch {
+  const batch = parseJsonObject(value);
+  const counts = parseOptionalJsonObject(batch.request_counts);
   const succeeded = Number(counts?.succeeded ?? 0);
   const errored = Number(counts?.errored ?? 0);
   const canceled = Number(counts?.canceled ?? 0);
@@ -418,28 +476,26 @@ function normalizeAnthropicBatch(value: unknown, provider: string): Batch {
     completionWindow: "24h",
     createdAt: timestamp(batch.created_at) ?? 0,
     endpoint: "/v1/chat/completions",
-    id: typeof batch.id === "string" ? batch.id : "",
+    id: isString(batch.id) ? batch.id : "",
     object: "batch",
     provider,
     status,
     raw: value,
-    ...(completedAt === undefined ? {} : { completedAt }),
-    ...(cancellingAt === undefined ? {} : { cancellingAt }),
-    ...(expiresAt === undefined ? {} : { expiresAt }),
-    ...(typeof batch.results_url === "string" ? { outputFileId: batch.results_url } : { outputFileId: null }),
-    ...(counts === undefined
-      ? {}
-      : {
-          requestCounts: {
-            completed: succeeded,
-            failed: errored + canceled + expired,
-            total: succeeded + errored + canceled + expired + processing,
-          },
-        }),
+    ...includeWhen(!(completedAt === undefined), { completedAt }),
+    ...includeWhen(!(cancellingAt === undefined), { cancellingAt }),
+    ...includeWhen(!(expiresAt === undefined), { expiresAt }),
+    ...(isString(batch.results_url) ? { outputFileId: batch.results_url } : { outputFileId: null }),
+    ...includeWhen(!(counts === undefined), {
+      requestCounts: {
+        completed: succeeded,
+        failed: errored + canceled + expired,
+        total: succeeded + errored + canceled + expired + processing,
+      },
+    }),
   };
 }
 
-function finishReason(value: unknown): FinishReason {
+function finishReason(value: JsonValue | undefined): FinishReason {
   if (value === "max_tokens") return "length";
   if (value === "tool_use") return "tool_calls";
   if (value === "end_turn" || value === "stop_sequence") return "stop";
@@ -447,21 +503,21 @@ function finishReason(value: unknown): FinishReason {
   return null;
 }
 
-function anthropicUsage(value: Record<string, unknown>): CompletionUsage {
-  const promptTokens = typeof value.input_tokens === "number" ? value.input_tokens : 0;
-  const completionTokens = typeof value.output_tokens === "number" ? value.output_tokens : 0;
-  const promptTokensDetails: Record<string, unknown> = {};
-  if (typeof value.cache_creation_input_tokens === "number") {
+function anthropicUsage(value: JsonObject): CompletionUsage {
+  const promptTokens = isNumber(value.input_tokens) ? value.input_tokens : 0;
+  const completionTokens = isNumber(value.output_tokens) ? value.output_tokens : 0;
+  const promptTokensDetails: JsonObject = {};
+  if (isNumber(value.cache_creation_input_tokens)) {
     promptTokensDetails.cacheCreationTokens = value.cache_creation_input_tokens;
   }
-  if (typeof value.cache_read_input_tokens === "number") {
+  if (isNumber(value.cache_read_input_tokens)) {
     promptTokensDetails.cachedTokens = value.cache_read_input_tokens;
   }
   return {
     completionTokens,
     promptTokens,
     totalTokens: completionTokens + promptTokens,
-    ...(Object.keys(promptTokensDetails).length === 0 ? {} : { promptTokensDetails }),
+    ...includeWhen(!(Object.keys(promptTokensDetails).length === 0), { promptTokensDetails }),
   };
 }
 
@@ -478,28 +534,29 @@ export class AnthropicProvider extends BaseProvider {
     super();
     this.providerName = config.name ?? "anthropic";
     const apiBase =
-      options.apiBase ??
-      getEnvironmentVariable(config.envApiBase ?? "ANTHROPIC_BASE_URL");
+      options.apiBase ?? getEnvironmentVariable(config.envApiBase ?? "ANTHROPIC_BASE_URL");
+    // SAFETY: The provider contract establishes the asserted representation at this boundary.
     this.client =
       client ??
       new Anthropic({
-        ...(options.clientOptions as ConstructorParameters<typeof Anthropic>[0]),
+        ...options.clientOptions,
         apiKey: resolveApiKey(options),
-        ...(apiBase === undefined ? {} : { baseURL: apiBase }),
+        ...includeWhen(!(apiBase === undefined), { baseURL: apiBase }),
       });
     this.metadata = completeProviderMetadata({
       capabilities: { ...anthropicCapabilities, ...config.capabilities },
-      documentationUrl:
-        config.documentationUrl ?? "https://docs.anthropic.com/en/api/",
+      documentationUrl: config.documentationUrl ?? "https://docs.anthropic.com/en/api/",
       envApiBase: config.envApiBase ?? "ANTHROPIC_BASE_URL",
       envApiKey: config.envApiKey ?? "ANTHROPIC_API_KEY",
       name: this.providerName,
       requiresApiKey: config.requiresApiKey ?? true,
-      ...(apiBase === undefined ? {} : { apiBase }),
+      ...includeWhen(!(apiBase === undefined), { apiBase }),
     });
   }
 
-  override completion(params: CompletionParams): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion> {
+  override completion(
+    params: CompletionParams,
+  ): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion> {
     if (params.messages.length === 0) {
       return Promise.reject(new TypeError("The messages array cannot be empty."));
     }
@@ -507,28 +564,57 @@ export class AnthropicProvider extends BaseProvider {
     return this.execute(async () => {
       const requestOptions = timeoutRequestOptions(params.timeout);
       if (params.stream === true) {
-        const stream = requestOptions === undefined
-          ? await this.client.messages.create({ ...request, stream: true } as never)
-          : await this.client.messages.create({ ...request, stream: true } as never, requestOptions);
+        // SAFETY: The provider contract establishes the asserted representation at this boundary.
+        const stream =
+          requestOptions === undefined
+            ? await this.client.messages.create({
+                ...request,
+                stream: true,
+              } as never)
+            : await this.client.messages.create(
+                { ...request, stream: true } as never,
+                requestOptions,
+              );
+        if (!isAsyncIterable(stream)) {
+          throw new TypeError(`${this.providerName} returned a non-streaming completion response.`);
+        }
         return this.protectStream(
-          this.normalizeStream(stream as unknown as AsyncIterable<Record<string, any>>, params.model),
+          this.normalizeStream(
+            mapAsyncIterable(stream, (event) => parseJsonObject(event, "Anthropic stream event")),
+            params.model,
+          ),
         );
       }
-      const response = requestOptions === undefined
-        ? await this.client.messages.create({ ...request, stream: false } as never)
-        : await this.client.messages.create({ ...request, stream: false } as never, requestOptions);
+      // SAFETY: The provider contract establishes the asserted representation at this boundary.
+      const response =
+        requestOptions === undefined
+          ? await this.client.messages.create({
+              ...request,
+              stream: false,
+            } as never)
+          : await this.client.messages.create(
+              { ...request, stream: false } as never,
+              requestOptions,
+            );
       return this.normalizeCompletion(response);
     });
   }
 
-  override messages(params: MessagesParams): Promise<AsyncIterable<MessageStreamEvent> | MessageResponse> {
+  override messages(
+    params: MessagesParams,
+  ): Promise<AsyncIterable<MessageStreamEvent> | MessageResponse> {
     return this.execute(async () => {
       const requestOptions = timeoutRequestOptions(params.timeout);
-      const response = requestOptions === undefined
-        ? await this.client.messages.create(nativeMessagesRequest(params) as never)
-        : await this.client.messages.create(nativeMessagesRequest(params) as never, requestOptions);
+      // SAFETY: The provider contract establishes the asserted representation at this boundary.
+      const response =
+        requestOptions === undefined
+          ? await this.client.messages.create(nativeMessagesRequest(params) as never)
+          : await this.client.messages.create(
+              nativeMessagesRequest(params) as never,
+              requestOptions,
+            );
       if (isAsyncIterable(response)) {
-        return this.protectStream(mapAsyncIterable(response, nativeMessageEvent));
+        return this.protectStream(mapAsyncIterable(response, (event) => nativeMessageEvent(event)));
       }
       return nativeMessage(response);
     });
@@ -537,13 +623,13 @@ export class AnthropicProvider extends BaseProvider {
   override createBatch(params: CreateBatchParams): Promise<Batch> {
     if (!this.metadata.capabilities.batch) return super.createBatch(params);
     return this.execute(async () => {
-      const requests: Record<string, unknown>[] = [];
+      const requests = [];
       for (const line of (await readFile(params.inputFilePath, "utf8")).split("\n")) {
         if (line.trim().length === 0) continue;
-        const entry = JSON.parse(line) as Record<string, any>;
-        const body = (entry.body ?? {}) as Record<string, unknown>;
+        const entry = parseJsonObject(JSON.parse(line));
+        const body = parseJsonObject(entry.body ?? {});
         requests.push({
-          custom_id: typeof entry.custom_id === "string" ? entry.custom_id : "",
+          custom_id: isString(entry.custom_id) ? entry.custom_id : "",
           params: compactObject({
             max_tokens: body.max_tokens ?? 1_024,
             messages: body.messages ?? [],
@@ -554,6 +640,7 @@ export class AnthropicProvider extends BaseProvider {
           }),
         });
       }
+      // SAFETY: The provider contract establishes the asserted representation at this boundary.
       const response = await this.client.messages.batches.create({
         requests,
         ...params.providerOptions,
@@ -562,7 +649,7 @@ export class AnthropicProvider extends BaseProvider {
     });
   }
 
-  override retrieveBatch(batchId: string, providerOptions: Record<string, unknown> = {}): Promise<Batch> {
+  override retrieveBatch(batchId: string, providerOptions: JsonObject = {}): Promise<Batch> {
     if (!this.metadata.capabilities.batch) return super.retrieveBatch(batchId, providerOptions);
     return this.execute(async () => {
       const response = await this.client.messages.batches.retrieve(batchId, providerOptions);
@@ -570,7 +657,7 @@ export class AnthropicProvider extends BaseProvider {
     });
   }
 
-  override cancelBatch(batchId: string, providerOptions: Record<string, unknown> = {}): Promise<Batch> {
+  override cancelBatch(batchId: string, providerOptions: JsonObject = {}): Promise<Batch> {
     if (!this.metadata.capabilities.batch) return super.cancelBatch(batchId, providerOptions);
     return this.execute(async () => {
       const response = await this.client.messages.batches.cancel(batchId, providerOptions);
@@ -582,7 +669,11 @@ export class AnthropicProvider extends BaseProvider {
     if (!this.metadata.capabilities.batch) return super.listBatches(params);
     return this.execute(async () => {
       const page = await this.client.messages.batches.list(
-        compactObject({ after_id: params.after, limit: params.limit, ...params.providerOptions }),
+        compactObject({
+          after_id: params.after,
+          limit: params.limit,
+          ...params.providerOptions,
+        }),
       );
       return page.data.map((batch) => normalizeAnthropicBatch(batch, this.providerName));
     });
@@ -590,7 +681,7 @@ export class AnthropicProvider extends BaseProvider {
 
   override retrieveBatchResults(
     batchId: string,
-    providerOptions: Record<string, unknown> = {},
+    providerOptions: JsonObject = {},
   ): Promise<BatchResult> {
     if (!this.metadata.capabilities.batch) {
       return super.retrieveBatchResults(batchId, providerOptions);
@@ -608,7 +699,10 @@ export class AnthropicProvider extends BaseProvider {
       const results: BatchResult["results"] = [];
       for await (const entry of response) {
         if (entry.result.type === "succeeded") {
-          results.push({ customId: entry.custom_id, result: this.normalizeCompletion(entry.result.message) });
+          results.push({
+            customId: entry.custom_id,
+            result: this.normalizeCompletion(entry.result.message),
+          });
           continue;
         }
         if (entry.result.type === "errored") {
@@ -623,14 +717,17 @@ export class AnthropicProvider extends BaseProvider {
         }
         results.push({
           customId: entry.custom_id,
-          error: { code: entry.result.type, message: `Request ${entry.result.type}` },
+          error: {
+            code: entry.result.type,
+            message: `Request ${entry.result.type}`,
+          },
         });
       }
       return { results };
     });
   }
 
-  override listModels(providerOptions: Record<string, unknown> = {}): Promise<Model[]> {
+  override listModels(providerOptions: JsonObject = {}): Promise<Model[]> {
     if (!this.metadata.capabilities.listModels) return super.listModels(providerOptions);
     return this.execute(async () => {
       const page = await this.client.models.list(providerOptions);
@@ -648,14 +745,14 @@ export class AnthropicProvider extends BaseProvider {
     });
   }
 
-  private completionRequest(params: CompletionParams): Record<string, unknown> {
+  private completionRequest(params: CompletionParams) {
     const convertedMessages = convertMessages(params.messages);
     const maxTokens = params.maxTokens ?? params.maxCompletionTokens ?? 8_192;
     const reasoning = reasoningConfiguration(params);
     const structuredOutput = structuredOutputConfiguration(params.responseFormat);
     const outputConfig = {
-      ...((structuredOutput.output_config as Record<string, unknown> | undefined) ?? {}),
-      ...((reasoning.output_config as Record<string, unknown> | undefined) ?? {}),
+      ...(parseOptionalJsonObject(structuredOutput.output_config) ?? {}),
+      ...(parseOptionalJsonObject(reasoning.output_config) ?? {}),
     };
     let toolChoice = convertToolChoice(params.toolChoice);
     if (params.parallelToolCalls !== undefined) {
@@ -665,9 +762,9 @@ export class AnthropicProvider extends BaseProvider {
       ...convertedMessages,
       max_tokens: maxTokens,
       model: params.model,
-      ...(Object.keys(outputConfig).length === 0 ? {} : { output_config: outputConfig }),
-      ...("thinking" in reasoning ? { thinking: reasoning.thinking } : {}),
-      stop_sequences: typeof params.stop === "string" ? [params.stop] : params.stop,
+      ...includeWhen(!(Object.keys(outputConfig).length === 0), { output_config: outputConfig }),
+      ...includeWhen("thinking" in reasoning, { thinking: reasoning.thinking }),
+      stop_sequences: isString(params.stop) ? [params.stop] : params.stop,
       service_tier: params.serviceTier,
       stream: params.stream,
       temperature: params.temperature,
@@ -678,26 +775,30 @@ export class AnthropicProvider extends BaseProvider {
     };
   }
 
-  private normalizeCompletion(value: unknown): ChatCompletion {
-    const response = value as Record<string, any>;
-    const contentBlocks = response.content as Record<string, any>[];
+  private normalizeCompletion<Value>(value: Value): ChatCompletion {
+    const response = parseJsonObject(value);
+    const contentBlocks = parseJsonObjectArray(response.content);
     const text = contentBlocks
       .filter((block) => block.type === "text")
-      .map((block) => String(block.text))
+      .map((block) => stringValue(block.text))
       .join("");
     const reasoning = contentBlocks
       .filter((block) => block.type === "thinking")
-      .map((block) => String(block.thinking))
+      .map((block) => stringValue(block.thinking))
       .join("");
+    // SAFETY: The provider contract establishes the asserted representation at this boundary.
     const thinkingSignature = contentBlocks.find(
-      (block) => block.type === "thinking" && typeof block.signature === "string",
+      (block) => block.type === "thinking" && isString(block.signature),
     )?.signature as string | undefined;
     const toolCalls = contentBlocks.flatMap((block): ToolCall[] =>
       block.type === "tool_use"
         ? [
             {
-              function: { arguments: JSON.stringify(block.input), name: String(block.name) },
-              id: String(block.id),
+              function: {
+                arguments: JSON.stringify(block.input),
+                name: stringValue(block.name),
+              },
+              id: stringValue(block.id),
               type: "function",
             },
           ]
@@ -711,26 +812,26 @@ export class AnthropicProvider extends BaseProvider {
           message: {
             content: text.length === 0 ? null : text,
             role: "assistant",
-            ...(reasoning.length === 0 ? {} : { reasoning }),
-            ...(thinkingSignature === undefined
-              ? {}
-              : { extraContent: { anthropic: { signature: thinkingSignature } } }),
-            ...(toolCalls.length === 0 ? {} : { toolCalls }),
+            ...includeWhen(!(reasoning.length === 0), { reasoning }),
+            ...includeWhen(!(thinkingSignature === undefined), {
+              extraContent: { anthropic: { signature: thinkingSignature } },
+            }),
+            ...includeWhen(!(toolCalls.length === 0), { toolCalls }),
           },
         },
       ],
       created: unixTimestamp(),
-      id: String(response.id),
-      model: String(response.model),
+      id: stringValue(response.id),
+      model: stringValue(response.model),
       object: "chat.completion",
       provider: this.providerName,
       raw: value,
-      usage: anthropicUsage(response.usage as Record<string, unknown>),
+      usage: anthropicUsage(parseJsonObject(response.usage)),
     };
   }
 
   private async *normalizeStream(
-    stream: AsyncIterable<Record<string, any>>,
+    stream: AsyncIterable<JsonObject>,
     requestedModel: string,
   ): AsyncIterable<ChatCompletionChunk> {
     let id = "anthropic-stream";
@@ -740,18 +841,24 @@ export class AnthropicProvider extends BaseProvider {
 
     for await (const event of stream) {
       if (event.type === "message_start") {
-        id = String(event.message.id);
-        model = String(event.message.model);
+        const message = parseJsonObject(event.message);
+        const messageUsage = parseJsonObject(message.usage ?? {});
+        id = stringValue(message.id, id);
+        model = stringValue(message.model, model);
         created = unixTimestamp();
-        inputTokens = Number(event.message.usage?.input_tokens ?? 0);
+        inputTokens = Number(messageUsage.input_tokens ?? 0);
         yield this.chunk(id, model, created, { role: "assistant" }, null, event);
         continue;
       }
       if (event.type === "content_block_start") {
-        const block = event.content_block as Record<string, any>;
-        if (block.type === "text" && typeof block.text === "string" && block.text.length > 0) {
+        const block = parseJsonObject(event.content_block);
+        if (block.type === "text" && isString(block.text) && block.text.length > 0) {
           yield this.chunk(id, model, created, { content: block.text }, null, event);
-        } else if (block.type === "thinking" && typeof block.thinking === "string" && block.thinking.length > 0) {
+        } else if (
+          block.type === "thinking" &&
+          isString(block.thinking) &&
+          block.thinking.length > 0
+        ) {
           yield this.chunk(id, model, created, { reasoning: block.thinking }, null, event);
         } else if (block.type === "tool_use") {
           yield this.chunk(
@@ -761,8 +868,8 @@ export class AnthropicProvider extends BaseProvider {
             {
               toolCalls: [
                 {
-                  function: { arguments: "", name: String(block.name) },
-                  id: String(block.id),
+                  function: { arguments: "", name: stringValue(block.name) },
+                  id: stringValue(block.id),
                   index: Number(event.index),
                   type: "function",
                 },
@@ -775,11 +882,18 @@ export class AnthropicProvider extends BaseProvider {
         continue;
       }
       if (event.type === "content_block_delta") {
-        const delta = event.delta as Record<string, any>;
+        const delta = parseJsonObject(event.delta);
         if (delta.type === "text_delta") {
-          yield this.chunk(id, model, created, { content: String(delta.text) }, null, event);
+          yield this.chunk(id, model, created, { content: stringValue(delta.text) }, null, event);
         } else if (delta.type === "thinking_delta") {
-          yield this.chunk(id, model, created, { reasoning: String(delta.thinking) }, null, event);
+          yield this.chunk(
+            id,
+            model,
+            created,
+            { reasoning: stringValue(delta.thinking) },
+            null,
+            event,
+          );
         } else if (delta.type === "input_json_delta") {
           yield this.chunk(
             id,
@@ -788,7 +902,7 @@ export class AnthropicProvider extends BaseProvider {
             {
               toolCalls: [
                 {
-                  function: { arguments: String(delta.partial_json) },
+                  function: { arguments: stringValue(delta.partial_json) },
                   index: Number(event.index),
                 },
               ],
@@ -801,7 +915,11 @@ export class AnthropicProvider extends BaseProvider {
             id,
             model,
             created,
-            { extraContent: { anthropic: { signature: String(delta.signature) } } },
+            {
+              extraContent: {
+                anthropic: { signature: stringValue(delta.signature) },
+              },
+            },
             null,
             event,
           );
@@ -809,9 +927,11 @@ export class AnthropicProvider extends BaseProvider {
         continue;
       }
       if (event.type === "message_delta") {
-        const outputTokens = Number(event.usage?.output_tokens ?? 0);
+        const eventUsage = parseJsonObject(event.usage ?? {});
+        const eventDelta = parseJsonObject(event.delta ?? {});
+        const outputTokens = Number(eventUsage.output_tokens ?? 0);
         yield {
-          ...this.chunk(id, model, created, {}, finishReason(event.delta?.stop_reason), event),
+          ...this.chunk(id, model, created, {}, finishReason(eventDelta.stop_reason), event),
           usage: {
             completionTokens: outputTokens,
             promptTokens: inputTokens,
@@ -828,7 +948,7 @@ export class AnthropicProvider extends BaseProvider {
     created: number,
     delta: ChatCompletionChunk["choices"][number]["delta"],
     reason: FinishReason,
-    raw: unknown,
+    raw: JsonValue | undefined,
   ): ChatCompletionChunk {
     return {
       choices: [{ delta, finishReason: reason, index: 0 }],

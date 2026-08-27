@@ -34,15 +34,17 @@ const response = await llm.messages({
   model,
   maxTokens: 512,
   messages: [{ role: "user", content: "Look up order 123." }],
-  tools: [{
-    name: "get_order",
-    description: "Retrieve an order",
-    inputSchema: {
-      type: "object",
-      properties: { id: { type: "string" } },
-      required: ["id"],
+  tools: [
+    {
+      name: "get_order",
+      description: "Retrieve an order",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "string" } },
+        required: ["id"],
+      },
     },
-  }],
+  ],
   toolChoice: { type: "auto" },
 });
 ```

@@ -11,22 +11,22 @@
     "openai",
     "typescript"
   ],
+  "homepage": "https://github.com/anurag-roy/any-llm-ts#readme",
+  "bugs": {
+    "url": "https://github.com/anurag-roy/any-llm-ts/issues"
+  },
   "license": "Apache-2.0",
   "author": "Anurag Roy",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/anurag-roy/any-llm-ts.git"
   },
-  "bugs": {
-    "url": "https://github.com/anurag-roy/any-llm-ts/issues"
-  },
-  "homepage": "https://github.com/anurag-roy/any-llm-ts#readme",
-  "type": "module",
-  "sideEffects": false,
   "files": [
     "dist",
     "NOTICE"
   ],
+  "type": "module",
+  "sideEffects": false,
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -37,9 +37,6 @@
       "require": "./dist/index.cjs"
     }
   },
-  "engines": {
-    "node": ">=20"
-  },
   "publishConfig": {
     "access": "public",
     "provenance": true
@@ -47,12 +44,14 @@
   "scripts": {
     "build": "tsup",
     "changeset": "changeset",
-    "check": "npm run lint && npm run typecheck && npm test && npm run build",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run build",
     "docs:build": "npm --prefix apps/docs run build",
-    "docs:check": "npm run build && npm --prefix apps/docs run generate:providers -- --check && npm --prefix apps/docs run lint && npm --prefix apps/docs run types:check && npm run docs:build && npm --prefix apps/docs run check:links",
+    "docs:check": "npm run build && npm --prefix apps/docs run generate:providers -- --check && npm --prefix apps/docs run format:check && npm --prefix apps/docs run lint && npm --prefix apps/docs run types:check && npm run docs:build && npm --prefix apps/docs run check:links",
     "docs:dev": "npm --prefix apps/docs run dev",
     "docs:generate": "npm run build && npm --prefix apps/docs run generate:providers",
-    "lint": "eslint .",
+    "format": "oxfmt --disable-nested-config .",
+    "format:check": "oxfmt --disable-nested-config --check .",
+    "lint": "oxlint .",
     "parity:check": "vitest run tests/parity.test.ts",
     "release": "npm run check && changeset publish",
     "test": "vitest run --coverage",
@@ -79,13 +78,17 @@
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.0",
-    "@eslint/js": "^10.0.1",
+    "@oxlint/plugins": "^1.80.0",
     "@types/node": "^26.1.2",
     "@vitest/coverage-v8": "^4.1.10",
-    "eslint": "^10.8.0",
+    "oxfmt": "^0.65.0",
+    "oxlint": "^1.80.0",
+    "oxlint-tsgolint": "^7.0.2001",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.66.0",
     "vitest": "^4.1.10"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

@@ -1,8 +1,10 @@
+import { parseJsonObject } from "../src/utils.js";
+import type { JsonObject } from "../src/types.js";
 import {
   FinishReason as GeminiFinishReason,
   FunctionCallingConfigMode,
   type GenerateContentResponse,
-  type GoogleGenAI,
+  GoogleGenAI,
 } from "@google/genai";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -38,11 +40,10 @@ interface FakeBatches {
   list: ReturnType<typeof vi.fn>;
 }
 
-function fakeGemini(overrides: Partial<FakeModels> = {}, batchOverrides: Partial<FakeBatches> = {}): {
-  batches: FakeBatches;
-  client: GoogleGenAI;
-  models: FakeModels;
-} {
+function fakeGemini(
+  overrides: Partial<FakeModels> = {},
+  batchOverrides: Partial<FakeBatches> = {},
+) {
   const models: FakeModels = {
     embedContent: vi.fn(),
     generateContent: vi.fn(),
@@ -57,11 +58,17 @@ function fakeGemini(overrides: Partial<FakeModels> = {}, batchOverrides: Partial
     list: vi.fn(),
     ...batchOverrides,
   };
-  return { batches, client: { batches, models } as unknown as GoogleGenAI, models };
+  // SAFETY: This test double implements the provider surface exercised by this test.
+  return {
+    batches,
+    client: Object.assign(new GoogleGenAI({ apiKey: "test" }), { batches, models }),
+    models,
+  };
 }
 
-function response(value: Record<string, unknown>): GenerateContentResponse {
-  return value as unknown as GenerateContentResponse;
+function response(value: JsonObject): GenerateContentResponse {
+  // SAFETY: This test double implements the provider surface exercised by this test.
+  return value as GenerateContentResponse & JsonObject;
 }
 
 async function* responses(
@@ -70,9 +77,7 @@ async function* responses(
   yield* values;
 }
 
-async function collect(
-  stream: AsyncIterable<ChatCompletionChunk>
-): Promise<ChatCompletionChunk[]> {
+async function collect(stream: AsyncIterable<ChatCompletionChunk>): Promise<ChatCompletionChunk[]> {
   const chunks: ChatCompletionChunk[] = [];
   for await (const chunk of stream) chunks.push(chunk);
   return chunks;
@@ -88,7 +93,7 @@ function okSdk() {
             finishReason: GeminiFinishReason.STOP,
           },
         ],
-      })
+      }),
     ),
   });
 }
@@ -97,6 +102,7 @@ async function convertedContents(messages: ChatMessage[]): Promise<any[]> {
   const sdk = okSdk();
   const provider = new GeminiProvider({}, sdk.client);
   await provider.completion({ messages, model: "gemini-test" });
+  // SAFETY: This test double implements the provider surface exercised by this test.
   return sdk.models.generateContent.mock.calls[0]?.[0].contents as any[];
 }
 
@@ -151,6 +157,7 @@ describe("Gemini provider", () => {
     });
     const provider = new GeminiProvider({}, sdk.client);
 
+    // SAFETY: This test double implements the provider surface exercised by this test.
     const result = (await provider.completion({
       frequencyPenalty: 0.2,
       logprobs: true,
@@ -253,10 +260,7 @@ describe("Gemini provider", () => {
       topP: 0.8,
     })) as ChatCompletion;
 
-    const request = sdk.models.generateContent.mock.calls[0]?.[0] as Record<
-      string,
-      any
-    >;
+    const request = parseJsonObject(sdk.models.generateContent.mock.calls[0]?.[0]);
     expect(request).toMatchObject({
       config: {
         candidateCount: 2,
@@ -412,7 +416,7 @@ describe("Gemini provider", () => {
               finishReason: GeminiFinishReason.STOP,
             },
           ],
-        })
+        }),
       ),
     });
     const provider = new GeminiProvider({}, sdk.client);
@@ -445,10 +449,9 @@ describe("Gemini provider", () => {
         { function: { name: "second" }, type: "function" },
       ],
     });
-    const config = sdk.models.generateContent.mock.calls[0]?.[0]
-      .config as Record<string, any>;
-    const contents = sdk.models.generateContent.mock.calls[0]?.[0]
-      .contents as any[];
+    const config = parseJsonObject(sdk.models.generateContent.mock.calls[0]?.[0].config);
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    const contents = sdk.models.generateContent.mock.calls[0]?.[0].contents as any[];
     expect(config).toMatchObject({
       responseMimeType: "application/json",
       thinkingConfig: { includeThoughts: false },
@@ -492,9 +495,7 @@ describe("Gemini provider", () => {
         functionCallingConfig: { mode: FunctionCallingConfigMode.NONE },
       },
     });
-    expect(
-      sdk.models.generateContent.mock.calls[1]?.[0].config.thinkingConfig
-    ).toBeUndefined();
+    expect(sdk.models.generateContent.mock.calls[1]?.[0].config.thinkingConfig).toBeUndefined();
 
     await provider.completion({
       messages: [{ content: "hi", role: "user" }],
@@ -536,6 +537,7 @@ describe("Gemini provider", () => {
     [{ name: "get_weather", arguments: null }, {}],
     [{ name: "get_weather", arguments: "" }, {}],
   ])("accepts JSON or parsed tool-call arguments %#", async (fn, expectedArgs) => {
+    // SAFETY: This test double implements the provider surface exercised by this test.
     const contents = await convertedContents([
       {
         content: null,
@@ -565,6 +567,7 @@ describe("Gemini provider", () => {
     ["1", { result: 1 }],
     ["not JSON", { result: "not JSON" }],
   ])("accepts JSON or parsed tool-result content %#", async (toolContent, expectedResponse) => {
+    // SAFETY: This test double implements the provider surface exercised by this test.
     const contents = await convertedContents([
       { content: "What is the weather?", role: "user" },
       {
@@ -572,7 +575,10 @@ describe("Gemini provider", () => {
         role: "assistant",
         toolCalls: [
           {
-            function: { arguments: '{"location": "Paris"}', name: "get_weather" },
+            function: {
+              arguments: '{"location": "Paris"}',
+              name: "get_weather",
+            },
             id: "call_123",
             type: "function",
           },
@@ -591,9 +597,7 @@ describe("Gemini provider", () => {
   it("normalizes streaming text, reasoning, tools, usage, and stable roles", async () => {
     const stream = responses(
       response({
-        candidates: [
-          { content: { parts: [{ text: "Hello" }], role: "model" }, index: 0 },
-        ],
+        candidates: [{ content: { parts: [{ text: "Hello" }], role: "model" }, index: 0 }],
         createTime: "2026-02-03T04:05:06.000Z",
         modelVersion: "gemini-stream-model",
         responseId: "stream-1",
@@ -629,7 +633,7 @@ describe("Gemini provider", () => {
           thoughtsTokenCount: 1,
           totalTokenCount: 10,
         },
-      })
+      }),
     );
     const sdk = fakeGemini({
       generateContentStream: vi.fn().mockResolvedValue(stream),
@@ -640,10 +644,11 @@ describe("Gemini provider", () => {
       model: "gemini-test",
       stream: true,
     });
+    // SAFETY: This test double implements the provider surface exercised by this test.
     const chunks = await collect(result as AsyncIterable<ChatCompletionChunk>);
 
     expect(sdk.models.generateContentStream).toHaveBeenCalledWith(
-      expect.objectContaining({ model: "gemini-test" })
+      expect.objectContaining({ model: "gemini-test" }),
     );
     expect(chunks).toHaveLength(2);
     expect(chunks[0]).toMatchObject({
@@ -697,9 +702,7 @@ describe("Gemini provider", () => {
   it("surfaces blocked prompts and structured-output terminal failures", async () => {
     const generateContent = vi
       .fn()
-      .mockResolvedValueOnce(
-        response({ promptFeedback: { blockReason: "SAFETY" } })
-      )
+      .mockResolvedValueOnce(response({ promptFeedback: { blockReason: "SAFETY" } }))
       .mockResolvedValueOnce(
         response({
           candidates: [
@@ -708,7 +711,7 @@ describe("Gemini provider", () => {
               finishReason: GeminiFinishReason.MAX_TOKENS,
             },
           ],
-        })
+        }),
       )
       .mockResolvedValueOnce(
         response({
@@ -718,10 +721,11 @@ describe("Gemini provider", () => {
               finishReason: GeminiFinishReason.SAFETY,
             },
           ],
-        })
+        }),
       );
     const sdk = fakeGemini({ generateContent });
     const provider = new GeminiProvider({}, sdk.client);
+    // SAFETY: This test double implements the provider surface exercised by this test.
     const blocked = (await provider.completion({
       messages: [{ content: "Hi", role: "user" }],
       model: "gemini-test",
@@ -738,79 +742,73 @@ describe("Gemini provider", () => {
       responseFormat: { type: "json_object" },
     };
     await expect(provider.completion(structuredParams)).rejects.toBeInstanceOf(
-      ContextLengthExceededError
+      ContextLengthExceededError,
     );
-    await expect(provider.completion(structuredParams)).rejects.toBeInstanceOf(
-      ContentFilterError
-    );
+    await expect(provider.completion(structuredParams)).rejects.toBeInstanceOf(ContentFilterError);
   });
 
   it("validates normalized parameters and inline media", async () => {
     const sdk = fakeGemini();
     const provider = new GeminiProvider({}, sdk.client);
-    await expect(
-      provider.completion({ messages: [], model: "gemini-test" })
-    ).rejects.toThrow(/messages array cannot be empty/u);
+    await expect(provider.completion({ messages: [], model: "gemini-test" })).rejects.toThrow(
+      /messages array cannot be empty/u,
+    );
     await expect(
       provider.completion({
         messages: [{ content: "Hi", role: "user" }],
         model: "gemini-test",
         parallelToolCalls: false,
-      })
+      }),
     ).rejects.toThrow(/parallelToolCalls/u);
     expect(() =>
       provider.completion({
         messages: [{ content: "Hi", role: "user" }],
         model: "gemini-test",
         toolChoice: "something-else",
-      })
+      }),
     ).toThrow(/Unsupported Gemini toolChoice/u);
     expect(() =>
       provider.completion({
         messages: [{ content: "Hi", role: "user" }],
         model: "gemini-test",
         responseFormat: { type: "xml" },
-      })
+      }),
     ).toThrow(/Unsupported Gemini responseFormat/u);
     expect(() =>
       provider.completion({
         messages: [{ content: "Hi", role: "user" }],
         model: "gemini-test",
         tools: [{ unsupported_native_tool: {} }],
-      })
+      }),
     ).toThrow(/Unsupported Gemini tool/u);
     expect(() =>
       provider.completion({
         messages: [{ content: "Hi", role: "user" }],
         model: "gemini-test",
         responseFormat: { json_schema: { schema: "bad" }, type: "json_schema" },
-      })
+      }),
     ).toThrow(/json_schema.schema must be an object/u);
     expect(() =>
       provider.completion({
         messages: [
           {
-            content: [
-              { image_url: "data:image/png;base64,%%%", type: "image_url" },
-            ],
+            content: [{ image_url: "data:image/png;base64,%%%", type: "image_url" }],
             role: "user",
           },
         ],
         model: "gemini-test",
-      })
+      }),
     ).toThrow(/valid base64 data URL/u);
     expect(() =>
       provider.completion({
         messages: [
           {
-            content: [
-              { image_url: "data:image/png;base64,", type: "image_url" },
-            ],
+            content: [{ image_url: "data:image/png;base64,", type: "image_url" }],
             role: "user",
           },
         ],
         model: "gemini-test",
-      })
+      }),
     ).toThrow(/must contain base64 data/u);
     expect(() =>
       provider.completion({
@@ -821,7 +819,7 @@ describe("Gemini provider", () => {
           },
         ],
         model: "gemini-test",
-      })
+      }),
     ).toThrow(/file_data.*file_id/u);
     expect(() =>
       provider.completion({
@@ -837,12 +835,12 @@ describe("Gemini provider", () => {
           },
         ],
         model: "gemini-test",
-      })
+      }),
     ).toThrow(/valid base64 data URL/u);
   });
 
   it("creates float embeddings and lists every model page", async () => {
-    async function* models(): AsyncIterable<Record<string, unknown>> {
+    async function* models() {
       yield { displayName: "Gemini A", name: "models/gemini-a" };
       yield { name: "models/gemini-b" };
     }
@@ -912,24 +910,28 @@ describe("Gemini provider", () => {
         encodingFormat: "base64",
         input: "hello",
         model: "embedding",
-      })
+      }),
     ).rejects.toThrow(/base64/u);
-    await expect(
-      provider.embedding({ input: [1, 2], model: "embedding" })
-    ).rejects.toThrow(/string or an array of strings/u);
+    await expect(provider.embedding({ input: [1, 2], model: "embedding" })).rejects.toThrow(
+      /string or an array of strings/u,
+    );
     const error = await provider
       .completion({
         messages: [{ content: "Hi", role: "user" }],
         model: "gemini-test",
       })
-      .catch((value: unknown) => value);
+      .catch((cause: unknown) => cause);
     expect(error).toBeInstanceOf(RateLimitError);
     expect(error).toMatchObject({ provider: "gemini", retryAfter: "2" });
   });
 
   it("supports the Gemini batch lifecycle and converts OpenAI JSONL requests", async () => {
     const job = {
-      completionStats: { failedCount: "1", incompleteCount: "0", successfulCount: "2" },
+      completionStats: {
+        failedCount: "1",
+        incompleteCount: "0",
+        successfulCount: "2",
+      },
       createTime: "2026-01-01T00:00:00.000Z",
       dest: { fileName: "files/output-1" },
       displayName: "Nightly",
@@ -946,20 +948,49 @@ describe("Gemini provider", () => {
     };
     const statusPage = {
       async *[Symbol.asyncIterator]() {
-        yield { ...job, createTime: "invalid", dest: { gcsUri: "gs://output" }, name: "failed", state: "JOB_STATE_FAILED" };
-        yield { ...job, dest: { bigqueryUri: "bq://output" }, name: "cancelling", state: "JOB_STATE_CANCELLING" };
-        yield { ...job, dest: undefined, name: "cancelled", state: "JOB_STATE_CANCELLED" };
-        yield { ...job, name: "expired", outputInfo: { gcsOutputDirectory: "gs://directory" }, state: "JOB_STATE_EXPIRED" };
-        yield { ...job, name: "queued", outputInfo: { bigqueryOutputTable: "bq://table" }, state: "JOB_STATE_QUEUED" };
+        yield {
+          ...job,
+          createTime: "invalid",
+          dest: { gcsUri: "gs://output" },
+          name: "failed",
+          state: "JOB_STATE_FAILED",
+        };
+        yield {
+          ...job,
+          dest: { bigqueryUri: "bq://output" },
+          name: "cancelling",
+          state: "JOB_STATE_CANCELLING",
+        };
+        yield {
+          ...job,
+          dest: undefined,
+          name: "cancelled",
+          state: "JOB_STATE_CANCELLED",
+        };
+        yield {
+          ...job,
+          name: "expired",
+          outputInfo: { gcsOutputDirectory: "gs://directory" },
+          state: "JOB_STATE_EXPIRED",
+        };
+        yield {
+          ...job,
+          name: "queued",
+          outputInfo: { bigqueryOutputTable: "bq://table" },
+          state: "JOB_STATE_QUEUED",
+        };
         yield { ...job, name: "pending", state: "JOB_STATE_PENDING" };
       },
     };
-    const sdk = fakeGemini({}, {
-      cancel: vi.fn().mockResolvedValue(undefined),
-      create: vi.fn().mockResolvedValue(job),
-      get: vi.fn().mockResolvedValue(job),
-      list: vi.fn().mockResolvedValueOnce(page).mockResolvedValueOnce(statusPage),
-    });
+    const sdk = fakeGemini(
+      {},
+      {
+        cancel: vi.fn().mockResolvedValue(undefined),
+        create: vi.fn().mockResolvedValue(job),
+        get: vi.fn().mockResolvedValue(job),
+        list: vi.fn().mockResolvedValueOnce(page).mockResolvedValueOnce(statusPage),
+      },
+    );
     const provider = new GeminiProvider({}, sdk.client);
     const inputFilePath = fileURLToPath(new URL("./fixtures/batch.jsonl", import.meta.url));
 
@@ -967,7 +998,11 @@ describe("Gemini provider", () => {
       provider.createBatch({
         endpoint: "/v1/chat/completions",
         inputFilePath,
-        providerOptions: { dest: "gs://bucket/output", displayName: "Nightly", model: "model-override" },
+        providerOptions: {
+          dest: "gs://bucket/output",
+          displayName: "Nightly",
+          model: "model-override",
+        },
       }),
     ).resolves.toMatchObject({
       completedAt: 1_767_225_660,
@@ -990,13 +1025,21 @@ describe("Gemini provider", () => {
         }),
       ],
     });
-    await expect(provider.retrieveBatch("batches/batch-1")).resolves.toMatchObject({ id: "batches/batch-1" });
-    await expect(provider.cancelBatch("batches/batch-1")).resolves.toMatchObject({ id: "batches/batch-1" });
+    await expect(provider.retrieveBatch("batches/batch-1")).resolves.toMatchObject({
+      id: "batches/batch-1",
+    });
+    await expect(provider.cancelBatch("batches/batch-1")).resolves.toMatchObject({
+      id: "batches/batch-1",
+    });
     await expect(provider.listBatches({ after: "next", limit: 1 })).resolves.toMatchObject([
       { id: "batches/batch-1" },
     ]);
-    expect(sdk.batches.cancel).toHaveBeenCalledWith({ name: "batches/batch-1" });
-    expect(sdk.batches.list).toHaveBeenCalledWith({ config: { pageSize: 1, pageToken: "next" } });
+    expect(sdk.batches.cancel).toHaveBeenCalledWith({
+      name: "batches/batch-1",
+    });
+    expect(sdk.batches.list).toHaveBeenCalledWith({
+      config: { pageSize: 1, pageToken: "next" },
+    });
     await expect(provider.listBatches()).resolves.toMatchObject([
       { id: "failed", outputFileId: "gs://output", status: "failed" },
       { id: "cancelling", outputFileId: "bq://output", status: "cancelling" },
@@ -1013,7 +1056,13 @@ describe("Gemini provider", () => {
 
   it("normalizes Gemini inline batch results and completion states", async () => {
     const successfulResponse = response({
-      candidates: [{ content: { parts: [{ text: "done" }], role: "model" }, finishReason: "STOP", index: 0 }],
+      candidates: [
+        {
+          content: { parts: [{ text: "done" }], role: "model" },
+          finishReason: "STOP",
+          index: 0,
+        },
+      ],
       modelVersion: "model-a",
       responseId: "response-1",
     });
@@ -1021,7 +1070,10 @@ describe("Gemini provider", () => {
       dest: {
         inlinedResponses: [
           { metadata: { custom_id: "ok" }, response: successfulResponse },
-          { error: { code: 400, message: "Bad request" }, metadata: { custom_id: "bad" } },
+          {
+            error: { code: 400, message: "Bad request" },
+            metadata: { custom_id: "bad" },
+          },
           { metadata: { custom_id: "missing" } },
         ],
       },
@@ -1032,20 +1084,42 @@ describe("Gemini provider", () => {
     const get = vi
       .fn()
       .mockResolvedValueOnce(completed)
-      .mockResolvedValueOnce({ name: "batches/pending", state: "JOB_STATE_RUNNING" })
-      .mockResolvedValueOnce({ name: "batches/external", state: "JOB_STATE_SUCCEEDED" });
+      .mockResolvedValueOnce({
+        name: "batches/pending",
+        state: "JOB_STATE_RUNNING",
+      })
+      .mockResolvedValueOnce({
+        name: "batches/external",
+        state: "JOB_STATE_SUCCEEDED",
+      });
     const sdk = fakeGemini({}, { get });
     const provider = new GeminiProvider({}, sdk.client);
 
     await expect(provider.retrieveBatchResults("batches/batch-1")).resolves.toMatchObject({
       results: [
-        { customId: "ok", result: { choices: [{ message: { content: "done" } }], provider: "gemini" } },
+        {
+          customId: "ok",
+          result: {
+            choices: [{ message: { content: "done" } }],
+            provider: "gemini",
+          },
+        },
         { customId: "bad", error: { code: "400", message: "Bad request" } },
-        { customId: "missing", error: { code: "unknown", message: "Record contains neither response nor error" } },
+        {
+          customId: "missing",
+          error: {
+            code: "unknown",
+            message: "Record contains neither response nor error",
+          },
+        },
       ],
     });
-    await expect(provider.retrieveBatchResults("batches/pending")).rejects.toBeInstanceOf(BatchNotCompleteError);
-    await expect(provider.retrieveBatchResults("batches/external")).rejects.toThrow(/does not contain inline results/u);
+    await expect(provider.retrieveBatchResults("batches/pending")).rejects.toBeInstanceOf(
+      BatchNotCompleteError,
+    );
+    await expect(provider.retrieveBatchResults("batches/external")).rejects.toThrow(
+      /does not contain inline results/u,
+    );
   });
 
   it("resolves credentials, base URL metadata, registry capabilities, and exports", () => {

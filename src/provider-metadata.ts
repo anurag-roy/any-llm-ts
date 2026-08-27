@@ -1,8 +1,4 @@
-import type {
-  PromptCacheKeySupport,
-  ProviderMetadata,
-  ProviderTier,
-} from "./types.js";
+import type { PromptCacheKeySupport, ProviderMetadata, ProviderTier } from "./types.js";
 
 const verifiedProviders = new Set([
   "anthropic",
@@ -34,33 +30,24 @@ const verifiedProviders = new Set([
 ]);
 
 export function providerTier(name: string): ProviderTier {
-  return verifiedProviders.has(name.trim().toLowerCase())
-    ? "verified"
-    : "community";
+  return verifiedProviders.has(name.trim().toLowerCase()) ? "verified" : "community";
 }
 
-export function providerPromptCacheKeySupport(
-  name: string,
-): PromptCacheKeySupport {
+export function providerPromptCacheKeySupport(name: string): PromptCacheKeySupport {
   const normalized = name.trim().toLowerCase();
   if (normalized === "openai" || normalized === "meta") return "supported";
   if (normalized === "otari") return "passthrough";
   return "unsupported";
 }
 
-type IncompleteProviderMetadata = Omit<
-  ProviderMetadata,
-  "promptCacheKeySupport" | "tier"
-> & Partial<Pick<ProviderMetadata, "promptCacheKeySupport" | "tier">>;
+type IncompleteProviderMetadata = Omit<ProviderMetadata, "promptCacheKeySupport" | "tier"> &
+  Partial<Pick<ProviderMetadata, "promptCacheKeySupport" | "tier">>;
 
-export function completeProviderMetadata(
-  metadata: IncompleteProviderMetadata,
-): ProviderMetadata {
+export function completeProviderMetadata(metadata: IncompleteProviderMetadata): ProviderMetadata {
   return {
     ...metadata,
     promptCacheKeySupport:
-      metadata.promptCacheKeySupport ??
-      providerPromptCacheKeySupport(metadata.name),
+      metadata.promptCacheKeySupport ?? providerPromptCacheKeySupport(metadata.name),
     tier: metadata.tier ?? providerTier(metadata.name),
   };
 }

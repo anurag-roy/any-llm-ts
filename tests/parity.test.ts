@@ -1,3 +1,4 @@
+import { isBoolean, isFunction } from "../src/utils.js";
 import { describe, expect, it } from "vitest";
 
 import sourceParity from "../parity/python-source.json" with { type: "json" };
@@ -7,15 +8,14 @@ import type { ProviderCapabilities } from "../src/index.js";
 
 const knownProviderGaps = [] as const;
 
-const knownOperationGaps = [
-] as const;
+const knownOperationGaps = [] as const;
 
-const knownCapabilityGaps: Partial<Record<keyof ProviderCapabilities, readonly string[]>> = {
+const knownCapabilityGaps = {
   // The cloud-specific Anthropic SDK clients do not expose message batches.
   batch: ["azureanthropic", "vertexaianthropic"],
   // Voyage exposes embeddings only; the Python flag is inherited but unusable.
   messages: ["voyage"],
-};
+} satisfies Partial<Record<keyof ProviderCapabilities, readonly string[]>>;
 
 describe("Python source parity contract", () => {
   it("tracks the exact provider-name gap", () => {
@@ -30,8 +30,9 @@ describe("Python source parity contract", () => {
   });
 
   it("tracks the exact stateless-operation gap", () => {
+    // SAFETY: This test double implements the provider surface exercised by this test.
     const missing = sourceParity.operations.filter(
-      (operation) => typeof publicApi[operation as keyof typeof publicApi] !== "function",
+      (operation) => !isFunction(publicApi[operation as keyof typeof publicApi]),
     );
 
     expect(missing.toSorted()).toEqual([...knownOperationGaps].toSorted());
@@ -56,15 +57,21 @@ describe("Python source parity contract", () => {
         "streaming",
         "vision",
       ]);
-      expect(Object.values(metadata.capabilities).every((value) => typeof value === "boolean")).toBe(true);
+      expect(Object.values(metadata.capabilities).every((value) => isBoolean(value))).toBe(true);
     }
   });
 
   it("matches the Python capability matrix except for documented unusable flags", () => {
     const metadata = AnyLLM.getAllProviderMetadata();
     for (const [rawCapability, sourceProviders] of Object.entries(sourceParity.capabilities)) {
+      // SAFETY: This test double implements the provider surface exercised by this test.
       const capability = rawCapability as keyof ProviderCapabilities;
-      const gaps = new Set(knownCapabilityGaps[capability] ?? []);
+      const gaps = new Set(
+        Object.hasOwn(knownCapabilityGaps, capability)
+          ? // SAFETY: Object.hasOwn establishes that the capability indexes this partial gap table.
+            knownCapabilityGaps[capability as keyof typeof knownCapabilityGaps]
+          : [],
+      );
       const expected = sourceProviders.filter((provider) => !gaps.has(provider));
       const actual = metadata
         .filter((provider) => provider.capabilities[capability])

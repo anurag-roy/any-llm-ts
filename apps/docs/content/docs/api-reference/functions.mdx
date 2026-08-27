@@ -6,9 +6,7 @@ description: Operation helpers that create a provider client for a single call.
 ## `completion(params)`
 
 ```ts
-function completion(
-  params: DirectCompletionParams & { stream?: false },
-): Promise<ChatCompletion>;
+function completion(params: DirectCompletionParams & { stream?: false }): Promise<ChatCompletion>;
 
 function completion(
   params: DirectCompletionParams & { stream: true },
@@ -18,9 +16,7 @@ function completion(
 ## `responses(params)`
 
 ```ts
-function responses(
-  params: DirectResponsesParams & { stream?: false },
-): Promise<Response>;
+function responses(params: DirectResponsesParams & { stream?: false }): Promise<Response>;
 
 function responses(
   params: DirectResponsesParams & { stream: true },

@@ -51,7 +51,10 @@ describe("Cohere provider rerank", () => {
       "https://cohere.example/v2/rerank",
       expect.objectContaining({
         body: expect.any(String),
-        headers: { Authorization: "Bearer secret", "Content-Type": "application/json" },
+        headers: {
+          Authorization: "Bearer secret",
+          "Content-Type": "application/json",
+        },
         method: "POST",
       }),
     );
@@ -77,18 +80,35 @@ describe("Cohere provider rerank", () => {
       .mockResolvedValueOnce(Response.json({ results: [] }))
       .mockResolvedValueOnce(Response.json({ message: "Bad request" }, { status: 400 }));
     const provider = new CohereProvider({ apiKey: "secret" }, fetch);
-    await expect(provider.rerank({ documents: [], model: "rerank", query: "query" })).resolves.toMatchObject({
+    await expect(
+      provider.rerank({ documents: [], model: "rerank", query: "query" }),
+    ).resolves.toMatchObject({
       results: [],
     });
-    await expect(provider.rerank({ documents: [], model: "rerank", query: "query" })).rejects.toBeInstanceOf(
-      InvalidRequestError,
+    await expect(
+      provider.rerank({ documents: [], model: "rerank", query: "query" }),
+    ).rejects.toBeInstanceOf(InvalidRequestError);
+  });
+
+  it("ignores malformed optional result and metadata fields", async () => {
+    const fetch = vi.fn().mockResolvedValue(
+      Response.json({
+        meta: { billed_units: { invalid: "value" }, tokens: { invalid: "value" } },
+      }),
     );
+    const provider = new CohereProvider({ apiKey: "secret" }, fetch);
+
+    await expect(
+      provider.rerank({ documents: [], model: "rerank", query: "query" }),
+    ).resolves.toMatchObject({ results: [] });
   });
 
   it("resolves environment configuration and requires an API key", () => {
     expect(() => new CohereProvider()).toThrow(MissingApiKeyError);
     process.env.COHERE_API_KEY = "secret";
     process.env.COHERE_BASE_URL = "https://private.cohere.example/v1";
-    expect(new CohereProvider().metadata.apiBase).toBe("https://private.cohere.example/compatibility/v1");
+    expect(new CohereProvider().metadata.apiBase).toBe(
+      "https://private.cohere.example/compatibility/v1",
+    );
   });
 });

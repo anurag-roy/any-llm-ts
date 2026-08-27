@@ -96,7 +96,11 @@ describe("AnyLLM registry and facade", () => {
     expect(llm.metadata.promptCacheKeySupport).toBe("passthrough");
     expect(llm.metadata.requiresApiKey).toBe(false);
     expect(() =>
-      AnyLLM.createOpenAICompatible({ apiBase: "https://example.com", name: "", requiresApiKey: false }),
+      AnyLLM.createOpenAICompatible({
+        apiBase: "https://example.com",
+        name: "",
+        requiresApiKey: false,
+      }),
     ).toThrow(TypeError);
 
     const configured = AnyLLM.createOpenAICompatible({
@@ -120,12 +124,19 @@ describe("AnyLLM registry and facade", () => {
   });
 
   it("registers a custom provider and rejects accidental replacement", async () => {
-    registerProvider("fake", () => new FakeProvider(), { metadata: fakeMetadata, override: true });
+    registerProvider("fake", () => new FakeProvider(), {
+      metadata: fakeMetadata,
+      override: true,
+    });
     expect(() => {
-      registerProvider("fake", () => new FakeProvider(), { metadata: fakeMetadata });
+      registerProvider("fake", () => new FakeProvider(), {
+        metadata: fakeMetadata,
+      });
     }).toThrow(/already registered/u);
     expect(() => {
-      registerProvider(" ", () => new FakeProvider(), { metadata: fakeMetadata });
+      registerProvider(" ", () => new FakeProvider(), {
+        metadata: fakeMetadata,
+      });
     }).toThrow(TypeError);
 
     const llm = AnyLLM.create("FAKE");
@@ -144,35 +155,49 @@ describe("AnyLLM registry and facade", () => {
   it("rejects prompt cache keys for providers that do not support them", async () => {
     const llm = AnyLLM.fromProvider(new FakeProvider());
 
-    await expect(llm.completion({
-      messages: [{ content: "Hi", role: "user" }],
-      model: "model-a",
-      promptCacheKey: "cache-key",
-    })).rejects.toBeInstanceOf(UnsupportedParameterError);
-    await expect(llm.responses({
-      input: "Hi",
-      model: "model-a",
-      promptCacheKey: "cache-key",
-    })).rejects.toBeInstanceOf(UnsupportedParameterError);
-    await expect(llm.messages({
-      maxTokens: 10,
-      messages: [{ content: "Hi", role: "user" }],
-      model: "model-a",
-      promptCacheKey: "cache-key",
-    })).rejects.toBeInstanceOf(UnsupportedParameterError);
+    await expect(
+      llm.completion({
+        messages: [{ content: "Hi", role: "user" }],
+        model: "model-a",
+        promptCacheKey: "cache-key",
+      }),
+    ).rejects.toBeInstanceOf(UnsupportedParameterError);
+    await expect(
+      llm.responses({
+        input: "Hi",
+        model: "model-a",
+        promptCacheKey: "cache-key",
+      }),
+    ).rejects.toBeInstanceOf(UnsupportedParameterError);
+    await expect(
+      llm.messages({
+        maxTokens: 10,
+        messages: [{ content: "Hi", role: "user" }],
+        model: "model-a",
+        promptCacheKey: "cache-key",
+      }),
+    ).rejects.toBeInstanceOf(UnsupportedParameterError);
   });
 
   it("parses recommended and legacy model syntax", () => {
-    expect(AnyLLM.splitModelProvider("openai:gpt-4.1")).toEqual({ model: "gpt-4.1", provider: "openai" });
+    expect(AnyLLM.splitModelProvider("openai:gpt-4.1")).toEqual({
+      model: "gpt-4.1",
+      provider: "openai",
+    });
     const warning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
-    expect(AnyLLM.splitModelProvider("openai/gpt-4.1")).toEqual({ model: "gpt-4.1", provider: "openai" });
+    expect(AnyLLM.splitModelProvider("openai/gpt-4.1")).toEqual({
+      model: "gpt-4.1",
+      provider: "openai",
+    });
     expect(warning).toHaveBeenCalledWith(expect.stringContaining("deprecated"), expect.any(Object));
     warning.mockRestore();
   });
 
   it("does not split model IDs containing slashes unless the prefix is a provider", () => {
     expect(() => AnyLLM.splitModelProvider("org/model")).toThrow(InvalidModelSyntaxError);
-    expect(() => AnyLLM.splitModelProvider("model-without-provider")).toThrow(InvalidModelSyntaxError);
+    expect(() => AnyLLM.splitModelProvider("model-without-provider")).toThrow(
+      InvalidModelSyntaxError,
+    );
   });
 
   it("rejects unsupported providers", () => {
@@ -213,25 +238,37 @@ describe("AnyLLM registry and facade", () => {
     await expect(llm.transcription({ file: new Blob(), model: "audio" })).rejects.toBeInstanceOf(
       UnsupportedOperationError,
     );
-    await expect(llm.speech({ input: "hello", model: "audio", voice: "voice" })).rejects.toBeInstanceOf(
+    await expect(
+      llm.speech({ input: "hello", model: "audio", voice: "voice" }),
+    ).rejects.toBeInstanceOf(UnsupportedOperationError);
+    await expect(llm.moderation({ input: "hello" })).rejects.toBeInstanceOf(
       UnsupportedOperationError,
     );
-    await expect(llm.moderation({ input: "hello" })).rejects.toBeInstanceOf(UnsupportedOperationError);
     await expect(
-      llm.createBatch({ endpoint: "/v1/chat/completions", inputFilePath: "input.jsonl" }),
+      llm.createBatch({
+        endpoint: "/v1/chat/completions",
+        inputFilePath: "input.jsonl",
+      }),
     ).rejects.toBeInstanceOf(UnsupportedOperationError);
     await expect(llm.retrieveBatch("batch-1")).rejects.toBeInstanceOf(UnsupportedOperationError);
     await expect(llm.cancelBatch("batch-1")).rejects.toBeInstanceOf(UnsupportedOperationError);
     await expect(llm.listBatches()).rejects.toBeInstanceOf(UnsupportedOperationError);
-    await expect(llm.retrieveBatchResults("batch-1")).rejects.toBeInstanceOf(UnsupportedOperationError);
-    await expect(llm.rerank({ documents: ["document"], model: "rerank", query: "query" })).rejects.toBeInstanceOf(
+    await expect(llm.retrieveBatchResults("batch-1")).rejects.toBeInstanceOf(
       UnsupportedOperationError,
     );
-    await expect(llm.messages({ maxTokens: 10, messages: [{ content: "hello", role: "user" }], model: "claude" }))
-      .resolves.toMatchObject({
-        content: [{ text: "hello", type: "text" }],
-        role: "assistant",
-        type: "message",
-      });
+    await expect(
+      llm.rerank({ documents: ["document"], model: "rerank", query: "query" }),
+    ).rejects.toBeInstanceOf(UnsupportedOperationError);
+    await expect(
+      llm.messages({
+        maxTokens: 10,
+        messages: [{ content: "hello", role: "user" }],
+        model: "claude",
+      }),
+    ).resolves.toMatchObject({
+      content: [{ text: "hello", type: "text" }],
+      role: "assistant",
+      type: "message",
+    });
   });
 });

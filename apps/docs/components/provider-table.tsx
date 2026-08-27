@@ -47,7 +47,13 @@ export function ProviderTable() {
               </td>
               {capabilityColumns.map(([capability]) => (
                 <td key={capability} className="px-3 py-2 text-center">
-                  <span className={provider.capabilities[capability] ? "text-emerald-600" : "text-fd-muted-foreground"}>
+                  <span
+                    className={
+                      provider.capabilities[capability]
+                        ? "text-emerald-600"
+                        : "text-fd-muted-foreground"
+                    }
+                  >
                     {provider.capabilities[capability] ? "✓" : "—"}
                   </span>
                   <span className="sr-only">

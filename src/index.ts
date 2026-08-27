@@ -63,8 +63,10 @@ export { AzureAnthropicProvider } from "./providers/azureanthropic.js";
 export { BedrockProvider } from "./providers/bedrock.js";
 export type {
   BedrockClientLike,
+  BedrockControlClientLike,
   BedrockProviderClientOptions,
   BedrockProviderClients,
+  BedrockS3ClientLike,
 } from "./providers/bedrock.js";
 export { CohereProvider } from "./providers/cohere.js";
 export { GeminiProvider } from "./providers/gemini.js";
@@ -88,10 +90,7 @@ export { VertexAIAnthropicProvider } from "./providers/vertexaianthropic.js";
 export { VoyageProvider } from "./providers/voyage.js";
 export type { VoyageAIClientLike } from "./providers/voyage.js";
 export { WatsonxProvider } from "./providers/watsonx.js";
-export type {
-  WatsonxClientLike,
-  WatsonxProviderClientOptions,
-} from "./providers/watsonx.js";
+export type { WatsonxClientLike, WatsonxProviderClientOptions } from "./providers/watsonx.js";
 export { AzureOpenAIProvider, OpenAIProvider } from "./providers/openai.js";
 export { registerProvider } from "./providers/registry.js";
 export type { ProviderFactory } from "./providers/registry.js";

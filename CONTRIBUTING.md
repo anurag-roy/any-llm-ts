@@ -9,7 +9,7 @@ npm install
 npm run check
 ```
 
-The full check includes ESLint, strict TypeScript compilation, Vitest coverage, and package builds.
+The full check includes Oxfmt, Oxlint, strict TypeScript compilation, Vitest coverage, and package builds.
 
 ## Documentation
 

@@ -23,10 +23,10 @@ const llm = AnyLLM.create("openai", {
 });
 ```
 
-| Option | Purpose |
-| --- | --- |
-| `apiKey` | Overrides the provider's conventional API-key environment variable. |
-| `apiBase` | Overrides the configured API base URL or endpoint. |
+| Option          | Purpose                                                               |
+| --------------- | --------------------------------------------------------------------- |
+| `apiKey`        | Overrides the provider's conventional API-key environment variable.   |
+| `apiBase`       | Overrides the configured API base URL or endpoint.                    |
 | `clientOptions` | Passes additional constructor options to the underlying provider SDK. |
 
 The values in `clientOptions` are intentionally typed as `Record<string, unknown>` because the

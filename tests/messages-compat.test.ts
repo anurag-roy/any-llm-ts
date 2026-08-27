@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { AnyLLM, BaseProvider, UnsupportedOperationError, messages, registerProvider } from "../src/index.js";
+import {
+  AnyLLM,
+  BaseProvider,
+  UnsupportedOperationError,
+  messages,
+  registerProvider,
+} from "../src/index.js";
 import {
   completionStreamToMessageEvents,
   completionToMessageResponse,
@@ -58,7 +64,9 @@ class MessagesProvider extends BaseProvider {
   readonly metadata = metadata;
   readonly requests: CompletionParams[] = [];
 
-  override completion(params: CompletionParams): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion> {
+  override completion(
+    params: CompletionParams,
+  ): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion> {
     this.requests.push(params);
     if (params.stream === true) {
       return Promise.resolve(
@@ -66,9 +74,21 @@ class MessagesProvider extends BaseProvider {
           yield chunk({ role: "assistant" });
           yield chunk({ reasoning: "plan" });
           yield chunk({ content: "hello" });
-          yield chunk({ toolCalls: [{ function: { arguments: "", name: "weather" }, id: "tool-1", index: 0 }] });
-          yield chunk({ toolCalls: [{ function: { arguments: '{"city":' }, index: 0 }] });
-          yield chunk({ toolCalls: [{ function: { arguments: '"Paris"}' }, index: 0 }] });
+          yield chunk({
+            toolCalls: [
+              {
+                function: { arguments: "", name: "weather" },
+                id: "tool-1",
+                index: 0,
+              },
+            ],
+          });
+          yield chunk({
+            toolCalls: [{ function: { arguments: '{"city":' }, index: 0 }],
+          });
+          yield chunk({
+            toolCalls: [{ function: { arguments: '"Paris"}' }, index: 0 }],
+          });
           yield chunk({}, "tool_calls");
           yield {
             ...chunk({}),
@@ -126,24 +146,40 @@ describe("Messages compatibility API", () => {
         {
           content: [
             { text: "What is the weather?", type: "text" },
-            { source: { type: "url", url: "https://example.com/map.png" }, type: "image" },
+            {
+              source: { type: "url", url: "https://example.com/map.png" },
+              type: "image",
+            },
           ],
           role: "user",
         },
         {
           content: [
             { thinking: "I should check", type: "thinking" },
-            { id: "tool-previous", input: { city: "Paris" }, name: "weather", type: "tool_use" },
+            {
+              id: "tool-previous",
+              input: { city: "Paris" },
+              name: "weather",
+              type: "tool_use",
+            },
           ],
           role: "assistant",
         },
         {
-          content: [{ content: "18 C", toolUseId: "tool-previous", type: "tool_result" }],
+          content: [
+            {
+              content: "18 C",
+              toolUseId: "tool-previous",
+              type: "tool_result",
+            },
+          ],
           role: "user",
         },
       ],
       model: "model-a",
-      outputFormat: { format: { schema: { title: "Forecast", type: "object" } } },
+      outputFormat: {
+        format: { schema: { title: "Forecast", type: "object" } },
+      },
       promptCacheKey: "conversation-1",
       system: [
         { text: "Be", type: "text" },
@@ -151,7 +187,13 @@ describe("Messages compatibility API", () => {
       ],
       thinking: { budgetTokens: 1_000, type: "enabled" },
       toolChoice: { name: "weather", type: "tool" },
-      tools: [{ description: "Get weather", inputSchema: { type: "object" }, name: "weather" }],
+      tools: [
+        {
+          description: "Get weather",
+          inputSchema: { type: "object" },
+          name: "weather",
+        },
+      ],
     });
 
     expect(provider.requests[0]).toMatchObject({
@@ -161,7 +203,10 @@ describe("Messages compatibility API", () => {
         {
           content: [
             { text: "What is the weather?", type: "text" },
-            { image_url: { url: "https://example.com/map.png" }, type: "image_url" },
+            {
+              image_url: { url: "https://example.com/map.png" },
+              type: "image_url",
+            },
           ],
           role: "user",
         },
@@ -183,13 +228,20 @@ describe("Messages compatibility API", () => {
       promptCacheKey: "conversation-1",
       reasoningEffort: "minimal",
       responseFormat: {
-        json_schema: { name: "Forecast", schema: { title: "Forecast", type: "object" } },
+        json_schema: {
+          name: "Forecast",
+          schema: { title: "Forecast", type: "object" },
+        },
         type: "json_schema",
       },
       toolChoice: { function: { name: "weather" }, type: "function" },
       tools: [
         {
-          function: { description: "Get weather", name: "weather", parameters: { type: "object" } },
+          function: {
+            description: "Get weather",
+            name: "weather",
+            parameters: { type: "object" },
+          },
           type: "function",
         },
       ],
@@ -198,7 +250,12 @@ describe("Messages compatibility API", () => {
       content: [
         { thinking: "checked the forecast", type: "thinking" },
         { text: "sunny", type: "text" },
-        { id: "tool-1", input: { city: "Paris" }, name: "weather", type: "tool_use" },
+        {
+          id: "tool-1",
+          input: { city: "Paris" },
+          name: "weather",
+          type: "tool_use",
+        },
       ],
       id: "message-1",
       stopReason: "tool_use",
@@ -237,16 +294,29 @@ describe("Messages compatibility API", () => {
       type: "message_delta",
       usage: { cacheReadInputTokens: 3, inputTokens: 7, outputTokens: 5 },
     });
-    expect(provider.requests[0]).toMatchObject({ stream: true, streamOptions: { include_usage: true } });
+    expect(provider.requests[0]).toMatchObject({
+      stream: true,
+      streamOptions: { include_usage: true },
+    });
   });
 
   it("rejects native-only Messages controls on compatibility providers", async () => {
     const llm = AnyLLM.fromProvider(new MessagesProvider());
     await expect(
-      llm.messages({ contextManagement: { edits: [] }, maxTokens: 10, messages: [], model: "model-a" }),
+      llm.messages({
+        contextManagement: { edits: [] },
+        maxTokens: 10,
+        messages: [],
+        model: "model-a",
+      }),
     ).rejects.toBeInstanceOf(UnsupportedOperationError);
     await expect(
-      llm.messages({ betas: ["context-management"], maxTokens: 10, messages: [], model: "model-a" }),
+      llm.messages({
+        betas: ["context-management"],
+        maxTokens: 10,
+        messages: [],
+        model: "model-a",
+      }),
     ).rejects.toBeInstanceOf(UnsupportedOperationError);
   });
 
@@ -264,9 +334,20 @@ describe("Messages compatibility API", () => {
           messages: [
             {
               content: [
-                { content: [{ text: "tool text", type: "text" }], toolUseId: "tool-a", type: "tool_result" },
+                {
+                  content: [{ text: "tool text", type: "text" }],
+                  toolUseId: "tool-a",
+                  type: "tool_result",
+                },
                 { toolUseId: "tool-b", type: "tool_result" },
-                { source: { data: "aGVsbG8=", mediaType: "image/jpeg", type: "base64" }, type: "image" },
+                {
+                  source: {
+                    data: "aGVsbG8=",
+                    mediaType: "image/jpeg",
+                    type: "base64",
+                  },
+                  type: "image",
+                },
                 { custom: true, type: "provider_block" },
               ],
               role: "user",
@@ -297,7 +378,10 @@ describe("Messages compatibility API", () => {
         { content: "", role: "tool", toolCallId: "tool-b" },
         {
           content: [
-            { image_url: { url: "data:image/jpeg;base64,aGVsbG8=" }, type: "image_url" },
+            {
+              image_url: { url: "data:image/jpeg;base64,aGVsbG8=" },
+              type: "image_url",
+            },
             { custom: true, type: "provider_block" },
           ],
           role: "user",
@@ -315,21 +399,39 @@ describe("Messages compatibility API", () => {
       topP: 0.9,
     });
 
-    expect(messagesToCompletionParams(params({ outputFormat: { format: "json" } })).responseFormat).toEqual({
+    expect(
+      messagesToCompletionParams(params({ outputFormat: { format: "json" } })).responseFormat,
+    ).toEqual({
       format: "json",
     });
-    expect(messagesToCompletionParams(params({ thinking: { type: "disabled" } })).reasoningEffort).toBe("none");
-    expect(messagesToCompletionParams(params({ thinking: { budgetTokens: 1_500, type: "enabled" } })).reasoningEffort)
-      .toBe("low");
-    expect(messagesToCompletionParams(params({ thinking: { budgetTokens: 4_000, type: "enabled" } })).reasoningEffort)
-      .toBe("medium");
-    expect(messagesToCompletionParams(params({ thinking: { budgetTokens: 12_000, type: "enabled" } })).reasoningEffort)
-      .toBe("high");
-    expect(messagesToCompletionParams(params({ thinking: { budgetTokens: 30_000, type: "enabled" } })).reasoningEffort)
-      .toBe("xhigh");
-    expect(messagesToCompletionParams(params({ thinking: { type: "enabled" } })).reasoningEffort).toBe("medium");
-    expect(messagesToCompletionParams(params({ toolChoice: { type: "none" } })).toolChoice).toBe("none");
-    expect(messagesToCompletionParams(params({ toolChoice: { type: "auto" } })).toolChoice).toBe("auto");
+    expect(
+      messagesToCompletionParams(params({ thinking: { type: "disabled" } })).reasoningEffort,
+    ).toBe("none");
+    expect(
+      messagesToCompletionParams(params({ thinking: { budgetTokens: 1_500, type: "enabled" } }))
+        .reasoningEffort,
+    ).toBe("low");
+    expect(
+      messagesToCompletionParams(params({ thinking: { budgetTokens: 4_000, type: "enabled" } }))
+        .reasoningEffort,
+    ).toBe("medium");
+    expect(
+      messagesToCompletionParams(params({ thinking: { budgetTokens: 12_000, type: "enabled" } }))
+        .reasoningEffort,
+    ).toBe("high");
+    expect(
+      messagesToCompletionParams(params({ thinking: { budgetTokens: 30_000, type: "enabled" } }))
+        .reasoningEffort,
+    ).toBe("xhigh");
+    expect(
+      messagesToCompletionParams(params({ thinking: { type: "enabled" } })).reasoningEffort,
+    ).toBe("medium");
+    expect(messagesToCompletionParams(params({ toolChoice: { type: "none" } })).toolChoice).toBe(
+      "none",
+    );
+    expect(messagesToCompletionParams(params({ toolChoice: { type: "auto" } })).toolChoice).toBe(
+      "auto",
+    );
   });
 
   it("normalizes empty, malformed, and terminal completion variants", () => {
@@ -337,44 +439,46 @@ describe("Messages compatibility API", () => {
       finishReason: ChatCompletion["choices"][number]["finishReason"],
       content: ChatCompletion["choices"][number]["message"]["content"],
       toolArguments?: string,
-    ): ChatCompletion => ({
-      choices: [
-        {
-          finishReason,
-          index: 0,
-          message: {
-            content,
-            role: "assistant",
-            ...(toolArguments === undefined
-              ? {}
-              : {
-                  toolCalls: [
-                    { function: { arguments: toolArguments, name: "tool" }, id: "tool-1", type: "function" },
-                  ],
-                }),
+    ): ChatCompletion => {
+      const message: ChatCompletion["choices"][number]["message"] = {
+        content,
+        role: "assistant",
+      };
+      if (toolArguments !== undefined) {
+        message.toolCalls = [
+          {
+            function: { arguments: toolArguments, name: "tool" },
+            id: "tool-1",
+            type: "function",
           },
-        },
-      ],
-      created: 1,
-      id: "completion",
-      model: "model-a",
-      object: "chat.completion",
-      provider: "messages-fake",
-    });
+        ];
+      }
+      return {
+        choices: [{ finishReason, index: 0, message }],
+        created: 1,
+        id: "completion",
+        model: "model-a",
+        object: "chat.completion",
+        provider: "messages-fake",
+      };
+    };
 
     expect(completionToMessageResponse(completion("length", null))).toMatchObject({
       content: [{ text: "", type: "text" }],
       stopReason: "max_tokens",
       usage: { inputTokens: 0, outputTokens: 0 },
     });
-    expect(completionToMessageResponse(completion("function_call", [{ text: "part", type: "text" }], "bad")))
-      .toMatchObject({
-        content: [
-          { text: "part", type: "text" },
-          { input: {}, type: "tool_use" },
-        ],
-        stopReason: "tool_use",
-      });
+    expect(
+      completionToMessageResponse(
+        completion("function_call", [{ text: "part", type: "text" }], "bad"),
+      ),
+    ).toMatchObject({
+      content: [
+        { text: "part", type: "text" },
+        { input: {}, type: "tool_use" },
+      ],
+      stopReason: "tool_use",
+    });
     expect(completionToMessageResponse(completion("stop", "done", ""))).toMatchObject({
       content: [
         { text: "done", type: "text" },
@@ -416,12 +520,24 @@ describe("Messages compatibility API", () => {
     const stream = completionStreamToMessageEvents(
       (async function* (): AsyncIterable<ChatCompletionChunk> {
         yield chunk({ role: "assistant" });
-        yield chunk({ toolCalls: [{ function: { name: "first" }, id: "tool-1", index: 0 }] });
-        yield chunk({ toolCalls: [{ function: { name: "second" }, id: "tool-2", index: 1 }] });
-        yield chunk({ toolCalls: [{ function: { arguments: "{\"one\":" }, index: 0 }] });
-        yield chunk({ toolCalls: [{ function: { arguments: "{\"two\":" }, index: 1 }] });
-        yield chunk({ toolCalls: [{ function: { arguments: "1}" }, index: 0 }] });
-        yield chunk({ toolCalls: [{ function: { arguments: "2}" }, index: 1 }] });
+        yield chunk({
+          toolCalls: [{ function: { name: "first" }, id: "tool-1", index: 0 }],
+        });
+        yield chunk({
+          toolCalls: [{ function: { name: "second" }, id: "tool-2", index: 1 }],
+        });
+        yield chunk({
+          toolCalls: [{ function: { arguments: '{"one":' }, index: 0 }],
+        });
+        yield chunk({
+          toolCalls: [{ function: { arguments: '{"two":' }, index: 1 }],
+        });
+        yield chunk({
+          toolCalls: [{ function: { arguments: "1}" }, index: 0 }],
+        });
+        yield chunk({
+          toolCalls: [{ function: { arguments: "2}" }, index: 1 }],
+        });
         yield chunk({}, "tool_calls");
       })(),
     );
@@ -433,8 +549,8 @@ describe("Messages compatibility API", () => {
       { contentBlock: { id: "tool-2", name: "second" }, index: 1 },
     ]);
     expect(events.filter((event) => event.type === "content_block_delta")).toMatchObject([
-      { delta: { partialJson: "{\"one\":" }, index: 0 },
-      { delta: { partialJson: "{\"two\":" }, index: 1 },
+      { delta: { partialJson: '{"one":' }, index: 0 },
+      { delta: { partialJson: '{"two":' }, index: 1 },
       { delta: { partialJson: "1}" }, index: 0 },
       { delta: { partialJson: "2}" }, index: 1 },
     ]);
@@ -445,9 +561,16 @@ describe("Messages compatibility API", () => {
   });
 
   it("exposes the stateless Messages helper", async () => {
-    registerProvider("messages-fake", () => new MessagesProvider(), { metadata, override: true });
+    registerProvider("messages-fake", () => new MessagesProvider(), {
+      metadata,
+      override: true,
+    });
     await expect(
-      messages({ maxTokens: 10, messages: [{ content: "hello", role: "user" }], model: "messages-fake:model-b" }),
+      messages({
+        maxTokens: 10,
+        messages: [{ content: "hello", role: "user" }],
+        model: "messages-fake:model-b",
+      }),
     ).resolves.toMatchObject({ model: "model-b", type: "message" });
   });
 });

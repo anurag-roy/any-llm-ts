@@ -4,7 +4,7 @@ import { GitHubProvider } from "../src/index.js";
 import type { CompletionParams } from "../src/index.js";
 
 class ExposedGitHubProvider extends GitHubProvider {
-  request(params: CompletionParams): Record<string, unknown> {
+  request(params: CompletionParams) {
     return this.completionRequest(params);
   }
 }
@@ -12,22 +12,36 @@ class ExposedGitHubProvider extends GitHubProvider {
 describe("GitHub Models provider", () => {
   it("remaps max completion tokens", () => {
     const provider = new ExposedGitHubProvider({ apiKey: "github-token" });
-    expect(provider.request({
-      maxCompletionTokens: 100,
-      messages: [{ content: "hello", role: "user" }],
-      model: "openai/gpt-4o-mini",
-    })).toMatchObject({ max_tokens: 100 });
-    expect(provider.request({ messages: [], model: "model" })).not.toHaveProperty("max_completion_tokens");
+    expect(
+      provider.request({
+        maxCompletionTokens: 100,
+        messages: [{ content: "hello", role: "user" }],
+        model: "openai/gpt-4o-mini",
+      }),
+    ).toMatchObject({ max_tokens: 100 });
+    expect(provider.request({ messages: [], model: "model" })).not.toHaveProperty(
+      "max_completion_tokens",
+    );
   });
 
   it("lists and normalizes the separate GitHub model catalog", async () => {
-    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify([
-      { id: "openai/gpt-4o-mini", publisher: "OpenAI" },
-      { publisher: "missing-id" },
-      "malformed",
-    ]), { status: 200 }));
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify([
+            { id: "openai/gpt-4o-mini", publisher: "OpenAI" },
+            { publisher: "missing-id" },
+            "malformed",
+          ]),
+          { status: 200 },
+        ),
+      );
     const provider = new GitHubProvider(
-      { apiBase: "https://custom.models.example/inference", apiKey: "github-token" },
+      {
+        apiBase: "https://custom.models.example/inference",
+        apiKey: "github-token",
+      },
       fetch,
     );
     await expect(provider.listModels()).resolves.toMatchObject([
@@ -42,11 +56,16 @@ describe("GitHub Models provider", () => {
   });
 
   it("normalizes catalog HTTP errors", async () => {
-    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: "denied" }), {
-      status: 403,
-      statusText: "Forbidden",
-    }));
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ message: "denied" }), {
+        status: 403,
+        statusText: "Forbidden",
+      }),
+    );
     const provider = new GitHubProvider({ apiKey: "github-token" }, fetch);
-    await expect(provider.listModels()).rejects.toMatchObject({ provider: "github", statusCode: 403 });
+    await expect(provider.listModels()).rejects.toMatchObject({
+      provider: "github",
+      statusCode: 403,
+    });
   });
 });

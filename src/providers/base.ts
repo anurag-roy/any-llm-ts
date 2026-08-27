@@ -1,3 +1,4 @@
+import type { JsonObject } from "../types.js";
 import { UnsupportedOperationError, normalizeProviderError } from "../errors.js";
 import type {
   ChatCompletion,
@@ -49,7 +50,7 @@ export abstract class BaseProvider {
     return Promise.reject(new UnsupportedOperationError("embeddings", this.metadata.name));
   }
 
-  listModels(_providerOptions?: Record<string, unknown>): Promise<Model[]> {
+  listModels(_providerOptions?: JsonObject): Promise<Model[]> {
     return Promise.reject(new UnsupportedOperationError("model listing", this.metadata.name));
   }
 
@@ -73,11 +74,11 @@ export abstract class BaseProvider {
     return Promise.reject(new UnsupportedOperationError("batch completions", this.metadata.name));
   }
 
-  retrieveBatch(_batchId: string, _providerOptions?: Record<string, unknown>): Promise<Batch> {
+  retrieveBatch(_batchId: string, _providerOptions?: JsonObject): Promise<Batch> {
     return Promise.reject(new UnsupportedOperationError("batch completions", this.metadata.name));
   }
 
-  cancelBatch(_batchId: string, _providerOptions?: Record<string, unknown>): Promise<Batch> {
+  cancelBatch(_batchId: string, _providerOptions?: JsonObject): Promise<Batch> {
     return Promise.reject(new UnsupportedOperationError("batch completions", this.metadata.name));
   }
 
@@ -85,7 +86,7 @@ export abstract class BaseProvider {
     return Promise.reject(new UnsupportedOperationError("batch completions", this.metadata.name));
   }
 
-  retrieveBatchResults(_batchId: string, _providerOptions?: Record<string, unknown>): Promise<BatchResult> {
+  retrieveBatchResults(_batchId: string, _providerOptions?: JsonObject): Promise<BatchResult> {
     return Promise.reject(new UnsupportedOperationError("batch completions", this.metadata.name));
   }
 
@@ -93,9 +94,14 @@ export abstract class BaseProvider {
     return Promise.reject(new UnsupportedOperationError("reranking", this.metadata.name));
   }
 
-  async messages(params: MessagesParams): Promise<AsyncIterable<MessageStreamEvent> | MessageResponse> {
+  async messages(
+    params: MessagesParams,
+  ): Promise<AsyncIterable<MessageStreamEvent> | MessageResponse> {
     if (params.contextManagement !== undefined || (params.betas?.length ?? 0) > 0) {
-      throw new UnsupportedOperationError("Messages context management and beta features", this.metadata.name);
+      throw new UnsupportedOperationError(
+        "Messages context management and beta features",
+        this.metadata.name,
+      );
     }
     const result = await this.completion(messagesToCompletionParams(params));
     return Symbol.asyncIterator in result

@@ -1,3 +1,6 @@
+import { parseJsonObject, parseJsonObjectArray } from "../src/utils.js";
+import type { JsonObject } from "../src/types.js";
+import { isObject, isString } from "../src/utils.js";
 import {
   CreateModelInvocationJobCommand,
   GetModelInvocationJobCommand,
@@ -22,32 +25,44 @@ import {
 } from "../src/index.js";
 import type {
   BedrockClientLike,
+  BedrockControlClientLike,
   BedrockProviderClients,
+  BedrockS3ClientLike,
   ChatCompletion,
   ChatCompletionChunk,
 } from "../src/index.js";
 
-function client(send: BedrockClientLike["send"]): BedrockClientLike {
-  return { send };
-}
+type BedrockTestCommand =
+  | ConverseCommand
+  | ConverseStreamCommand
+  | CreateModelInvocationJobCommand
+  | GetModelInvocationJobCommand
+  | GetObjectCommand
+  | InvokeModelCommand
+  | ListFoundationModelsCommand
+  | ListModelInvocationJobsCommand
+  | StopModelInvocationJobCommand;
 
 function provider(
-  runtimeSend: BedrockClientLike["send"] = async () => ({}),
-  controlSend: BedrockClientLike["send"] = async () => ({}),
-  s3Send: BedrockClientLike["send"] = async () => ({}),
+  runtimeSend?: ReturnType<typeof vi.fn>,
+  controlSend?: ReturnType<typeof vi.fn>,
+  s3Send?: ReturnType<typeof vi.fn>,
 ): BedrockProvider {
+  const resolvedRuntime = runtimeSend ?? vi.fn().mockResolvedValue({});
+  const resolvedControl = controlSend ?? vi.fn().mockResolvedValue({});
+  const resolvedS3 = s3Send ?? vi.fn().mockResolvedValue({});
   const clients: BedrockProviderClients = {
-    control: client(controlSend),
-    runtime: client(runtimeSend),
-    s3: client(s3Send),
+    // SAFETY: Each mock implements the AWS send surface exercised by this test suite.
+    control: { send: resolvedControl as BedrockControlClientLike["send"] },
+    // SAFETY: Each mock implements the AWS send surface exercised by this test suite.
+    runtime: { send: resolvedRuntime as BedrockClientLike["send"] },
+    // SAFETY: Each mock implements the AWS send surface exercised by this test suite.
+    s3: { send: resolvedS3 as BedrockS3ClientLike["send"] },
   };
   return new BedrockProvider({}, clients);
 }
 
-function job(
-  status = "Completed",
-  overrides: Record<string, unknown> = {},
-): Record<string, unknown> {
+function job(status = "Completed", overrides: JsonObject = {}) {
   return {
     errorRecordCount: 1,
     inputDataConfig: {
@@ -67,7 +82,7 @@ function job(
   };
 }
 
-async function* events(...values: unknown[]): AsyncIterable<unknown> {
+async function* events<Value>(...values: Value[]): AsyncIterable<Value> {
   yield* values;
 }
 
@@ -78,7 +93,7 @@ afterEach(() => {
 
 describe("Bedrock provider", () => {
   it("builds Converse requests for system, images, reasoning, and tools", async () => {
-    const send = vi.fn(async (command: unknown): Promise<unknown> => {
+    const send = vi.fn(async (command: BedrockTestCommand) => {
       expect(command).toBeInstanceOf(ConverseCommand);
       return {
         output: {
@@ -111,6 +126,7 @@ describe("Bedrock provider", () => {
     });
     const bedrock = provider(send);
 
+    // SAFETY: This test double implements the provider surface exercised by this test.
     const result = (await bedrock.completion({
       maxCompletionTokens: 1_000,
       messages: [
@@ -154,7 +170,10 @@ describe("Bedrock provider", () => {
           function: {
             description: "Get weather",
             name: "weather",
-            parameters: { properties: { city: { type: "string" } }, type: "object" },
+            parameters: {
+              properties: { city: { type: "string" } },
+              type: "object",
+            },
           },
           type: "function",
         },
@@ -162,6 +181,7 @@ describe("Bedrock provider", () => {
       topP: 0.8,
     })) as ChatCompletion;
 
+    // SAFETY: This test double implements the provider surface exercised by this test.
     const command = send.mock.calls[0]?.[0] as ConverseCommand;
     expect(command.input).toMatchObject({
       additionalModelRequestFields: {
@@ -181,8 +201,12 @@ describe("Bedrock provider", () => {
         tools: [{ toolSpec: { name: "weather" } }],
       },
     });
-    const requestMessages = command.input.messages as Record<string, any>[];
-    expect(requestMessages[0]?.content[1]?.image).toMatchObject({
+    const requestMessages = parseJsonObjectArray(command.input.messages);
+    const firstContent = requestMessages[0]?.content;
+    const image = Array.isArray(firstContent)
+      ? parseJsonObject(firstContent[1] ?? {}).image
+      : undefined;
+    expect(image).toMatchObject({
       format: "png",
       source: { bytes: new Uint8Array(Buffer.from("hello")) },
     });
@@ -227,7 +251,7 @@ describe("Bedrock provider", () => {
     "us.anthropic.claude-haiku-4-5-20251001-v1:0",
     "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
   ])("emulates structured output for Claude model %s", async (model) => {
-    const send = vi.fn(async (command: unknown): Promise<unknown> => {
+    const send = vi.fn(async (command: BedrockTestCommand) => {
       expect(command).toBeInstanceOf(ConverseCommand);
       return {
         output: {
@@ -263,12 +287,9 @@ describe("Bedrock provider", () => {
         type: "object",
       },
       name: "city",
-      parse(value: unknown): { name: string } {
-        const name =
-          typeof value === "object" && value !== null
-            ? (value as Record<string, unknown>).name
-            : undefined;
-        if (typeof name !== "string") {
+      parse<Value>(value: Value) {
+        const name = isObject(value) ? parseJsonObject(value).name : undefined;
+        if (!isString(name)) {
           throw new TypeError("Expected a city object.");
         }
         return { name };
@@ -279,15 +300,21 @@ describe("Bedrock provider", () => {
       model,
       reasoningEffort: "none",
       responseFormat: format,
-      tools: [{
-        function: {
-          name: "weather",
-          parameters: { properties: { city: { type: "string" } }, type: "object" },
+      tools: [
+        {
+          function: {
+            name: "weather",
+            parameters: {
+              properties: { city: { type: "string" } },
+              type: "object",
+            },
+          },
+          type: "function",
         },
-        type: "function",
-      }],
+      ],
     });
 
+    // SAFETY: This test double implements the provider surface exercised by this test.
     const command = send.mock.calls[0]?.[0] as ConverseCommand;
     expect(command.input.toolConfig).toMatchObject({
       toolChoice: { tool: { name: "any_llm_structured_output" } },
@@ -303,14 +330,16 @@ describe("Bedrock provider", () => {
       ],
     });
     expect(result).toMatchObject({
-      choices: [{
-        finishReason: "stop",
-        message: {
-          content: '{"name":"Paris"}',
-          parsed: { name: "Paris" },
-          reasoning: "The capital of France is Paris.",
+      choices: [
+        {
+          finishReason: "stop",
+          message: {
+            content: '{"name":"Paris"}',
+            parsed: { name: "Paris" },
+            reasoning: "The capital of France is Paris.",
+          },
         },
-      }],
+      ],
       usage: {
         completionTokens: 50,
         promptTokens: 180,
@@ -380,10 +409,12 @@ describe("Bedrock provider", () => {
       bedrock.completion({
         messages: [{ content: "Hi", role: "user" }],
         model: "anthropic.claude-test",
-        tools: [{
-          function: { name: "any_llm_structured_output" },
-          type: "function",
-        }],
+        tools: [
+          {
+            function: { name: "any_llm_structured_output" },
+            type: "function",
+          },
+        ],
       }),
     ).toThrow(InvalidRequestError);
     expect(() =>
@@ -397,18 +428,23 @@ describe("Bedrock provider", () => {
         model: "model",
       }),
     ).toThrow(InvalidRequestError);
-    await expect(
-      bedrock.completion({ messages: [], model: "model" }),
-    ).rejects.toThrow(/cannot be empty/u);
+    await expect(bedrock.completion({ messages: [], model: "model" })).rejects.toThrow(
+      /cannot be empty/u,
+    );
   });
 
   it("normalizes Converse streaming events with stable tool indices", async () => {
-    const send = vi.fn(async (command: unknown): Promise<unknown> => {
+    const send = vi.fn(async (command: BedrockTestCommand) => {
       expect(command).toBeInstanceOf(ConverseStreamCommand);
       return {
         stream: events(
           { messageStart: { role: "assistant" } },
-          { contentBlockStart: { contentBlockIndex: 0, start: { reasoningContent: {} } } },
+          {
+            contentBlockStart: {
+              contentBlockIndex: 0,
+              start: { reasoningContent: {} },
+            },
+          },
           {
             contentBlockDelta: {
               contentBlockIndex: 0,
@@ -427,11 +463,20 @@ describe("Bedrock provider", () => {
               delta: { toolUse: { input: '{"city":' } },
             },
           },
-          { contentBlockDelta: { contentBlockIndex: 4, delta: { text: "hello" } } },
+          {
+            contentBlockDelta: {
+              contentBlockIndex: 4,
+              delta: { text: "hello" },
+            },
+          },
           { messageStop: { stopReason: "tool_use" } },
           {
             metadata: {
-              usage: { cacheReadInputTokens: 1, inputTokens: 2, outputTokens: 3 },
+              usage: {
+                cacheReadInputTokens: 1,
+                inputTokens: 2,
+                outputTokens: 3,
+              },
             },
           },
           { contentBlockStop: { contentBlockIndex: 4 } },
@@ -445,13 +490,12 @@ describe("Bedrock provider", () => {
       stream: true,
     });
     const chunks: ChatCompletionChunk[] = [];
+    // SAFETY: This test double implements the provider surface exercised by this test.
     for await (const chunk of result as AsyncIterable<ChatCompletionChunk>) chunks.push(chunk);
 
     expect(chunks).toHaveLength(8);
     expect(chunks[2]?.choices[0]?.delta).toMatchObject({ reasoning: "think" });
-    expect(chunks[3]?.choices[0]?.delta.toolCalls).toMatchObject([
-      { id: "call-1", index: 0 },
-    ]);
+    expect(chunks[3]?.choices[0]?.delta.toolCalls).toMatchObject([{ id: "call-1", index: 0 }]);
     expect(chunks[4]?.choices[0]?.delta.toolCalls).toMatchObject([
       { function: { arguments: '{"city":' }, index: 0 },
     ]);
@@ -461,7 +505,7 @@ describe("Bedrock provider", () => {
 
   it("invokes embedding models once per input", async () => {
     let invocation = 0;
-    const send = vi.fn(async (command: unknown): Promise<unknown> => {
+    const send = vi.fn(async (command: BedrockTestCommand) => {
       expect(command).toBeInstanceOf(InvokeModelCommand);
       invocation += 1;
       return {
@@ -490,25 +534,30 @@ describe("Bedrock provider", () => {
       provider: "bedrock",
       usage: { promptTokens: 5, totalTokens: 5 },
     });
+    // SAFETY: This test double implements the provider surface exercised by this test.
     const first = send.mock.calls[0]?.[0] as InvokeModelCommand;
     const body = first.input.body;
-    expect(typeof body).toBe("string");
-    if (typeof body !== "string") throw new TypeError("Expected a JSON body.");
+    expect(isString(body)).toBe(true);
+    if (!isString(body)) throw new TypeError("Expected a JSON body.");
     expect(JSON.parse(body)).toEqual({
       dimensions: 256,
       inputText: "one",
       normalize: true,
     });
+    await expect(bedrock.embedding({ input: [1], model: "model" })).rejects.toThrow(
+      /string or an array of strings/u,
+    );
     await expect(
-      bedrock.embedding({ input: [1], model: "model" }),
-    ).rejects.toThrow(/string or an array of strings/u);
-    await expect(
-      bedrock.embedding({ encodingFormat: "base64", input: "one", model: "model" }),
+      bedrock.embedding({
+        encodingFormat: "base64",
+        input: "one",
+        model: "model",
+      }),
     ).rejects.toThrow(/base64/u);
   });
 
   it("lists foundation models", async () => {
-    const send = vi.fn(async (command: unknown): Promise<unknown> => {
+    const send = vi.fn(async (command: BedrockTestCommand) => {
       expect(command).toBeInstanceOf(ListFoundationModelsCommand);
       return {
         modelSummaries: [
@@ -517,20 +566,22 @@ describe("Bedrock provider", () => {
         ],
       };
     });
-    await expect(provider(undefined, send).listModels({ byOutputModality: "TEXT" })).resolves.toMatchObject([
-      { created: 0, id: "anthropic.claude-test", ownedBy: "aws" },
-    ]);
+    await expect(
+      provider(undefined, send).listModels({ byOutputModality: "TEXT" }),
+    ).resolves.toMatchObject([{ created: 0, id: "anthropic.claude-test", ownedBy: "aws" }]);
   });
 
   it("creates, retrieves, cancels, and lists batch jobs", async () => {
-    const send = vi.fn(async (command: unknown): Promise<unknown> => {
+    const send = vi.fn(async (command: BedrockTestCommand) => {
       if (command instanceof CreateModelInvocationJobCommand) {
         return { jobArn: job().jobArn };
       }
       if (command instanceof GetModelInvocationJobCommand) return job("Submitted");
       if (command instanceof StopModelInvocationJobCommand) return {};
       if (command instanceof ListModelInvocationJobsCommand) {
-        return { invocationJobSummaries: [job("Completed"), job("InProgress", { jobArn: "arn:job-2" })] };
+        return {
+          invocationJobSummaries: [job("Completed"), job("InProgress", { jobArn: "arn:job-2" })],
+        };
       }
       throw new Error("Unexpected command");
     });
@@ -558,6 +609,7 @@ describe("Bedrock provider", () => {
       requestCounts: { completed: 2, failed: 1, total: 3 },
       status: "validating",
     });
+    // SAFETY: This test double implements the provider surface exercised by this test.
     const create = send.mock.calls.find(
       ([command]) => command instanceof CreateModelInvocationJobCommand,
     )?.[0] as CreateModelInvocationJobCommand;
@@ -568,11 +620,16 @@ describe("Bedrock provider", () => {
       tags: [{ key: "env", value: "test" }],
     });
 
-    await expect(provider(undefined, send).retrieveBatch("arn:job")).resolves.toMatchObject({ status: "validating" });
-    await expect(provider(undefined, send).cancelBatch("arn:job")).resolves.toMatchObject({ status: "validating" });
+    await expect(provider(undefined, send).retrieveBatch("arn:job")).resolves.toMatchObject({
+      status: "validating",
+    });
+    await expect(provider(undefined, send).cancelBatch("arn:job")).resolves.toMatchObject({
+      status: "validating",
+    });
     await expect(
       provider(undefined, send).listBatches({ after: "token", limit: 2 }),
     ).resolves.toMatchObject([{ status: "completed" }, { status: "in_progress" }]);
+    // SAFETY: This test double implements the provider surface exercised by this test.
     const list = send.mock.calls.find(
       ([command]) => command instanceof ListModelInvocationJobsCommand,
     )?.[0] as ListModelInvocationJobsCommand;
@@ -587,12 +644,18 @@ describe("Bedrock provider", () => {
     };
     await expect(bedrock.createBatch(base)).rejects.toThrow(/roleArn/u);
     await expect(
-      bedrock.createBatch({ ...base, providerOptions: { roleArn: "arn:role" } }),
+      bedrock.createBatch({
+        ...base,
+        providerOptions: { roleArn: "arn:role" },
+      }),
     ).rejects.toThrow(/outputS3Uri/u);
     await expect(
       bedrock.createBatch({
         ...base,
-        providerOptions: { outputS3Uri: "s3://bucket/out", roleArn: "arn:role" },
+        providerOptions: {
+          outputS3Uri: "s3://bucket/out",
+          roleArn: "arn:role",
+        },
       }),
     ).rejects.toThrow(/modelId/u);
     expect(() =>
@@ -609,11 +672,11 @@ describe("Bedrock provider", () => {
   });
 
   it("reads completed batch output from its derived S3 key", async () => {
-    const controlSend = vi.fn(async (command: unknown): Promise<unknown> => {
+    const controlSend = vi.fn(async (command: BedrockTestCommand) => {
       expect(command).toBeInstanceOf(GetModelInvocationJobCommand);
       return job("PartiallyCompleted");
     });
-    const s3Send = vi.fn(async (command: unknown): Promise<unknown> => {
+    const s3Send = vi.fn(async (command: BedrockTestCommand) => {
       expect(command).toBeInstanceOf(GetObjectCommand);
       return {
         Body: {
@@ -646,6 +709,7 @@ describe("Bedrock provider", () => {
         { customId: "missing", error: { code: "unknown" } },
       ],
     });
+    // SAFETY: This test double implements the provider surface exercised by this test.
     const get = s3Send.mock.calls[0]?.[0] as GetObjectCommand;
     expect(get.input).toEqual({
       Bucket: "output-bucket",
@@ -654,16 +718,21 @@ describe("Bedrock provider", () => {
   });
 
   it("rejects results for incomplete jobs", async () => {
-    const send = vi.fn(async (): Promise<unknown> => job("InProgress"));
-    await expect(
-      provider(undefined, send).retrieveBatchResults("arn:job"),
-    ).rejects.toBeInstanceOf(BatchNotCompleteError);
+    const send = vi.fn(async () => job("InProgress"));
+    await expect(provider(undefined, send).retrieveBatchResults("arn:job")).rejects.toBeInstanceOf(
+      BatchNotCompleteError,
+    );
   });
 
   it("is registered with AWS credential-chain metadata", () => {
     expect(AnyLLM.getSupportedProviders()).toContain("bedrock");
     expect(AnyLLM.getProviderMetadata("bedrock")).toMatchObject({
-      capabilities: { batch: true, embedding: true, reasoning: true, vision: true },
+      capabilities: {
+        batch: true,
+        embedding: true,
+        reasoning: true,
+        vision: true,
+      },
       name: "bedrock",
       requiresApiKey: false,
     });

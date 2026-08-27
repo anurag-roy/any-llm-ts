@@ -1,4 +1,5 @@
-import type OpenAI from "openai";
+import type { JsonObject } from "../src/types.js";
+import OpenAI from "openai";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 
@@ -10,13 +11,15 @@ import {
 } from "../src/index.js";
 import { createProvider } from "../src/providers/registry.js";
 
-function completionResponse(): Record<string, unknown> {
+function completionResponse() {
   return {
-    choices: [{
-      finish_reason: "stop",
-      index: 0,
-      message: { content: "done", role: "assistant" },
-    }],
+    choices: [
+      {
+        finish_reason: "stop",
+        index: 0,
+        message: { content: "done", role: "assistant" },
+      },
+    ],
     created: 1,
     id: "chat-1",
     model: "model-a",
@@ -24,7 +27,7 @@ function completionResponse(): Record<string, unknown> {
   };
 }
 
-function job(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function job(overrides: JsonObject = {}) {
   return {
     created_at: "2026-08-12T12:00:00.000Z",
     endpoint: "/v1/chat/completions",
@@ -37,15 +40,28 @@ function job(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   };
 }
 
-function client(overrides: Record<string, unknown> = {}): OpenAI {
-  return {
-    batches: { cancel: vi.fn(), create: vi.fn(), list: vi.fn(), retrieve: vi.fn() },
+interface TogetherClientOverrides {
+  batches?: object;
+  chat?: object;
+  embeddings?: object;
+  files?: object;
+  models?: object;
+}
+
+function client(overrides: TogetherClientOverrides = {}): OpenAI {
+  return Object.assign(new OpenAI({ apiKey: "test" }), {
+    batches: {
+      cancel: vi.fn(),
+      create: vi.fn(),
+      list: vi.fn(),
+      retrieve: vi.fn(),
+    },
     chat: { completions: { create: vi.fn() } },
     embeddings: { create: vi.fn() },
     files: { content: vi.fn(), create: vi.fn() },
     models: { list: vi.fn() },
     ...overrides,
-  } as unknown as OpenAI;
+  });
 }
 
 describe("Together provider", () => {
@@ -82,30 +98,33 @@ describe("Together provider", () => {
       model: "model-a",
     });
 
-    expect(create.mock.calls[0]?.[0].messages).toEqual([
-      { content: "done", role: "assistant" },
-    ]);
+    expect(create.mock.calls[0]?.[0].messages).toEqual([{ content: "done", role: "assistant" }]);
   });
 
   it("implements Together's upload, batch lifecycle, and result format", async () => {
     const files = {
-      content: vi.fn().mockResolvedValue(new Response([
-        JSON.stringify({
-          custom_id: "ok",
-          response: { body: completionResponse(), status_code: 200 },
-        }),
-        JSON.stringify({ custom_id: "bad", error: { code: "invalid", message: "bad request" } }),
-      ].join("\n"))),
+      content: vi.fn().mockResolvedValue(
+        new Response(
+          [
+            JSON.stringify({
+              custom_id: "ok",
+              response: { body: completionResponse(), status_code: 200 },
+            }),
+            JSON.stringify({
+              custom_id: "bad",
+              error: { code: "invalid", message: "bad request" },
+            }),
+          ].join("\n"),
+        ),
+      ),
       create: vi.fn().mockResolvedValue({ id: "file-in" }),
     };
     const batches = {
       cancel: vi.fn().mockResolvedValue(job({ status: "CANCELING" })),
       create: vi.fn().mockResolvedValue({ job: job(), warning: null }),
-      list: vi.fn().mockResolvedValue([
-        job(),
-        job({ id: "batch-2", status: "COMPLETED" }),
-      ]),
-      retrieve: vi.fn()
+      list: vi.fn().mockResolvedValue([job(), job({ id: "batch-2", status: "COMPLETED" })]),
+      retrieve: vi
+        .fn()
         .mockResolvedValueOnce(job())
         .mockResolvedValueOnce(job())
         .mockResolvedValueOnce(job({ output_file_id: "file-out", status: "COMPLETED" })),
@@ -113,17 +132,25 @@ describe("Together provider", () => {
     const provider = new TogetherProvider({ apiKey: "secret" }, client({ batches, files }));
     const inputFilePath = fileURLToPath(new URL("./fixtures/batch.jsonl", import.meta.url));
 
-    await expect(provider.createBatch({
-      completionWindow: "24h",
-      endpoint: "/v1/chat/completions",
-      inputFilePath,
-      metadata: { ignored: "yes" },
-      providerOptions: { priority: 2 },
-    })).resolves.toMatchObject({ id: "batch-1", provider: "together", status: "in_progress" });
-    expect(files.create).toHaveBeenCalledWith(expect.objectContaining({
-      check: false,
-      purpose: "batch-api",
-    }));
+    await expect(
+      provider.createBatch({
+        completionWindow: "24h",
+        endpoint: "/v1/chat/completions",
+        inputFilePath,
+        metadata: { ignored: "yes" },
+        providerOptions: { priority: 2 },
+      }),
+    ).resolves.toMatchObject({
+      id: "batch-1",
+      provider: "together",
+      status: "in_progress",
+    });
+    expect(files.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        check: false,
+        purpose: "batch-api",
+      }),
+    );
     expect(batches.create).toHaveBeenCalledWith({
       completion_window: "24h",
       endpoint: "/v1/chat/completions",
@@ -131,11 +158,19 @@ describe("Together provider", () => {
       priority: 2,
     });
 
-    await expect(provider.retrieveBatch("batch-1")).resolves.toMatchObject({ status: "in_progress" });
-    await expect(provider.cancelBatch("batch-1")).resolves.toMatchObject({ status: "cancelling" });
+    await expect(provider.retrieveBatch("batch-1")).resolves.toMatchObject({
+      status: "in_progress",
+    });
+    await expect(provider.cancelBatch("batch-1")).resolves.toMatchObject({
+      status: "cancelling",
+    });
     await expect(provider.listBatches({ limit: 1 })).resolves.toHaveLength(1);
-    await expect(provider.listBatches({ after: "cursor" })).rejects.toBeInstanceOf(UnsupportedParameterError);
-    await expect(provider.retrieveBatchResults("batch-1")).rejects.toBeInstanceOf(BatchNotCompleteError);
+    await expect(provider.listBatches({ after: "cursor" })).rejects.toBeInstanceOf(
+      UnsupportedParameterError,
+    );
+    await expect(provider.retrieveBatchResults("batch-1")).rejects.toBeInstanceOf(
+      BatchNotCompleteError,
+    );
     await expect(provider.retrieveBatchResults("batch-1")).resolves.toMatchObject({
       results: [
         { customId: "ok", result: { provider: "together" } },

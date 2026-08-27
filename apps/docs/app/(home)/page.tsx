@@ -24,7 +24,8 @@ const features = [
     title: "Stay type-safe",
   },
   {
-    description: "Use native adapters, registered providers, or your own OpenAI-compatible endpoint.",
+    description:
+      "Use native adapters, registered providers, or your own OpenAI-compatible endpoint.",
     icon: PlugZap,
     title: "Extend when needed",
   },
@@ -42,8 +43,8 @@ export default function HomePage() {
           One typed interface for your LLM providers
         </h1>
         <p className="mt-6 max-w-2xl text-balance text-lg text-fd-muted-foreground md:text-xl">
-          Use chat completions, streaming, tools, embeddings, responses, images, moderation, and audio
-          without coupling your application to one provider SDK.
+          Use chat completions, streaming, tools, embeddings, responses, images, moderation, and
+          audio without coupling your application to one provider SDK.
         </p>
         <div className="mt-9 flex flex-wrap justify-center gap-3">
           <Link
@@ -66,8 +67,7 @@ export default function HomePage() {
           codeblock={{
             "aria-label": "TypeScript quickstart example",
             allowCopy: false,
-            className:
-              "mt-14 w-full max-w-3xl text-left shadow-2xl shadow-fd-primary/5",
+            className: "mt-14 w-full max-w-3xl text-left shadow-2xl shadow-fd-primary/5",
             id: "quickstart-code",
             icon: (
               <span aria-hidden="true" className="flex gap-2">

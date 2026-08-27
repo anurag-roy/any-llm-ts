@@ -1,3 +1,8 @@
+import { includeWhen } from "./utils.js";
+import type { JsonValue } from "./types.js";
+import { parseJsonObject, parseJsonValue } from "./utils.js";
+import type { JsonObject } from "./types.js";
+import { isNumber, isObject, isString } from "./utils.js";
 import type {
   ChatCompletion,
   ChatCompletionChunk,
@@ -19,18 +24,17 @@ import type {
 } from "./types.js";
 
 function systemText(system: MessagesParams["system"]): string | undefined {
-  if (system === undefined || typeof system === "string") return system;
+  if (system === undefined || isString(system)) return system;
   return system.map((block) => block.text).join("");
 }
 
-function toolResultText(content: unknown): string {
-  if (typeof content === "string") return content;
+function toolResultText(content: JsonValue | MessagesTextBlock[] | undefined): string {
+  if (isString(content)) return content;
   if (Array.isArray(content)) {
     return content
-      .filter((block): block is MessagesTextBlock =>
-        typeof block === "object" && block !== null && block.type === "text" && typeof block.text === "string",
+      .flatMap((block): string[] =>
+        isObject(block) && "text" in block && isString(block.text) ? [block.text] : [],
       )
-      .map((block) => block.text)
       .join("");
   }
   return content === undefined ? "" : JSON.stringify(content);
@@ -38,10 +42,10 @@ function toolResultText(content: unknown): string {
 
 function imageUrl(block: MessagesInputContentBlock): string | undefined {
   if (block.type !== "image" || !("source" in block)) return undefined;
-  const source = block.source as Record<string, unknown>;
-  if (source.type === "url" && typeof source.url === "string") return source.url;
-  if (source.type === "base64" && typeof source.data === "string") {
-    const mediaType = typeof source.mediaType === "string" ? source.mediaType : "image/png";
+  const source = parseJsonObject(block.source);
+  if (source.type === "url" && isString(source.url)) return source.url;
+  if (source.type === "base64" && isString(source.data)) {
+    const mediaType = isString(source.mediaType) ? source.mediaType : "image/png";
     return `data:${mediaType};base64,${source.data}`;
   }
   return undefined;
@@ -52,19 +56,22 @@ function assistantMessage(content: MessagesInputContentBlock[]): ChatMessage {
   const reasoning: string[] = [];
   const toolCalls: NonNullable<ChatMessage["toolCalls"]> = [];
   for (const block of content) {
-    if (block.type === "text" && "text" in block && typeof block.text === "string") text.push(block.text);
-    if (block.type === "thinking" && "thinking" in block && typeof block.thinking === "string") {
+    if (block.type === "text" && "text" in block && isString(block.text)) text.push(block.text);
+    if (block.type === "thinking" && "thinking" in block && isString(block.thinking)) {
       reasoning.push(block.thinking);
     }
     if (
       block.type === "tool_use" &&
       "id" in block &&
       "name" in block &&
-      typeof block.id === "string" &&
-      typeof block.name === "string"
+      isString(block.id) &&
+      isString(block.name)
     ) {
       toolCalls.push({
-        function: { arguments: JSON.stringify("input" in block ? block.input : {}), name: block.name },
+        function: {
+          arguments: JSON.stringify("input" in block ? block.input : {}),
+          name: block.name,
+        },
         id: block.id,
         type: "function",
       });
@@ -73,8 +80,8 @@ function assistantMessage(content: MessagesInputContentBlock[]): ChatMessage {
   return {
     content: text.length === 0 ? null : text.join(""),
     role: "assistant",
-    ...(reasoning.length === 0 ? {} : { reasoning: reasoning.join("") }),
-    ...(toolCalls.length === 0 ? {} : { toolCalls }),
+    ...includeWhen(!(reasoning.length === 0), { reasoning: reasoning.join("") }),
+    ...includeWhen(!(toolCalls.length === 0), { toolCalls }),
   };
 }
 
@@ -88,7 +95,7 @@ function userMessages(content: MessagesInputContentBlock[]): ChatMessage[] {
   };
 
   for (const block of content) {
-    if (block.type === "tool_result" && "toolUseId" in block && typeof block.toolUseId === "string") {
+    if (block.type === "tool_result" && "toolUseId" in block && isString(block.toolUseId)) {
       flush();
       messages.push({
         content: toolResultText("content" in block ? block.content : ""),
@@ -97,7 +104,7 @@ function userMessages(content: MessagesInputContentBlock[]): ChatMessage[] {
       });
       continue;
     }
-    if (block.type === "text" && "text" in block && typeof block.text === "string") {
+    if (block.type === "text" && "text" in block && isString(block.text)) {
       parts.push({ text: block.text, type: "text" });
       continue;
     }
@@ -106,7 +113,7 @@ function userMessages(content: MessagesInputContentBlock[]): ChatMessage[] {
       parts.push({ image_url: { url }, type: "image_url" });
       continue;
     }
-    parts.push({ ...block });
+    parts.push({ ...parseJsonObject(block, "message content block") });
   }
   flush();
   return messages;
@@ -118,7 +125,7 @@ function toChatMessages(params: MessagesParams): ChatMessage[] {
   if (system !== undefined && system.length > 0) messages.push({ content: system, role: "system" });
 
   for (const message of params.messages) {
-    if (typeof message.content === "string") {
+    if (isString(message.content)) {
       messages.push({ content: message.content, role: message.role });
     } else if (message.role === "assistant") {
       messages.push(assistantMessage(message.content));
@@ -129,26 +136,28 @@ function toChatMessages(params: MessagesParams): ChatMessage[] {
   return messages;
 }
 
-function outputFormat(value: MessagesParams["outputFormat"]): Record<string, unknown> | undefined {
+function outputFormat(value: MessagesParams["outputFormat"]) {
   if (value === undefined) return undefined;
   const format = value.format;
-  if (typeof format !== "object" || format === null) return value;
-  const schema = (format as Record<string, unknown>).schema;
-  if (typeof schema !== "object" || schema === null) return value;
-  const title = (schema as Record<string, unknown>).title;
+  if (!isObject(format)) return value;
+  const schema = parseJsonObject(format).schema;
+  if (!isObject(schema)) return value;
+  const title = parseJsonObject(schema).title;
   return {
     json_schema: {
-      name: typeof title === "string" ? title : "structured_output",
+      name: isString(title) ? title : "structured_output",
       schema,
     },
     type: "json_schema",
   };
 }
 
-function reasoningEffort(thinking: MessagesParams["thinking"]): CompletionParams["reasoningEffort"] {
+function reasoningEffort(
+  thinking: MessagesParams["thinking"],
+): CompletionParams["reasoningEffort"] {
   if (thinking?.type === "disabled") return "none";
   if (thinking?.type !== "enabled") return undefined;
-  const budget = typeof thinking.budgetTokens === "number" ? thinking.budgetTokens : 8_192;
+  const budget = isNumber(thinking.budgetTokens) ? thinking.budgetTokens : 8_192;
   if (budget <= 1_024) return "minimal";
   if (budget <= 2_048) return "low";
   if (budget <= 8_192) return "medium";
@@ -156,10 +165,12 @@ function reasoningEffort(thinking: MessagesParams["thinking"]): CompletionParams
   return "xhigh";
 }
 
-function toolChoice(value: NonNullable<MessagesParams["toolChoice"]>): NonNullable<CompletionParams["toolChoice"]> {
+function toolChoice(
+  value: NonNullable<MessagesParams["toolChoice"]>,
+): NonNullable<CompletionParams["toolChoice"]> {
   if (value.type === "any") return "required";
   if (value.type === "none") return "none";
-  if (value.type === "tool" && typeof value.name === "string") {
+  if (value.type === "tool" && isString(value.name)) {
     return { function: { name: value.name }, type: "function" };
   }
   return "auto";
@@ -168,34 +179,37 @@ function toolChoice(value: NonNullable<MessagesParams["toolChoice"]>): NonNullab
 export function messagesToCompletionParams(params: MessagesParams): CompletionParams {
   const effort = reasoningEffort(params.thinking);
   const format = outputFormat(params.outputFormat);
+  const selectedToolChoice =
+    params.toolChoice === undefined ? undefined : toolChoice(params.toolChoice);
+  const tools = params.tools?.map((tool) => ({
+    function: {
+      name: tool.name,
+      parameters: tool.inputSchema,
+      ...includeWhen(!(tool.description === undefined), { description: tool.description }),
+    },
+    type: "function" as const,
+  }));
   return {
     messages: toChatMessages(params),
     model: params.model,
     maxTokens: params.maxTokens,
-    ...(effort === undefined ? {} : { reasoningEffort: effort }),
-    ...(format === undefined ? {} : { responseFormat: format }),
-    ...(params.stopSequences === undefined ? {} : { stop: params.stopSequences }),
-    ...(params.stream === undefined ? {} : { stream: params.stream }),
-    ...(params.stream === true ? { streamOptions: { include_usage: true } } : {}),
-    ...(params.temperature === undefined ? {} : { temperature: params.temperature }),
-    ...(params.timeout === undefined ? {} : { timeout: params.timeout }),
-    ...(params.toolChoice === undefined ? {} : { toolChoice: toolChoice(params.toolChoice) }),
-    ...(params.tools === undefined
-      ? {}
-      : {
-          tools: params.tools.map((tool) => ({
-            function: {
-              description: tool.description,
-              name: tool.name,
-              parameters: tool.inputSchema,
-            },
-            type: "function" as const,
-          })),
-        }),
-    ...(params.topP === undefined ? {} : { topP: params.topP }),
-    ...(params.serviceTier === undefined ? {} : { serviceTier: params.serviceTier }),
-    ...(params.promptCacheKey === undefined ? {} : { promptCacheKey: params.promptCacheKey }),
-    ...(params.providerOptions === undefined ? {} : { providerOptions: params.providerOptions }),
+    ...includeWhen(!(effort === undefined), { reasoningEffort: effort }),
+    ...includeWhen(!(format === undefined), { responseFormat: format }),
+    ...includeWhen(!(params.stopSequences === undefined), { stop: params.stopSequences }),
+    ...includeWhen(!(params.stream === undefined), { stream: params.stream }),
+    ...includeWhen(params.stream === true, { streamOptions: { include_usage: true } }),
+    ...includeWhen(!(params.temperature === undefined), { temperature: params.temperature }),
+    ...includeWhen(!(params.timeout === undefined), { timeout: params.timeout }),
+    ...includeWhen(!(selectedToolChoice === undefined), { toolChoice: selectedToolChoice }),
+    ...includeWhen(!(tools === undefined), { tools }),
+    ...includeWhen(!(params.topP === undefined), { topP: params.topP }),
+    ...includeWhen(!(params.serviceTier === undefined), { serviceTier: params.serviceTier }),
+    ...includeWhen(!(params.promptCacheKey === undefined), {
+      promptCacheKey: params.promptCacheKey,
+    }),
+    ...includeWhen(!(params.providerOptions === undefined), {
+      providerOptions: params.providerOptions,
+    }),
   };
 }
 
@@ -205,9 +219,9 @@ function stopReason(reason: ChatCompletion["choices"][number]["finishReason"]): 
   return "end_turn";
 }
 
-function cachedTokens(details: Record<string, unknown> | undefined): number {
+function cachedTokens(details: JsonObject | undefined): number {
   const value = details?.cachedTokens ?? details?.cached_tokens;
-  return typeof value === "number" ? value : 0;
+  return isNumber(value) ? value : 0;
 }
 
 function usageFromCompletion(completion: ChatCompletion): MessageUsage {
@@ -217,26 +231,26 @@ function usageFromCompletion(completion: ChatCompletion): MessageUsage {
   return {
     inputTokens: usage.promptTokens - cached,
     outputTokens: usage.completionTokens,
-    ...(cached === 0 ? {} : { cacheReadInputTokens: cached }),
+    ...includeWhen(!(cached === 0), { cacheReadInputTokens: cached }),
   };
 }
 
 function textFromChatContent(content: ChatMessage["content"]): string {
-  if (typeof content === "string") return content;
+  if (isString(content)) return content;
   if (content === null) return "";
   return content
     .filter(
       (part): part is TextContentPart =>
-        part.type === "text" && "text" in part && typeof part.text === "string",
+        part.type === "text" && "text" in part && isString(part.text),
     )
     .map((part) => part.text)
     .join("");
 }
 
-function toolInput(value: string): unknown {
+function toolInput(value: string): JsonValue {
   if (value.length === 0) return {};
   try {
-    return JSON.parse(value) as unknown;
+    return parseJsonValue(JSON.parse(value), "tool input");
   } catch {
     return {};
   }
@@ -251,7 +265,12 @@ export function completionToMessageResponse(completion: ChatCompletion): Message
   const text = choice === undefined ? "" : textFromChatContent(choice.message.content);
   if (text.length > 0) content.push({ text, type: "text" });
   for (const call of choice?.message.toolCalls ?? []) {
-    content.push({ id: call.id, input: toolInput(call.function.arguments), name: call.function.name, type: "tool_use" });
+    content.push({
+      id: call.id,
+      input: toolInput(call.function.arguments),
+      name: call.function.name,
+      type: "tool_use",
+    });
   }
   if (content.length === 0) content.push({ text: "", type: "text" });
   return {
@@ -279,9 +298,10 @@ interface StreamState {
 
 function closeBlock(state: StreamState): ContentBlockStopEvent[] {
   if (state.blockType === undefined) return [];
-  const indexes = state.toolBlockIndexes.size === 0
-    ? [state.blockIndex]
-    : [...state.toolBlockIndexes.values()].sort((left, right) => left - right);
+  const indexes =
+    state.toolBlockIndexes.size === 0
+      ? [state.blockIndex]
+      : [...state.toolBlockIndexes.values()].sort((left, right) => left - right);
   state.toolBlockIndexes.clear();
   delete state.blockType;
   return indexes.map((index) => ({ index, type: "content_block_stop" }));
@@ -296,7 +316,11 @@ function openBlock(
   const events: (ContentBlockStartEvent | ContentBlockStopEvent)[] = closeBlock(state);
   state.blockIndex += 1;
   state.blockType = type;
-  events.push({ contentBlock, index: state.blockIndex, type: "content_block_start" });
+  events.push({
+    contentBlock,
+    index: state.blockIndex,
+    type: "content_block_start",
+  });
   return events;
 }
 
@@ -309,10 +333,10 @@ function toolDeltaEvents(state: StreamState, call: ToolCallDelta): MessageStream
     state.toolBlockIndexes.set(call.index, state.blockIndex);
     events.push({
       contentBlock: {
-      id: call.id,
-      input: {},
-      name: call.function?.name ?? "",
-      type: "tool_use",
+        id: call.id,
+        input: {},
+        name: call.function?.name ?? "",
+        type: "tool_use",
       },
       index: state.blockIndex,
       type: "content_block_start",
@@ -383,7 +407,7 @@ function finalUsage(state: StreamState): MessageUsage {
   return {
     inputTokens: state.inputTokens - cached,
     outputTokens: state.outputTokens,
-    ...(cached === 0 ? {} : { cacheReadInputTokens: cached }),
+    ...includeWhen(!(cached === 0), { cacheReadInputTokens: cached }),
   };
 }
 
@@ -405,7 +429,11 @@ export async function* completionStreamToMessageEvents(
     }
   } catch (error) {
     if (state.started) {
-      yield { delta: { stopReason: null }, type: "message_delta", usage: finalUsage(state) };
+      yield {
+        delta: { stopReason: null },
+        type: "message_delta",
+        usage: finalUsage(state),
+      };
     }
     throw error;
   }

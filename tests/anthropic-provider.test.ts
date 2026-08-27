@@ -1,4 +1,5 @@
-import type Anthropic from "@anthropic-ai/sdk";
+import { parseJsonObject } from "../src/utils.js";
+import Anthropic from "@anthropic-ai/sdk";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -6,19 +7,33 @@ import { BatchNotCompleteError, MissingApiKeyError, ProviderError } from "../src
 import { AnthropicProvider } from "../src/providers/anthropic.js";
 import type { ChatCompletion, ChatCompletionChunk } from "../src/types.js";
 
-function fakeAnthropic(overrides: Record<string, unknown> = {}): Anthropic {
-  return {
+interface AnthropicTestOverrides {
+  messages?: object;
+  models?: object;
+}
+
+function fakeAnthropic(overrides: AnthropicTestOverrides = {}): Anthropic {
+  return Object.assign(new Anthropic({ apiKey: "test" }), {
     messages: { create: vi.fn() },
     models: { list: vi.fn() },
     ...overrides,
-  } as unknown as Anthropic;
+  });
 }
 
-function anthropicResponse(): Record<string, unknown> {
+function anthropicResponse() {
   return {
     content: [
-      { signature: "signature", thinking: "I should call a tool", type: "thinking" },
-      { id: "tool-1", input: { city: "Paris" }, name: "weather", type: "tool_use" },
+      {
+        signature: "signature",
+        thinking: "I should call a tool",
+        type: "thinking",
+      },
+      {
+        id: "tool-1",
+        input: { city: "Paris" },
+        name: "weather",
+        type: "tool_use",
+      },
       { text: "Checking now.", type: "text" },
     ],
     id: "msg-1",
@@ -44,6 +59,7 @@ describe("Anthropic provider", () => {
   it("converts OpenAI-shaped conversations and normalizes responses", async () => {
     const create = vi.fn().mockResolvedValue(anthropicResponse());
     const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
+    // SAFETY: This test double implements the provider surface exercised by this test.
     const result = (await provider.completion({
       maxTokens: 4_096,
       messages: [
@@ -52,7 +68,10 @@ describe("Anthropic provider", () => {
         {
           content: [
             { image_url: "data:image/png;base64,aGVsbG8=", type: "image_url" },
-            { image_url: { url: "https://example.com/image.png" }, type: "image_url" },
+            {
+              image_url: { url: "https://example.com/image.png" },
+              type: "image_url",
+            },
             { text: "What is the weather?", type: "text" },
           ],
           role: "user",
@@ -84,7 +103,10 @@ describe("Anthropic provider", () => {
           function: {
             description: "Get weather",
             name: "weather",
-            parameters: { properties: { city: { type: "string" } }, type: "object" },
+            parameters: {
+              properties: { city: { type: "string" } },
+              type: "object",
+            },
           },
           type: "function",
         },
@@ -92,7 +114,7 @@ describe("Anthropic provider", () => {
       ],
     })) as ChatCompletion;
 
-    const request = create.mock.calls[0]?.[0] as Record<string, any>;
+    const request = parseJsonObject(create.mock.calls[0]?.[0]);
     expect(request).toMatchObject({
       max_tokens: 4096,
       metadata: { user_id: "123" },
@@ -122,7 +144,10 @@ describe("Anthropic provider", () => {
       input: { arguments: "not-json" },
       type: "tool_use",
     });
-    expect(request.messages[2].content[0]).toMatchObject({ tool_use_id: "old-tool", type: "tool_result" });
+    expect(request.messages[2].content[0]).toMatchObject({
+      tool_use_id: "old-tool",
+      type: "tool_result",
+    });
 
     expect(result).toMatchObject({
       choices: [
@@ -133,7 +158,10 @@ describe("Anthropic provider", () => {
             reasoning: "I should call a tool",
             extraContent: { anthropic: { signature: "signature" } },
             toolCalls: [
-              { function: { arguments: '{"city":"Paris"}', name: "weather" }, id: "tool-1" },
+              {
+                function: { arguments: '{"city":"Paris"}', name: "weather" },
+                id: "tool-1",
+              },
             ],
           },
         },
@@ -153,16 +181,30 @@ describe("Anthropic provider", () => {
     const response = anthropicResponse();
     response.content = [];
     response.stop_reason = "max_tokens";
-    response.usage = { input_tokens: 0, output_tokens: 0 };
+    response.usage = {
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+      input_tokens: 0,
+      output_tokens: 0,
+    };
     const create = vi.fn().mockResolvedValue(response);
     const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
+    // SAFETY: This test double implements the provider surface exercised by this test.
     const result = (await provider.completion({
       messages: [{ content: "Hi", role: "user" }],
       model: "claude-test",
       toolChoice: "required",
     })) as ChatCompletion;
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ max_tokens: 8192, tool_choice: { type: "any" } }));
-    expect(result.choices[0]).toMatchObject({ finishReason: "length", message: { content: null } });
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        max_tokens: 8192,
+        tool_choice: { type: "any" },
+      }),
+    );
+    expect(result.choices[0]).toMatchObject({
+      finishReason: "length",
+      message: { content: null },
+    });
   });
 
   it("maps JSON schema output, adaptive effort, and parallel tool choice", async () => {
@@ -176,7 +218,11 @@ describe("Anthropic provider", () => {
       responseFormat: {
         json_schema: {
           name: "answer",
-          schema: { properties: { answer: { type: "string" } }, required: ["answer"], type: "object" },
+          schema: {
+            properties: { answer: { type: "string" } },
+            required: ["answer"],
+            type: "object",
+          },
         },
         type: "json_schema",
       },
@@ -186,7 +232,11 @@ describe("Anthropic provider", () => {
         output_config: {
           effort: "low",
           format: {
-            schema: { properties: { answer: { type: "string" } }, required: ["answer"], type: "object" },
+            schema: {
+              properties: { answer: { type: "string" } },
+              required: ["answer"],
+              type: "object",
+            },
             type: "json_schema",
           },
         },
@@ -228,9 +278,15 @@ describe("Anthropic provider", () => {
       messages: [
         {
           content: [
-            { file: { file_data: "data:application/pdf;base64,cGRm" }, type: "file" },
+            {
+              file: { file_data: "data:application/pdf;base64,cGRm" },
+              type: "file",
+            },
             { file: { file_id: "unsupported" }, type: "file" },
-            { input_audio: { data: "audio", format: "mp3" }, type: "input_audio" },
+            {
+              input_audio: { data: "audio", format: "mp3" },
+              type: "input_audio",
+            },
           ],
           role: "user",
         },
@@ -239,7 +295,7 @@ describe("Anthropic provider", () => {
       toolChoice: "none",
       reasoningEffort: "none",
     });
-    const request = create.mock.calls[0]?.[0] as Record<string, any>;
+    const request = parseJsonObject(create.mock.calls[0]?.[0]);
     expect(request.messages[0].content).toEqual([
       {
         source: { data: "cGRm", media_type: "application/pdf", type: "base64" },
@@ -251,21 +307,50 @@ describe("Anthropic provider", () => {
   });
 
   it("normalizes text, thinking, tool-call, and terminal stream events", async () => {
-    async function* events(): AsyncIterable<Record<string, unknown>> {
+    async function* events() {
       yield {
-        message: { id: "msg-stream", model: "claude-stream", usage: { input_tokens: 4 } },
+        message: {
+          id: "msg-stream",
+          model: "claude-stream",
+          usage: { input_tokens: 4 },
+        },
         type: "message_start",
       };
-      yield { content_block: { text: "A", type: "text" }, index: 0, type: "content_block_start" };
-      yield { delta: { text: "B", type: "text_delta" }, index: 0, type: "content_block_delta" };
-      yield { content_block: { thinking: "X", type: "thinking" }, index: 1, type: "content_block_start" };
-      yield { delta: { thinking: "Y", type: "thinking_delta" }, index: 1, type: "content_block_delta" };
       yield {
-        content_block: { id: "tool-1", input: {}, name: "weather", type: "tool_use" },
+        content_block: { text: "A", type: "text" },
+        index: 0,
+        type: "content_block_start",
+      };
+      yield {
+        delta: { text: "B", type: "text_delta" },
+        index: 0,
+        type: "content_block_delta",
+      };
+      yield {
+        content_block: { thinking: "X", type: "thinking" },
+        index: 1,
+        type: "content_block_start",
+      };
+      yield {
+        delta: { thinking: "Y", type: "thinking_delta" },
+        index: 1,
+        type: "content_block_delta",
+      };
+      yield {
+        content_block: {
+          id: "tool-1",
+          input: {},
+          name: "weather",
+          type: "tool_use",
+        },
         index: 2,
         type: "content_block_start",
       };
-      yield { delta: { partial_json: "{", type: "input_json_delta" }, index: 2, type: "content_block_delta" };
+      yield {
+        delta: { partial_json: "{", type: "input_json_delta" },
+        index: 2,
+        type: "content_block_delta",
+      };
       yield {
         delta: { signature: "stream-signature", type: "signature_delta" },
         index: 1,
@@ -287,6 +372,7 @@ describe("Anthropic provider", () => {
       stream: true,
     });
     const chunks: ChatCompletionChunk[] = [];
+    // SAFETY: This test double implements the provider surface exercised by this test.
     for await (const chunk of result as AsyncIterable<ChatCompletionChunk>) chunks.push(chunk);
 
     expect(chunks.map((chunk) => chunk.choices[0]?.delta)).toEqual([
@@ -297,7 +383,12 @@ describe("Anthropic provider", () => {
       { reasoning: "Y" },
       {
         toolCalls: [
-          { function: { arguments: "", name: "weather" }, id: "tool-1", index: 2, type: "function" },
+          {
+            function: { arguments: "", name: "weather" },
+            id: "tool-1",
+            index: 2,
+            type: "function",
+          },
         ],
       },
       { toolCalls: [{ function: { arguments: "{" }, index: 2 }] },
@@ -315,7 +406,12 @@ describe("Anthropic provider", () => {
       content: [
         { text: "hello", type: "text" },
         { signature: "signature", thinking: "reasoning", type: "thinking" },
-        { id: "tool-1", input: { city: "Paris" }, name: "weather", type: "tool_use" },
+        {
+          id: "tool-1",
+          input: { city: "Paris" },
+          name: "weather",
+          type: "tool_use",
+        },
         { data: true, type: "server_block" },
       ],
       id: "native",
@@ -330,56 +426,116 @@ describe("Anthropic provider", () => {
         output_tokens: 3,
       },
     };
-    async function* events(): AsyncIterable<Record<string, unknown>> {
+    async function* events() {
       yield { message: native, type: "message_start" };
-      yield { content_block: { text: "", type: "text" }, index: 0, type: "content_block_start" };
-      yield { delta: { text: "hello", type: "text_delta" }, index: 0, type: "content_block_delta" };
-      yield { content_block: { thinking: "", type: "thinking" }, index: 1, type: "content_block_start" };
-      yield { content_block: { id: "tool-2", input: {}, name: "lookup", type: "tool_use" }, index: 2, type: "content_block_start" };
-      yield { delta: { partial_json: "{}", type: "input_json_delta" }, index: 2, type: "content_block_delta" };
+      yield {
+        content_block: { text: "", type: "text" },
+        index: 0,
+        type: "content_block_start",
+      };
+      yield {
+        delta: { text: "hello", type: "text_delta" },
+        index: 0,
+        type: "content_block_delta",
+      };
+      yield {
+        content_block: { thinking: "", type: "thinking" },
+        index: 1,
+        type: "content_block_start",
+      };
+      yield {
+        content_block: {
+          id: "tool-2",
+          input: {},
+          name: "lookup",
+          type: "tool_use",
+        },
+        index: 2,
+        type: "content_block_start",
+      };
+      yield {
+        delta: { partial_json: "{}", type: "input_json_delta" },
+        index: 2,
+        type: "content_block_delta",
+      };
       yield { index: 2, type: "content_block_stop" };
       yield {
         delta: { stop_reason: "tool_use", stop_sequence: "STOP" },
         type: "message_delta",
-        usage: { cache_read_input_tokens: 2, input_tokens: 4, output_tokens: 3 },
+        usage: {
+          cache_read_input_tokens: 2,
+          input_tokens: 4,
+          output_tokens: 3,
+        },
       };
       yield { type: "message_stop" };
     }
     const create = vi.fn().mockResolvedValueOnce(native).mockResolvedValueOnce(events());
     const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
-    await expect(provider.messages({
-      cacheControl: { type: "ephemeral" },
-      maxTokens: 10,
-      messages: [
-        {
-          content: [
-            { cacheControl: { type: "ephemeral" }, text: "hello", type: "text" },
-            { content: "result", isError: false, toolUseId: "tool-1", type: "tool_result" },
-            { source: { data: "aGVsbG8=", mediaType: "image/png", type: "base64" }, type: "image" },
-            { custom: true, type: "custom" },
-          ],
-          role: "user",
+    await expect(
+      provider.messages({
+        cacheControl: { type: "ephemeral" },
+        maxTokens: 10,
+        messages: [
+          {
+            content: [
+              {
+                cacheControl: { type: "ephemeral" },
+                text: "hello",
+                type: "text",
+              },
+              {
+                content: "result",
+                isError: false,
+                toolUseId: "tool-1",
+                type: "tool_result",
+              },
+              {
+                source: {
+                  data: "aGVsbG8=",
+                  mediaType: "image/png",
+                  type: "base64",
+                },
+                type: "image",
+              },
+              { custom: true, type: "custom" },
+            ],
+            role: "user",
+          },
+        ],
+        metadata: { userId: "user-1" },
+        model: "claude",
+        outputFormat: {
+          format: { schema: { type: "object" }, type: "json_schema" },
         },
-      ],
-      metadata: { userId: "user-1" },
-      model: "claude",
-      outputFormat: { format: { schema: { type: "object" }, type: "json_schema" } },
-      providerOptions: { custom_option: true },
-      serviceTier: "auto",
-      stopSequences: ["STOP"],
-      system: [{ cacheControl: { type: "ephemeral" }, text: "system", type: "text" }],
-      temperature: 0.2,
-      thinking: { budget_tokens: 1_000, type: "enabled" },
-      timeout: 2,
-      toolChoice: { name: "weather", type: "tool" },
-      tools: [{ cacheControl: { type: "ephemeral" }, inputSchema: { type: "object" }, name: "weather" }],
-      topK: 10,
-      topP: 0.8,
-    })).resolves.toMatchObject({
+        providerOptions: { custom_option: true },
+        serviceTier: "auto",
+        stopSequences: ["STOP"],
+        system: [{ cacheControl: { type: "ephemeral" }, text: "system", type: "text" }],
+        temperature: 0.2,
+        thinking: { budget_tokens: 1_000, type: "enabled" },
+        timeout: 2,
+        toolChoice: { name: "weather", type: "tool" },
+        tools: [
+          {
+            cacheControl: { type: "ephemeral" },
+            inputSchema: { type: "object" },
+            name: "weather",
+          },
+        ],
+        topK: 10,
+        topP: 0.8,
+      }),
+    ).resolves.toMatchObject({
       content: [
         { text: "hello", type: "text" },
         { signature: "signature", thinking: "reasoning", type: "thinking" },
-        { id: "tool-1", input: { city: "Paris" }, name: "weather", type: "tool_use" },
+        {
+          id: "tool-1",
+          input: { city: "Paris" },
+          name: "weather",
+          type: "tool_use",
+        },
         { data: true, type: "server_block" },
       ],
       id: "native",
@@ -391,16 +547,45 @@ describe("Anthropic provider", () => {
         outputTokens: 3,
       },
     });
-    const stream = await provider.messages({ maxTokens: 10, messages: [], model: "claude", stream: true });
+    const stream = await provider.messages({
+      maxTokens: 10,
+      messages: [],
+      model: "claude",
+      stream: true,
+    });
     const values = [];
+    // SAFETY: This test double implements the provider surface exercised by this test.
     for await (const event of stream as AsyncIterable<unknown>) values.push(event);
     expect(values).toMatchObject([
-      { message: { id: "native", stopReason: "end_turn" }, type: "message_start" },
-      { contentBlock: { text: "", type: "text" }, index: 0, type: "content_block_start" },
-      { delta: { text: "hello", type: "text_delta" }, index: 0, type: "content_block_delta" },
-      { contentBlock: { thinking: "", type: "thinking" }, index: 1, type: "content_block_start" },
-      { contentBlock: { id: "tool-2", type: "tool_use" }, index: 2, type: "content_block_start" },
-      { delta: { partialJson: "{}", type: "input_json_delta" }, index: 2, type: "content_block_delta" },
+      {
+        message: { id: "native", stopReason: "end_turn" },
+        type: "message_start",
+      },
+      {
+        contentBlock: { text: "", type: "text" },
+        index: 0,
+        type: "content_block_start",
+      },
+      {
+        delta: { text: "hello", type: "text_delta" },
+        index: 0,
+        type: "content_block_delta",
+      },
+      {
+        contentBlock: { thinking: "", type: "thinking" },
+        index: 1,
+        type: "content_block_start",
+      },
+      {
+        contentBlock: { id: "tool-2", type: "tool_use" },
+        index: 2,
+        type: "content_block_start",
+      },
+      {
+        delta: { partialJson: "{}", type: "input_json_delta" },
+        index: 2,
+        type: "content_block_delta",
+      },
       { index: 2, type: "content_block_stop" },
       {
         delta: { stopReason: "tool_use", stopSequence: "STOP" },
@@ -409,30 +594,48 @@ describe("Anthropic provider", () => {
       },
       { type: "message_stop" },
     ]);
-    expect(create).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      cache_control: { type: "ephemeral" },
-      custom_option: true,
-      max_tokens: 10,
-      messages: [
-        {
-          content: [
-            { cache_control: { type: "ephemeral" }, text: "hello", type: "text" },
-            { content: "result", is_error: false, tool_use_id: "tool-1", type: "tool_result" },
-            {
-              source: { data: "aGVsbG8=", media_type: "image/png", type: "base64", url: undefined },
-              type: "image",
-            },
-            { custom: true, type: "custom" },
-          ],
-          role: "user",
-        },
-      ],
-      model: "claude",
-      service_tier: "auto",
-      stop_sequences: ["STOP"],
-      top_k: 10,
-      top_p: 0.8,
-    }), { timeout: 2_000 });
+    expect(create).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        cache_control: { type: "ephemeral" },
+        custom_option: true,
+        max_tokens: 10,
+        messages: [
+          {
+            content: [
+              {
+                cache_control: { type: "ephemeral" },
+                text: "hello",
+                type: "text",
+              },
+              {
+                content: "result",
+                is_error: false,
+                tool_use_id: "tool-1",
+                type: "tool_result",
+              },
+              {
+                source: {
+                  data: "aGVsbG8=",
+                  media_type: "image/png",
+                  type: "base64",
+                  url: undefined,
+                },
+                type: "image",
+              },
+              { custom: true, type: "custom" },
+            ],
+            role: "user",
+          },
+        ],
+        model: "claude",
+        service_tier: "auto",
+        stop_sequences: ["STOP"],
+        top_k: 10,
+        top_p: 0.8,
+      }),
+      { timeout: 2_000 },
+    );
   });
 
   it("normalizes model pages", async () => {
@@ -441,7 +644,10 @@ describe("Anthropic provider", () => {
         yield { created_at: "2026-01-01T00:00:00.000Z", id: "claude-test" };
       },
     };
-    const provider = new AnthropicProvider({}, fakeAnthropic({ models: { list: vi.fn().mockResolvedValue(page) } }));
+    const provider = new AnthropicProvider(
+      {},
+      fakeAnthropic({ models: { list: vi.fn().mockResolvedValue(page) } }),
+    );
     await expect(provider.listModels()).resolves.toMatchObject([
       { created: 1_767_225_600, id: "claude-test", ownedBy: "anthropic" },
     ]);
@@ -455,7 +661,13 @@ describe("Anthropic provider", () => {
       expires_at: "2026-01-02T00:00:00.000Z",
       id: "msgbatch-1",
       processing_status: "ended",
-      request_counts: { canceled: 0, errored: 1, expired: 0, processing: 0, succeeded: 2 },
+      request_counts: {
+        canceled: 0,
+        errored: 1,
+        expired: 0,
+        processing: 0,
+        succeeded: 2,
+      },
       results_url: "https://example.com/results",
       type: "message_batch",
     };
@@ -466,7 +678,10 @@ describe("Anthropic provider", () => {
       results: vi.fn(),
       retrieve: vi.fn().mockResolvedValue(batch),
     };
-    const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { batches, create: vi.fn() } }));
+    const provider = new AnthropicProvider(
+      {},
+      fakeAnthropic({ messages: { batches, create: vi.fn() } }),
+    );
     const inputFilePath = fileURLToPath(new URL("./fixtures/batch.jsonl", import.meta.url));
 
     await expect(
@@ -488,42 +703,81 @@ describe("Anthropic provider", () => {
       requests: [
         {
           custom_id: "request-1",
-          params: { max_tokens: 1_024, messages: [{ content: "Hello", role: "user" }], model: "model-a" },
+          params: {
+            max_tokens: 1_024,
+            messages: [{ content: "Hello", role: "user" }],
+            model: "model-a",
+          },
         },
       ],
       user_profile_id: "profile-1",
     });
-    await expect(provider.retrieveBatch("msgbatch-1")).resolves.toMatchObject({ id: "msgbatch-1" });
-    await expect(provider.cancelBatch("msgbatch-1")).resolves.toMatchObject({ status: "cancelling" });
+    await expect(provider.retrieveBatch("msgbatch-1")).resolves.toMatchObject({
+      id: "msgbatch-1",
+    });
+    await expect(provider.cancelBatch("msgbatch-1")).resolves.toMatchObject({
+      status: "cancelling",
+    });
     await expect(provider.listBatches({ after: "previous", limit: 2 })).resolves.toMatchObject([
       { id: "msgbatch-1" },
     ]);
-    expect(batches.list).toHaveBeenCalledWith({ after_id: "previous", limit: 2 });
+    expect(batches.list).toHaveBeenCalledWith({
+      after_id: "previous",
+      limit: 2,
+    });
   });
 
   it("normalizes Anthropic batch results and rejects incomplete batches", async () => {
     const ended = { processing_status: "ended" };
     async function* resultEntries() {
-      yield { custom_id: "ok", result: { message: anthropicResponse(), type: "succeeded" } };
+      yield {
+        custom_id: "ok",
+        result: { message: anthropicResponse(), type: "succeeded" },
+      };
       yield {
         custom_id: "error",
-        result: { error: { error: { message: "Bad request", type: "invalid_request_error" } }, type: "errored" },
+        result: {
+          error: {
+            error: { message: "Bad request", type: "invalid_request_error" },
+          },
+          type: "errored",
+        },
       };
       yield { custom_id: "cancelled", result: { type: "canceled" } };
     }
-    const retrieve = vi.fn().mockResolvedValueOnce(ended).mockResolvedValueOnce({ processing_status: "in_progress" });
+    const retrieve = vi
+      .fn()
+      .mockResolvedValueOnce(ended)
+      .mockResolvedValueOnce({ processing_status: "in_progress" });
     const results = vi.fn().mockResolvedValue(resultEntries());
-    const batches = { cancel: vi.fn(), create: vi.fn(), list: vi.fn(), results, retrieve };
-    const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { batches, create: vi.fn() } }));
+    const batches = {
+      cancel: vi.fn(),
+      create: vi.fn(),
+      list: vi.fn(),
+      results,
+      retrieve,
+    };
+    const provider = new AnthropicProvider(
+      {},
+      fakeAnthropic({ messages: { batches, create: vi.fn() } }),
+    );
 
     await expect(provider.retrieveBatchResults("msgbatch-1")).resolves.toMatchObject({
       results: [
         { customId: "ok", result: { id: "msg-1", provider: "anthropic" } },
-        { customId: "error", error: { code: "invalid_request_error", message: "Bad request" } },
-        { customId: "cancelled", error: { code: "canceled", message: "Request canceled" } },
+        {
+          customId: "error",
+          error: { code: "invalid_request_error", message: "Bad request" },
+        },
+        {
+          customId: "cancelled",
+          error: { code: "canceled", message: "Request canceled" },
+        },
       ],
     });
-    await expect(provider.retrieveBatchResults("msgbatch-2")).rejects.toBeInstanceOf(BatchNotCompleteError);
+    await expect(provider.retrieveBatchResults("msgbatch-2")).rejects.toBeInstanceOf(
+      BatchNotCompleteError,
+    );
   });
 
   it("rejects empty messages and normalizes provider failures", async () => {
@@ -533,7 +787,10 @@ describe("Anthropic provider", () => {
       "messages array cannot be empty",
     );
     await expect(
-      provider.completion({ messages: [{ content: "Hi", role: "user" }], model: "claude" }),
+      provider.completion({
+        messages: [{ content: "Hi", role: "user" }],
+        model: "claude",
+      }),
     ).rejects.toBeInstanceOf(ProviderError);
   });
 

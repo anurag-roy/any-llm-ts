@@ -30,17 +30,17 @@ The TypeScript port keeps that boundary and the source project's deliberately th
 
 This is not a transliteration of Python classes and decorators.
 
-| Python design | TypeScript port |
-| --- | --- |
-| Separate sync and async APIs | Promise-first methods only; JavaScript has no useful blocking network primitive |
-| Snake-cased keyword arguments | A single camel-cased options object |
-| Runtime overload behavior | Compile-time overloads and conditional streaming return types |
-| Abstract provider subclasses returned from `AnyLLM.create` | A stable facade composed with an internal adapter |
-| Pydantic response models | Structural TypeScript interfaces with normalized runtime objects |
-| Python iterators and async iterators | `AsyncIterable` for all streams |
-| Dynamic module imports based on class names | Explicit factories in a typed registry |
-| Provider-specific `**kwargs` | `providerOptions` for request fields and `clientOptions` for SDK construction |
-| Pydantic model classes for structured output | Provider JSON-schema objects; schema-library integration can be added without coupling core to one validator |
+| Python design                                              | TypeScript port                                                                                              |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Separate sync and async APIs                               | Promise-first methods only; JavaScript has no useful blocking network primitive                              |
+| Snake-cased keyword arguments                              | A single camel-cased options object                                                                          |
+| Runtime overload behavior                                  | Compile-time overloads and conditional streaming return types                                                |
+| Abstract provider subclasses returned from `AnyLLM.create` | A stable facade composed with an internal adapter                                                            |
+| Pydantic response models                                   | Structural TypeScript interfaces with normalized runtime objects                                             |
+| Python iterators and async iterators                       | `AsyncIterable` for all streams                                                                              |
+| Dynamic module imports based on class names                | Explicit factories in a typed registry                                                                       |
+| Provider-specific `**kwargs`                               | `providerOptions` for request fields and `clientOptions` for SDK construction                                |
+| Pydantic model classes for structured output               | Provider JSON-schema objects; schema-library integration can be added without coupling core to one validator |
 
 Composition keeps the public client stable even when a provider adapter has a completely different native SDK. It also avoids the circular module initialization that a static factory on the adapter base class would create in ESM.
 
