@@ -6,6 +6,8 @@
 
 An independent TypeScript port inspired by [mozilla-ai/any-llm](https://github.com/mozilla-ai/any-llm).
 
+**[Documentation](https://any-llm-ts.anuragroy.dev)**
+
 <img src=".github/assets/quickstart.png" alt="Syntax-highlighted any-llm-ts quickstart example" width="768" />
 
 </div>
@@ -210,7 +212,7 @@ registerProvider("company", (options) => new CompanyProvider(options), {
 
 See [PORTING.md](./docs/PORTING.md) for the architectural analysis, what was deliberately preserved, and where TypeScript-specific choices differ from the Python project.
 
-The Fumadocs site is maintained in [`apps/docs`](./apps/docs). Run `npm run docs:dev` on Node.js 22
+The published docs are at [any-llm-ts.anuragroy.dev](https://any-llm-ts.anuragroy.dev). The Fumadocs site is maintained in [`apps/docs`](./apps/docs). Run `npm run docs:dev` on Node.js 22
 or newer to preview it locally.
 
 ## Development
