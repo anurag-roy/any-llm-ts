@@ -111,6 +111,20 @@ interface AzureProviderOptions extends ProviderOptions {
   apiVersion?: string;
 }
 
+function splitResponseTagFromReasoning(
+  content: unknown,
+  reasoning: unknown,
+): { content: unknown; reasoning: unknown } {
+  if (content !== null && content !== undefined) return { content, reasoning };
+  if (typeof reasoning !== "string") return { content, reasoning };
+  const match = /<response>([\s\S]*?)<\/response>/u.exec(reasoning);
+  if (match?.[1] === undefined) return { content, reasoning };
+  return {
+    content: match[1],
+    reasoning: reasoning.slice(0, match.index) || undefined,
+  };
+}
+
 function resolveApiKey(config: OpenAIProviderConfig, value: string | undefined): string {
   const apiKey = value ?? getEnvironmentVariable(config.envApiKey);
   if (apiKey !== undefined) return apiKey;
@@ -127,6 +141,7 @@ function toOpenAIMessage(
     name: message.name,
     role: message.role,
   };
+  if (message.refusal !== undefined) converted.refusal = message.refusal;
   if (message.toolCallId !== undefined) converted.tool_call_id = message.toolCallId;
   if (message.toolCalls !== undefined) {
     converted.tool_calls = message.toolCalls.map((toolCall) => ({
@@ -1117,18 +1132,13 @@ export class OpenAIProvider extends BaseProvider {
         const message = choice.message as Record<string, any>;
         let reasoning = message.reasoning ?? message.reasoning_content;
         let content = (message.content ?? null) as ChatMessage["content"];
-        if (
-          this.config.quirks?.trimReasoningAtResponseTag === true &&
-          content === null &&
-          typeof reasoning === "string"
-        ) {
-          const match = /<response>([\s\S]*?)<\/response>/u.exec(reasoning);
-          if (match?.[1] !== undefined) {
-            content = match[1];
-            reasoning = reasoning.slice(0, match.index) || undefined;
-          }
+        if (this.config.quirks?.trimReasoningAtResponseTag === true) {
+          const split = splitResponseTagFromReasoning(content, reasoning);
+          content = split.content as ChatMessage["content"];
+          reasoning = split.reasoning;
         }
         const toolCalls = normalizeToolCalls(message.tool_calls ?? message.toolCalls);
+        const refusal = message.refusal;
         return {
           finishReason: normalizeFinishReason(
             choice.finish_reason ?? choice.finishReason,
@@ -1139,6 +1149,7 @@ export class OpenAIProvider extends BaseProvider {
           message: {
             content,
             role: "assistant",
+            ...(typeof refusal === "string" ? { refusal } : {}),
             ...(typeof reasoning === "string" ? { reasoning } : {}),
             ...(this.metadata.name === "deepseek" && typeof reasoning === "string"
               ? {
@@ -1188,13 +1199,21 @@ export class OpenAIProvider extends BaseProvider {
         if (typeof choice.delta !== "object" || choice.delta === null) return [];
         const delta = choice.delta as Record<string, any>;
         const extraContent = delta.extra_content ?? delta.extraContent;
-        const reasoning = delta.reasoning ?? delta.reasoning_content;
+        let content: unknown = delta.content;
+        let reasoning = delta.reasoning ?? delta.reasoning_content;
+        if (this.config.quirks?.trimReasoningAtResponseTag === true) {
+          const split = splitResponseTagFromReasoning(content, reasoning);
+          content = split.content;
+          reasoning = split.reasoning;
+        }
+        const refusal = delta.refusal;
         return [{
           delta: {
-            ...(delta.content === undefined ? {} : { content: delta.content as string | null }),
+            ...(content === undefined ? {} : { content: content as string | null }),
             ...(typeof extraContent === "object" && extraContent !== null
               ? { extraContent: extraContent as Record<string, unknown> }
               : {}),
+            ...(typeof refusal === "string" ? { refusal } : {}),
             ...(delta.role === "assistant" ? { role: "assistant" as const } : {}),
             ...(typeof reasoning === "string" ? { reasoning } : {}),
             ...(Array.isArray(delta.tool_calls ?? delta.toolCalls)

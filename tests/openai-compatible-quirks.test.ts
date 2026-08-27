@@ -582,4 +582,63 @@ describe("OpenAI-compatible provider quirks", () => {
       role: "assistant",
     });
   });
+
+  it("recovers a Mistral <response> answer from streaming reasoning too", async () => {
+    async function* wrapped(): AsyncIterable<Record<string, unknown>> {
+      yield {
+        choices: [{
+          delta: {
+            reasoning_content: "Let me work it out.<response>The answer is 42.</response>",
+            role: "assistant",
+          },
+          finish_reason: null,
+          index: 0,
+        }],
+        created: 1,
+        id: "chatcmpl-abc",
+        model: "magistral-medium-latest",
+      };
+    }
+    async function* plain(): AsyncIterable<Record<string, unknown>> {
+      yield {
+        choices: [{
+          delta: { reasoning_content: "just thinking, nothing special", role: "assistant" },
+          finish_reason: null,
+          index: 0,
+        }],
+        created: 1,
+        id: "chatcmpl-abc",
+        model: "mistral-medium-3-5",
+      };
+    }
+
+    const create = vi.fn().mockResolvedValueOnce(wrapped()).mockResolvedValueOnce(plain());
+    const provider = new OpenAIProvider(
+      config("mistral", { trimReasoningAtResponseTag: true }),
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+
+    const recovered = await provider.completion({
+      messages: [{ content: "hello", role: "user" }],
+      model: "magistral-medium-latest",
+      stream: true,
+    });
+    const recoveredChunks: ChatCompletionChunk[] = [];
+    for await (const chunk of recovered as AsyncIterable<ChatCompletionChunk>) recoveredChunks.push(chunk);
+    expect(recoveredChunks[0]?.choices[0]?.delta).toMatchObject({
+      content: "The answer is 42.",
+      reasoning: "Let me work it out.",
+    });
+
+    const unchanged = await provider.completion({
+      messages: [{ content: "hello", role: "user" }],
+      model: "mistral-medium-3-5",
+      stream: true,
+    });
+    const unchangedChunks: ChatCompletionChunk[] = [];
+    for await (const chunk of unchanged as AsyncIterable<ChatCompletionChunk>) unchangedChunks.push(chunk);
+    expect(unchangedChunks[0]?.choices[0]?.delta.content).toBeUndefined();
+    expect(unchangedChunks[0]?.choices[0]?.delta.reasoning).toBe("just thinking, nothing special");
+  });
 });

@@ -165,6 +165,118 @@ describe("Anthropic provider", () => {
     expect(result.choices[0]).toMatchObject({ finishReason: "length", message: { content: null } });
   });
 
+  it("maps every Anthropic stop reason and preserves typed refusals", async () => {
+    const expected = {
+      end_turn: { finishReason: "stop", refusal: undefined },
+      stop_sequence: { finishReason: "stop", refusal: undefined },
+      pause_turn: { finishReason: "stop", refusal: undefined },
+      max_tokens: { finishReason: "length", refusal: undefined },
+      model_context_window_exceeded: { finishReason: "length", refusal: undefined },
+      tool_use: { finishReason: "tool_calls", refusal: undefined },
+      refusal: {
+        finishReason: "content_filter",
+        refusal: "Response blocked by Anthropic content filtering.",
+      },
+    } as const;
+
+    for (const [stopReason, mapped] of Object.entries(expected)) {
+      const payload = anthropicResponse();
+      payload.content = [{ text: "Hello", type: "text" }];
+      payload.stop_reason = stopReason;
+      payload.usage = { input_tokens: 10, output_tokens: 5 };
+      const create = vi.fn().mockResolvedValue(payload);
+      const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
+      const result = (await provider.completion({
+        messages: [{ content: "Hi", role: "user" }],
+        model: "claude-test",
+      })) as ChatCompletion;
+      expect(result.choices[0]?.finishReason, stopReason).toBe(mapped.finishReason);
+      expect(result.choices[0]?.message.refusal, stopReason).toBe(mapped.refusal);
+    }
+
+    const missing = anthropicResponse();
+    missing.content = [{ text: "Hello", type: "text" }];
+    missing.stop_reason = null;
+    missing.usage = { input_tokens: 10, output_tokens: 5 };
+    const create = vi.fn().mockResolvedValue(missing);
+    const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
+    const result = (await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "claude-test",
+    })) as ChatCompletion;
+    expect(result.choices[0]?.finishReason).toBe("stop");
+    expect(result.choices[0]?.message.refusal).toBeUndefined();
+  });
+
+  it("preserves Anthropic refusal stop details on completions and streams", async () => {
+    const stopDetails = { type: "refusal", category: "bio", explanation: "Request declined." };
+    const payload = anthropicResponse();
+    payload.content = [{ text: "Request declined.", type: "text" }];
+    payload.stop_reason = "refusal";
+    payload.stop_details = stopDetails;
+    payload.usage = { input_tokens: 10, output_tokens: 5 };
+    const create = vi.fn().mockResolvedValueOnce(payload).mockResolvedValueOnce(
+      (async function* events(): AsyncIterable<Record<string, unknown>> {
+        yield { message: { id: "msg-refusal", model: "claude-test" }, type: "message_start" };
+        yield {
+          delta: { stop_details: stopDetails, stop_reason: "refusal" },
+          type: "message_delta",
+          usage: { output_tokens: 5 },
+        };
+        yield { type: "message_stop" };
+      })(),
+    );
+    const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
+
+    const completion = (await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "claude-test",
+    })) as ChatCompletion;
+    expect(completion.choices[0]).toMatchObject({
+      finishReason: "content_filter",
+      message: {
+        extraContent: { anthropic: { stop_details: stopDetails } },
+        refusal: "Response blocked by Anthropic content filtering.",
+      },
+    });
+
+    const stream = await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "claude-test",
+      stream: true,
+    });
+    const chunks: ChatCompletionChunk[] = [];
+    for await (const chunk of stream as AsyncIterable<ChatCompletionChunk>) chunks.push(chunk);
+    expect(chunks.map((chunk) => chunk.choices[0]?.finishReason).filter(Boolean)).toEqual(["content_filter"]);
+    expect(chunks.at(-1)?.choices[0]?.delta).toMatchObject({
+      extraContent: { anthropic: { stop_details: stopDetails } },
+      refusal: "Response blocked by Anthropic content filtering.",
+    });
+  });
+
+  it("emits a single streaming terminal reason from message_delta", async () => {
+    async function* events(): AsyncIterable<Record<string, unknown>> {
+      yield { message: { id: "msg-stream", model: "claude-stream" }, type: "message_start" };
+      yield { index: 0, type: "content_block_stop" };
+      yield {
+        delta: { stop_reason: "tool_use" },
+        type: "message_delta",
+        usage: { output_tokens: 1 },
+      };
+      yield { type: "message_stop" };
+    }
+    const create = vi.fn().mockResolvedValue(events());
+    const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
+    const result = await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "claude-test",
+      stream: true,
+    });
+    const chunks: ChatCompletionChunk[] = [];
+    for await (const chunk of result as AsyncIterable<ChatCompletionChunk>) chunks.push(chunk);
+    expect(chunks.map((chunk) => chunk.choices[0]?.finishReason).filter(Boolean)).toEqual(["tool_calls"]);
+  });
+
   it("maps JSON schema output, adaptive effort, and parallel tool choice", async () => {
     const create = vi.fn().mockResolvedValue(anthropicResponse());
     const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
