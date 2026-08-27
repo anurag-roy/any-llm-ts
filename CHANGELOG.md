@@ -1,5 +1,11 @@
 # any-llm-ts
 
+## 0.4.3
+
+### Patch Changes
+
+- 0f70022: Add a link to the published documentation at https://any-llm-ts.anuragroy.dev.
+
 ## 0.4.2
 
 ### Patch Changes
