@@ -66,6 +66,8 @@ export interface ChatMessage {
   role: MessageRole;
   name?: string;
   reasoning?: string | null;
+  /** Provider-typed safety refusal; present when finishReason is content_filter. */
+  refusal?: string | null;
   toolCallId?: string;
   toolCalls?: ToolCall[];
   extraContent?: JsonObject;
@@ -210,6 +212,7 @@ export interface ToolCallDelta {
 export interface ChatCompletionDelta {
   content?: string | null;
   reasoning?: string | null;
+  refusal?: string | null;
   role?: "assistant";
   toolCalls?: ToolCallDelta[];
   extraContent?: JsonObject;

@@ -6,6 +6,7 @@ import { isObject, isString } from "../utils.js";
 import { readFile } from "node:fs/promises";
 
 import {
+  BlockedReason,
   FinishReason as GeminiFinishReason,
   FunctionCallingConfigMode,
   GoogleGenAI,
@@ -526,6 +527,8 @@ function structuredOutput(
   return { responseJsonSchema: schema, responseMimeType: "application/json" };
 }
 
+const GEMINI_CONTENT_FILTER_REFUSAL = "Response blocked by Gemini content filtering.";
+
 function usesThinkingLevel(model: string): boolean {
   const match = /(?:^|\/)gemini-(\d+)(?:\.(\d+))?/iu.exec(model);
   if (match?.[1] === undefined) return false;
@@ -555,6 +558,15 @@ function thinkingConfiguration(
     } as GenerateContentConfig["thinkingConfig"];
   }
   return { includeThoughts: true, thinkingBudget: reasoningBudgets[value] };
+}
+
+function promptWasBlocked(response: GenerateContentResponse): boolean {
+  const reason = response.promptFeedback?.blockReason;
+  return (
+    reason !== undefined &&
+    Object.values(BlockedReason).some((value) => value === reason) &&
+    reason !== BlockedReason.BLOCKED_REASON_UNSPECIFIED
+  );
 }
 
 function normalizeFinishReason(value: JsonValue | undefined, hasToolCalls: boolean): FinishReason {
@@ -1021,15 +1033,19 @@ export class GeminiProvider extends BaseProvider {
     const choices: ChatCompletion["choices"] = (response.candidates ?? []).map(
       (candidate, candidateIndex) => {
         const normalized = completionParts(candidate.content?.parts, candidateIndex);
+        const finishReason = normalizeFinishReason(
+          candidate.finishReason,
+          normalized.toolCalls !== undefined,
+        );
         return {
-          finishReason: normalizeFinishReason(
-            candidate.finishReason,
-            normalized.toolCalls !== undefined,
-          ),
+          finishReason,
           index: candidate.index ?? candidateIndex,
           message: {
             content: normalized.content,
             role: "assistant" as const,
+            ...includeWhen(finishReason === "content_filter", {
+              refusal: GEMINI_CONTENT_FILTER_REFUSAL,
+            }),
             ...includeWhen(!(normalized.messageExtraContent === undefined), {
               extraContent: normalized.messageExtraContent,
             }),
@@ -1046,11 +1062,15 @@ export class GeminiProvider extends BaseProvider {
         };
       },
     );
-    if (choices.length === 0 && response.promptFeedback?.blockReason !== undefined) {
+    if (choices.length === 0 && promptWasBlocked(response)) {
       choices.push({
         finishReason: "content_filter",
         index: 0,
-        message: { content: null, role: "assistant" },
+        message: {
+          content: null,
+          refusal: GEMINI_CONTENT_FILTER_REFUSAL,
+          role: "assistant",
+        },
       });
     }
 
@@ -1084,8 +1104,21 @@ export class GeminiProvider extends BaseProvider {
       state.model = response.modelVersion ?? state.model;
       state.created =
         response.createTime === undefined ? state.created : createdAt(response.createTime);
-      const choices: ChatCompletionChunk["choices"] = (response.candidates ?? []).map(
-        (candidate, candidateIndex) => {
+      const promptBlocked = promptWasBlocked(response);
+      const candidates = response.candidates ?? [];
+      const choices: ChatCompletionChunk["choices"] = [];
+      if (candidates.length === 0) {
+        const delta: ChatCompletionChunk["choices"][number]["delta"] = {};
+        if (!state.emittedRoles.has(0)) delta.role = "assistant";
+        if (promptBlocked) delta.refusal = GEMINI_CONTENT_FILTER_REFUSAL;
+        choices.push({
+          delta,
+          finishReason: promptBlocked ? "content_filter" : null,
+          index: 0,
+        });
+        state.emittedRoles.add(0);
+      } else {
+        for (const [candidateIndex, candidate] of candidates.entries()) {
           const choiceIndex = candidate.index ?? candidateIndex;
           const delta: ChatCompletionChunk["choices"][number]["delta"] = {};
           if (!state.emittedRoles.has(choiceIndex)) {
@@ -1132,23 +1165,21 @@ export class GeminiProvider extends BaseProvider {
             };
           }
           if (toolCalls.length > 0) delta.toolCalls = toolCalls;
-          return {
+          const mappedFinishReason = promptBlocked
+            ? "content_filter"
+            : normalizeFinishReason(candidate.finishReason, toolCalls.length > 0);
+          if (mappedFinishReason === "content_filter") {
+            delta.refusal = GEMINI_CONTENT_FILTER_REFUSAL;
+          }
+          choices.push({
             delta,
-            finishReason: normalizeFinishReason(candidate.finishReason, toolCalls.length > 0),
+            finishReason: mappedFinishReason,
             index: choiceIndex,
             ...includeWhen(!(candidate.logprobsResult === undefined), {
               logprobs: candidate.logprobsResult,
             }),
-          };
-        },
-      );
-      if (choices.length === 0 && response.promptFeedback?.blockReason !== undefined) {
-        choices.push({
-          delta: state.emittedRoles.has(0) ? {} : { role: "assistant" },
-          finishReason: "content_filter",
-          index: 0,
-        });
-        state.emittedRoles.add(0);
+          });
+        }
       }
 
       const usage = normalizeUsage(response.usageMetadata);

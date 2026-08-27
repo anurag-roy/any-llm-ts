@@ -1,6 +1,7 @@
 import { parseJsonObject } from "../src/utils.js";
 import type { JsonObject } from "../src/types.js";
 import {
+  BlockedReason,
   FinishReason as GeminiFinishReason,
   FunctionCallingConfigMode,
   type GenerateContentResponse,
@@ -733,7 +734,11 @@ describe("Gemini provider", () => {
     expect(blocked.choices[0]).toEqual({
       finishReason: "content_filter",
       index: 0,
-      message: { content: null, role: "assistant" },
+      message: {
+        content: null,
+        refusal: "Response blocked by Gemini content filtering.",
+        role: "assistant",
+      },
     });
 
     const structuredParams: CompletionParams = {
@@ -745,6 +750,79 @@ describe("Gemini provider", () => {
       ContextLengthExceededError,
     );
     await expect(provider.completion(structuredParams)).rejects.toBeInstanceOf(ContentFilterError);
+  });
+
+  it("preserves Gemini content-filter refusals and ignores unspecified prompt feedback", async () => {
+    const generateContent = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response({
+          candidates: [
+            {
+              content: { parts: [{ text: "Hello" }], role: "model" },
+              finishReason: GeminiFinishReason.SAFETY,
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          promptFeedback: { blockReason: BlockedReason.BLOCKED_REASON_UNSPECIFIED },
+        }),
+      )
+      .mockResolvedValueOnce(response({ candidates: undefined }));
+    const sdk = fakeGemini({ generateContent });
+    const provider = new GeminiProvider({}, sdk.client);
+
+    // SAFETY: The non-streaming request makes this completion result concrete in the test.
+    const filtered = (await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "gemini-test",
+    })) as ChatCompletion;
+    expect(filtered.choices[0]).toMatchObject({
+      finishReason: "content_filter",
+      message: {
+        content: "Hello",
+        refusal: "Response blocked by Gemini content filtering.",
+      },
+    });
+
+    // SAFETY: The non-streaming request makes this completion result concrete in the test.
+    const unspecified = (await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "gemini-test",
+    })) as ChatCompletion;
+    expect(unspecified.choices).toEqual([]);
+
+    // SAFETY: The non-streaming request makes this completion result concrete in the test.
+    const empty = (await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "gemini-test",
+    })) as ChatCompletion;
+    expect(empty.choices).toEqual([]);
+  });
+
+  it("maps streaming prompt blocks to a single typed refusal", async () => {
+    const stream = responses(
+      response({ candidates: undefined }),
+      response({ promptFeedback: { blockReason: BlockedReason.SAFETY } }),
+    );
+    const sdk = fakeGemini({
+      generateContentStream: vi.fn().mockResolvedValue(stream),
+    });
+    const provider = new GeminiProvider({}, sdk.client);
+    const result = await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "gemini-test",
+      stream: true,
+    });
+    // SAFETY: The streaming request makes this completion result an async iterable in the test.
+    const chunks = await collect(result as AsyncIterable<ChatCompletionChunk>);
+    expect(chunks.map((chunk) => chunk.choices[0]?.finishReason)).toEqual([null, "content_filter"]);
+    expect(chunks.map((chunk) => chunk.choices[0]?.delta.refusal)).toEqual([
+      undefined,
+      "Response blocked by Gemini content filtering.",
+    ]);
   });
 
   it("validates normalized parameters and inline media", async () => {

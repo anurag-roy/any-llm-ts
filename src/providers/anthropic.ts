@@ -66,6 +66,8 @@ const anthropicCapabilities: ProviderCapabilities = {
   vision: true,
 };
 
+const ANTHROPIC_CONTENT_FILTER_REFUSAL = "Response blocked by Anthropic content filtering.";
+
 export interface AnthropicProviderConfig {
   capabilities?: Partial<ProviderCapabilities>;
   documentationUrl?: string;
@@ -495,12 +497,24 @@ function normalizeAnthropicBatch<Value>(value: Value, provider: string): Batch {
   };
 }
 
-function finishReason(value: JsonValue | undefined): FinishReason {
-  if (value === "max_tokens") return "length";
+function finishReason(value: JsonValue | undefined, missing: FinishReason = "stop"): FinishReason {
+  if (value === null || value === undefined) return missing;
+  if (!isString(value)) return "stop";
+  if (value === "max_tokens" || value === "model_context_window_exceeded") return "length";
   if (value === "tool_use") return "tool_calls";
-  if (value === "end_turn" || value === "stop_sequence") return "stop";
   if (value === "refusal") return "content_filter";
-  return null;
+  return "stop";
+}
+
+function refusalStopDetails<Value>(value: Value): JsonObject | undefined {
+  if (!isObject(value)) return undefined;
+  const details = parseJsonObject(value).stop_details;
+  if (!isObject(details) || Array.isArray(details)) return undefined;
+  const normalized = parseJsonObject(details);
+  const entries = Object.entries(normalized).filter(
+    ([, entry]) => entry !== undefined && entry !== null,
+  );
+  return entries.length === 0 ? undefined : Object.fromEntries(entries);
 }
 
 function anthropicUsage(value: JsonObject): CompletionUsage {
@@ -790,6 +804,11 @@ export class AnthropicProvider extends BaseProvider {
     const thinkingSignature = contentBlocks.find(
       (block) => block.type === "thinking" && isString(block.signature),
     )?.signature as string | undefined;
+    const reason = finishReason(response.stop_reason);
+    const anthropicExtra: JsonObject = {};
+    if (thinkingSignature !== undefined) anthropicExtra.signature = thinkingSignature;
+    const stopDetails = refusalStopDetails(response);
+    if (stopDetails !== undefined) anthropicExtra.stop_details = stopDetails;
     const toolCalls = contentBlocks.flatMap((block): ToolCall[] =>
       block.type === "tool_use"
         ? [
@@ -807,14 +826,17 @@ export class AnthropicProvider extends BaseProvider {
     return {
       choices: [
         {
-          finishReason: finishReason(response.stop_reason),
+          finishReason: reason,
           index: 0,
           message: {
             content: text.length === 0 ? null : text,
             role: "assistant",
+            ...includeWhen(reason === "content_filter", {
+              refusal: ANTHROPIC_CONTENT_FILTER_REFUSAL,
+            }),
             ...includeWhen(!(reasoning.length === 0), { reasoning }),
-            ...includeWhen(!(thinkingSignature === undefined), {
-              extraContent: { anthropic: { signature: thinkingSignature } },
+            ...includeWhen(!(Object.keys(anthropicExtra).length === 0), {
+              extraContent: { anthropic: anthropicExtra },
             }),
             ...includeWhen(!(toolCalls.length === 0), { toolCalls }),
           },
@@ -930,8 +952,17 @@ export class AnthropicProvider extends BaseProvider {
         const eventUsage = parseJsonObject(event.usage ?? {});
         const eventDelta = parseJsonObject(event.delta ?? {});
         const outputTokens = Number(eventUsage.output_tokens ?? 0);
+        const reason = finishReason(eventDelta.stop_reason, null);
+        const stopDetails = refusalStopDetails(eventDelta);
+        const delta: ChatCompletionChunk["choices"][number]["delta"] = {};
+        if (reason === "content_filter") {
+          delta.refusal = ANTHROPIC_CONTENT_FILTER_REFUSAL;
+        }
+        if (stopDetails !== undefined) {
+          delta.extraContent = { anthropic: { stop_details: stopDetails } };
+        }
         yield {
-          ...this.chunk(id, model, created, {}, finishReason(eventDelta.stop_reason), event),
+          ...this.chunk(id, model, created, delta, reason, event),
           usage: {
             completionTokens: outputTokens,
             promptTokens: inputTokens,

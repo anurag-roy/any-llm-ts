@@ -1,6 +1,6 @@
 {
   "name": "any-llm-ts",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "A unified TypeScript interface for multiple LLM providers",
   "keywords": [
     "ai",

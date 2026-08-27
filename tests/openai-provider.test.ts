@@ -259,6 +259,42 @@ describe("OpenAI-compatible provider", () => {
     await expect(iterator.next()).rejects.toBeInstanceOf(ProviderError);
   });
 
+  it("preserves OpenAI-typed safety refusals", async () => {
+    const create = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          finish_reason: "content_filter",
+          index: 0,
+          message: {
+            content: null,
+            refusal: "I can't help with that.",
+            role: "assistant",
+          },
+        },
+      ],
+      created: 100,
+      id: "chat-refused",
+      model: "model-a",
+    });
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+    const response = await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "model-a",
+    });
+    expect(response).toMatchObject({
+      choices: [
+        {
+          finishReason: "content_filter",
+          message: { content: null, refusal: "I can't help with that." },
+        },
+      ],
+    });
+  });
+
   it("rejects empty conversations before making a request", async () => {
     const create = vi.fn();
     const provider = new OpenAIProvider(

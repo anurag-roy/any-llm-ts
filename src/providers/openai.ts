@@ -114,6 +114,7 @@ interface OpenAIMessageRequest {
   content: ChatMessage["content"];
   name?: string;
   reasoning_content?: string;
+  refusal?: string | null;
   role: ChatMessage["role"];
   tool_call_id?: string;
   tool_calls?: {
@@ -121,6 +122,25 @@ interface OpenAIMessageRequest {
     id: string;
     type: "function";
   }[];
+}
+
+interface ResponseTagResult<Content, Reasoning> {
+  content: Content | string;
+  reasoning: Reasoning | string | undefined;
+}
+
+function splitResponseTagFromReasoning<Content, Reasoning>(
+  content: Content,
+  reasoning: Reasoning,
+): ResponseTagResult<Content, Reasoning> {
+  if (content !== null && content !== undefined) return { content, reasoning };
+  if (!isString(reasoning)) return { content, reasoning };
+  const match = /<response>([\s\S]*?)<\/response>/u.exec(reasoning);
+  if (match?.[1] === undefined) return { content, reasoning };
+  return {
+    content: match[1],
+    reasoning: reasoning.slice(0, match.index) || undefined,
+  };
 }
 
 function resolveApiKey(config: OpenAIProviderConfig, value: string | undefined): string {
@@ -136,6 +156,7 @@ function toOpenAIMessage(message: ChatMessage, provider: string) {
     role: message.role,
   };
   if (message.name !== undefined) converted.name = message.name;
+  if (message.refusal !== undefined) converted.refusal = message.refusal;
   if (message.toolCallId !== undefined) converted.tool_call_id = message.toolCallId;
   if (message.toolCalls !== undefined) {
     converted.tool_calls = message.toolCalls.map((toolCall) => ({
@@ -1164,22 +1185,18 @@ export class OpenAIProvider extends BaseProvider {
         let reasoning = message.reasoning ?? message.reasoning_content;
         // SAFETY: The provider contract establishes the asserted representation at this boundary.
         let content = (message.content ?? null) as ChatMessage["content"];
-        if (
-          this.config.quirks?.trimReasoningAtResponseTag === true &&
-          content === null &&
-          isString(reasoning)
-        ) {
-          const match = /<response>([\s\S]*?)<\/response>/u.exec(reasoning);
-          if (match?.[1] !== undefined) {
-            content = match[1];
-            reasoning = reasoning.slice(0, match.index) || undefined;
-          }
+        if (this.config.quirks?.trimReasoningAtResponseTag === true) {
+          const split = splitResponseTagFromReasoning(content, reasoning);
+          content = split.content;
+          reasoning = split.reasoning;
         }
         const toolCalls = normalizeToolCalls(message.tool_calls ?? message.toolCalls);
+        const refusal = message.refusal;
         const normalizedMessage: ChatMessage & { role: "assistant" } = {
           content,
           role: "assistant",
         };
+        if (isString(refusal)) normalizedMessage.refusal = refusal;
         if (isString(reasoning)) normalizedMessage.reasoning = reasoning;
         if (this.metadata.name === "deepseek" && isString(reasoning)) {
           normalizedMessage.extraContent = {
@@ -1238,12 +1255,17 @@ export class OpenAIProvider extends BaseProvider {
         if (!isObject(choice.delta)) return [];
         const delta = parseJsonObject(choice.delta);
         const extraContent = delta.extra_content ?? delta.extraContent;
-        const reasoning = delta.reasoning ?? delta.reasoning_content;
-        const normalizedDelta: ChatCompletionChunk["choices"][number]["delta"] = {};
-        if (isString(delta.content) || delta.content === null) {
-          normalizedDelta.content = delta.content;
+        let content = isString(delta.content) || delta.content === null ? delta.content : undefined;
+        let reasoning = delta.reasoning ?? delta.reasoning_content;
+        if (this.config.quirks?.trimReasoningAtResponseTag === true) {
+          const split = splitResponseTagFromReasoning(content, reasoning);
+          content = split.content;
+          reasoning = split.reasoning;
         }
+        const normalizedDelta: ChatCompletionChunk["choices"][number]["delta"] = {};
+        if (content !== undefined) normalizedDelta.content = content;
         if (isObject(extraContent)) normalizedDelta.extraContent = parseJsonObject(extraContent);
+        if (isString(delta.refusal)) normalizedDelta.refusal = delta.refusal;
         if (delta.role === "assistant") normalizedDelta.role = "assistant";
         if (isString(reasoning)) normalizedDelta.reasoning = reasoning;
         const rawToolCalls = delta.tool_calls ?? delta.toolCalls;

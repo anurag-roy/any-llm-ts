@@ -6,6 +6,7 @@ import {
   UnsupportedParameterError,
   type ChatCompletion,
   type ChatCompletionChunk,
+  type JsonObject,
 } from "../src/index.js";
 import { OpenAIProvider } from "../src/providers/openai.js";
 
@@ -643,5 +644,72 @@ describe("OpenAI-compatible provider quirks", () => {
       content: "final answer",
       role: "assistant",
     });
+  });
+
+  it("recovers a Mistral <response> answer from streaming reasoning too", async () => {
+    async function* wrapped(): AsyncIterable<JsonObject> {
+      yield {
+        choices: [
+          {
+            delta: {
+              reasoning_content: "Let me work it out.<response>The answer is 42.</response>",
+              role: "assistant",
+            },
+            finish_reason: null,
+            index: 0,
+          },
+        ],
+        created: 1,
+        id: "chatcmpl-abc",
+        model: "magistral-medium-latest",
+      };
+    }
+    async function* plain(): AsyncIterable<JsonObject> {
+      yield {
+        choices: [
+          {
+            delta: { reasoning_content: "just thinking, nothing special", role: "assistant" },
+            finish_reason: null,
+            index: 0,
+          },
+        ],
+        created: 1,
+        id: "chatcmpl-abc",
+        model: "mistral-medium-3-5",
+      };
+    }
+
+    const create = vi.fn().mockResolvedValueOnce(wrapped()).mockResolvedValueOnce(plain());
+    const provider = new OpenAIProvider(
+      config("mistral", { trimReasoningAtResponseTag: true }),
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+
+    const recovered = await provider.completion({
+      messages: [{ content: "hello", role: "user" }],
+      model: "magistral-medium-latest",
+      stream: true,
+    });
+    const recoveredChunks: ChatCompletionChunk[] = [];
+    // SAFETY: The streaming request makes this completion result an async iterable in the test.
+    for await (const chunk of recovered as AsyncIterable<ChatCompletionChunk>)
+      recoveredChunks.push(chunk);
+    expect(recoveredChunks[0]?.choices[0]?.delta).toMatchObject({
+      content: "The answer is 42.",
+      reasoning: "Let me work it out.",
+    });
+
+    const unchanged = await provider.completion({
+      messages: [{ content: "hello", role: "user" }],
+      model: "mistral-medium-3-5",
+      stream: true,
+    });
+    const unchangedChunks: ChatCompletionChunk[] = [];
+    // SAFETY: The streaming request makes this completion result an async iterable in the test.
+    for await (const chunk of unchanged as AsyncIterable<ChatCompletionChunk>)
+      unchangedChunks.push(chunk);
+    expect(unchangedChunks[0]?.choices[0]?.delta.content).toBeUndefined();
+    expect(unchangedChunks[0]?.choices[0]?.delta.reasoning).toBe("just thinking, nothing special");
   });
 });
