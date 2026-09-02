@@ -246,6 +246,45 @@ describe("Bedrock provider", () => {
     });
   });
 
+  it("merges a user turn that follows a tool-result flush", async () => {
+    const send = vi.fn(async (command: BedrockTestCommand) => {
+      expect(command).toBeInstanceOf(ConverseCommand);
+      return {
+        output: { message: { content: [{ text: "ok" }] } },
+        stopReason: "end_turn",
+        usage: { inputTokens: 1, outputTokens: 1 },
+      };
+    });
+    const bedrock = provider(send);
+    await bedrock.completion({
+      messages: [
+        { content: "screenshot", role: "user" },
+        {
+          content: null,
+          role: "assistant",
+          toolCalls: [
+            {
+              function: { arguments: "{}", name: "shot" },
+              id: "t1",
+              type: "function",
+            },
+          ],
+        },
+        { content: "here", role: "tool", toolCallId: "t1" },
+        { content: [{ text: "what is in it", type: "text" }], role: "user" },
+      ],
+      model: "amazon.nova-lite-v1:0",
+    });
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    const command = send.mock.calls[0]?.[0] as ConverseCommand;
+    const requestMessages = parseJsonObjectArray(command.input.messages);
+    expect(requestMessages.map((message) => message.role)).toEqual(["user", "assistant", "user"]);
+    expect(requestMessages[2]?.content).toEqual([
+      { toolResult: { content: [{ text: "here" }], toolUseId: "t1" } },
+      { text: "what is in it" },
+    ]);
+  });
+
   it.each([
     "anthropic.claude-3-haiku-20240307-v1:0",
     "us.anthropic.claude-haiku-4-5-20251001-v1:0",

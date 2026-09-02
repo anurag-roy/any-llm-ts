@@ -284,7 +284,13 @@ function convertMessages(messages: ChatMessage[]) {
       if (assistant !== undefined) converted.push(assistant);
       continue;
     }
-    converted.push({ content: userContent(message.content), role: "user" });
+    const user = userContent(message.content);
+    const last = converted.at(-1);
+    if (last?.role === "user") {
+      last.content.push(...user);
+    } else {
+      converted.push({ content: user, role: "user" });
+    }
   }
   flushTools();
   return {

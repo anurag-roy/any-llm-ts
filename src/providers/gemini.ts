@@ -28,6 +28,7 @@ import {
   BatchNotCompleteError,
   InvalidRequestError,
   MissingApiKeyError,
+  UnsupportedParameterError,
 } from "../errors.js";
 import type {
   Batch,
@@ -356,7 +357,9 @@ function assistantParts(message: ChatMessage, namesById: Map<string, string>): P
       thought: true,
     });
   }
-  const content = contentParts(message.content);
+  const hasToolCalls = (message.toolCalls ?? []).length > 0;
+  const skipEmptyText = hasToolCalls && isString(message.content) && message.content.length === 0;
+  const content = skipEmptyText ? [] : contentParts(message.content);
   if (messageSignature !== undefined) {
     const signedPart = [...content].reverse().find((part) => part.text !== undefined);
     if (signedPart !== undefined) signedPart.thoughtSignature = messageSignature;
@@ -795,9 +798,7 @@ export class GeminiProvider extends BaseProvider {
       return Promise.reject(new TypeError("The messages array cannot be empty."));
     }
     if (params.parallelToolCalls !== undefined) {
-      return Promise.reject(
-        new TypeError("Gemini does not support the normalized parallelToolCalls parameter."),
-      );
+      return Promise.reject(new UnsupportedParameterError("parallelToolCalls", this.providerName));
     }
     const request = this.completionRequest(params);
 

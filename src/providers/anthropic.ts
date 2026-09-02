@@ -13,6 +13,7 @@ import { readFile } from "node:fs/promises";
 import Anthropic from "@anthropic-ai/sdk";
 
 import { BatchNotCompleteError, MissingApiKeyError } from "../errors.js";
+import { normalizeOutputConfig } from "../structured-output.js";
 import type {
   Batch,
   BatchResult,
@@ -308,7 +309,8 @@ export function nativeMessagesRequest(params: MessagesParams) {
     })),
     metadata: params.metadata,
     model: params.model,
-    output_config: params.outputFormat,
+    output_config:
+      params.outputFormat === undefined ? undefined : normalizeOutputConfig(params.outputFormat),
     service_tier: params.serviceTier,
     stop_sequences: params.stopSequences,
     stream: params.stream,

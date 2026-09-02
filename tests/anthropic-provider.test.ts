@@ -153,11 +153,17 @@ describe("Anthropic provider", () => {
     expect(request.messages[0].content[1]).toMatchObject({
       source: { type: "url", url: "https://example.com/image.png" },
     });
+    expect(request.messages[1].content.map((block: { type: string }) => block.type)).toEqual([
+      "thinking",
+      "text",
+      "tool_use",
+    ]);
     expect(request.messages[1].content[0]).toMatchObject({
       signature: "previous-signature",
       thinking: "Previous thought",
       type: "thinking",
     });
+    expect(request.messages[1].content[1]).toEqual({ text: "Calling", type: "text" });
     expect(request.messages[1].content[2]).toMatchObject({
       input: { arguments: "not-json" },
       type: "tool_use",
@@ -192,6 +198,57 @@ describe("Anthropic provider", () => {
         promptTokensDetails: { cacheCreationTokens: 2, cachedTokens: 3 },
         totalTokens: 15,
       },
+    });
+  });
+
+  it("does not fabricate empty text on a tool-only assistant turn", async () => {
+    const create = vi.fn().mockResolvedValue(anthropicResponse());
+    const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
+    await provider.completion({
+      messages: [
+        {
+          content: "",
+          role: "assistant",
+          toolCalls: [
+            {
+              function: { arguments: "{}", name: "get_weather" },
+              id: "toolu_1",
+              type: "function",
+            },
+          ],
+        },
+        { content: "I will check the weather.", role: "assistant", toolCalls: [] },
+      ],
+      model: "claude-test",
+    });
+    const request = parseJsonObject(create.mock.calls[0]?.[0]);
+    expect(request.messages[0].content.map((block: { type: string }) => block.type)).toEqual([
+      "tool_use",
+    ]);
+    expect(request.messages[1].content).toEqual([
+      { text: "I will check the weather.", type: "text" },
+    ]);
+  });
+
+  it("nests a bare outputFormat object before the native Messages call", async () => {
+    const create = vi.fn().mockResolvedValue({
+      content: [{ text: '{"city_name":"Paris"}', type: "text" }],
+      id: "msg-format",
+      model: "claude-test",
+      role: "assistant",
+      stop_reason: "end_turn",
+      type: "message",
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+    const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
+    await provider.messages({
+      maxTokens: 1024,
+      messages: [{ content: "Capital of France?", role: "user" }],
+      model: "claude-test",
+      outputFormat: { schema: { type: "object" }, type: "json_schema" },
+    });
+    expect(create.mock.calls[0]?.[0]).toMatchObject({
+      output_config: { format: { schema: { type: "object" }, type: "json_schema" } },
     });
   });
 
