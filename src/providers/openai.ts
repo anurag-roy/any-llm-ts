@@ -17,6 +17,7 @@ import type {
   ChatCompletion,
   ChatCompletionChunk,
   ChatMessage,
+  CompletionOperationOptions,
   CompletionParams,
   CompletionUsage,
   CreateBatchParams,
@@ -41,13 +42,15 @@ import type {
   Transcription,
   TranscriptionParams,
 } from "../types.js";
-import { providerPromptCacheKeySupport, providerTier } from "../provider-metadata.js";
+import { completeProviderMetadata } from "../provider-metadata.js";
 import {
   compactObject,
+  completionRequestOptions,
   flattenResponsesTools,
   getEnvironmentVariable,
   isAsyncIterable,
   mapAsyncIterable,
+  notifyCompletionDispatch,
   timeoutRequestOptions,
 } from "../utils.js";
 import { BaseProvider } from "./base.js";
@@ -85,6 +88,7 @@ interface OpenAIProviderConfig {
   documentationUrl: string;
   envApiBase?: string;
   envApiKey?: string;
+  gatewayControls?: boolean;
   name: string;
   promptCacheKeySupport?: ProviderMetadata["promptCacheKeySupport"];
   quirks?: OpenAIProviderQuirks;
@@ -673,25 +677,29 @@ export class OpenAIProvider extends BaseProvider {
         apiKey: resolveApiKey(config, options.apiKey),
         ...includeWhen(!(apiBase === undefined), { baseURL: apiBase }),
       });
-    this.metadata = {
-      capabilities: {
-        ...baseOpenAICompatibleCapabilities,
-        ...config.capabilities,
+    this.metadata = completeProviderMetadata(
+      {
+        capabilities: {
+          ...baseOpenAICompatibleCapabilities,
+          ...config.capabilities,
+        },
+        documentationUrl: config.documentationUrl,
+        name: config.name,
+        requiresApiKey: config.requiresApiKey !== false,
+        ...includeWhen(!(apiBase === undefined), { apiBase }),
+        ...includeWhen(!(config.envApiBase === undefined), { envApiBase: config.envApiBase }),
+        ...includeWhen(!(config.envApiKey === undefined), { envApiKey: config.envApiKey }),
+        ...includeWhen(!(config.promptCacheKeySupport === undefined), {
+          promptCacheKeySupport: config.promptCacheKeySupport,
+        }),
       },
-      documentationUrl: config.documentationUrl,
-      name: config.name,
-      promptCacheKeySupport:
-        config.promptCacheKeySupport ?? providerPromptCacheKeySupport(config.name),
-      requiresApiKey: config.requiresApiKey !== false,
-      tier: providerTier(config.name),
-      ...includeWhen(!(apiBase === undefined), { apiBase }),
-      ...includeWhen(!(config.envApiBase === undefined), { envApiBase: config.envApiBase }),
-      ...includeWhen(!(config.envApiKey === undefined), { envApiKey: config.envApiKey }),
-    };
+      config.gatewayControls === false ? "other" : "openai",
+    );
   }
 
   override completion(
     params: CompletionParams,
+    operation: CompletionOperationOptions = {},
   ): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion> {
     if (params.messages.length === 0) {
       return Promise.reject(new TypeError("The messages array cannot be empty."));
@@ -711,8 +719,9 @@ export class OpenAIProvider extends BaseProvider {
 
     return this.execute(async () => {
       const request = this.completionRequest(params);
-      const requestOptions = timeoutRequestOptions(params.timeout);
+      const requestOptions = completionRequestOptions(params.timeout, operation);
       if (params.stream === true) {
+        notifyCompletionDispatch(this.metadata.id, operation);
         // SAFETY: The provider contract establishes the asserted representation at this boundary.
         const stream =
           requestOptions === undefined
@@ -740,6 +749,7 @@ export class OpenAIProvider extends BaseProvider {
             : filtered;
         return this.protectStream(normalized);
       }
+      notifyCompletionDispatch(this.metadata.id, operation);
       // SAFETY: The provider contract establishes the asserted representation at this boundary.
       const response =
         requestOptions === undefined
@@ -1055,6 +1065,7 @@ export class OpenAIProvider extends BaseProvider {
     const maxCompletionTokens = params.maxCompletionTokens ?? params.maxTokens;
     const reasoningEffort = params.reasoningEffort === "auto" ? undefined : params.reasoningEffort;
     const request = {
+      ...params.providerOptions,
       ...compactObject({
         frequency_penalty: params.frequencyPenalty,
         logit_bias: params.logitBias,
@@ -1079,7 +1090,6 @@ export class OpenAIProvider extends BaseProvider {
         top_p: params.topP,
         user: params.user,
       }),
-      ...params.providerOptions,
     };
 
     const quirks = this.config.quirks;

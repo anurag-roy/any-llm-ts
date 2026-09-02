@@ -1,8 +1,17 @@
 import { readFile, writeFile } from "node:fs/promises";
+import { format } from "oxfmt";
 
 const outputUrl = new URL("../lib/provider-data.json", import.meta.url);
 const { AnyLLM } = await import(new URL("../../../dist/index.js", import.meta.url));
-const output = `${JSON.stringify(AnyLLM.getAllProviderMetadata(), null, 2)}\n`;
+const serializedOutput = `${JSON.stringify(AnyLLM.getAllProviderMetadata(), null, 2)}\n`;
+const { code: output, errors } = await format("provider-data.json", serializedOutput);
+
+if (errors.length > 0) {
+  throw new AggregateError(
+    errors.map(({ message }) => new Error(message)),
+    "Unable to format generated provider documentation",
+  );
+}
 
 if (process.argv.includes("--check")) {
   const current = await readFile(outputUrl, "utf8").catch(() => "");

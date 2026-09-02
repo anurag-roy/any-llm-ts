@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { completeProviderMetadata } from "../src/provider-metadata.js";
+
 import {
   AnyLLM,
   BaseProvider,
@@ -8,17 +10,20 @@ import {
   UnsupportedOperationError,
   UnsupportedProviderError,
   completion,
+  getProviderDescriptor,
+  getProviderDescriptors,
   registerProvider,
 } from "../src/index.js";
 import type {
   ChatCompletion,
   ChatCompletionChunk,
+  CompletionOperationOptions,
   CompletionParams,
   ProviderMetadata,
   ProviderOptions,
 } from "../src/index.js";
 
-const fakeMetadata: ProviderMetadata = {
+const fakeMetadata: ProviderMetadata = completeProviderMetadata({
   capabilities: {
     audioSpeech: false,
     audioTranscription: false,
@@ -41,15 +46,18 @@ const fakeMetadata: ProviderMetadata = {
   promptCacheKeySupport: "unsupported",
   requiresApiKey: false,
   tier: "community",
-};
+});
 
 class FakeProvider extends BaseProvider {
   readonly metadata = fakeMetadata;
+  readonly operations: CompletionOperationOptions[] = [];
   readonly requests: CompletionParams[] = [];
 
   override completion(
     params: CompletionParams,
+    operation: CompletionOperationOptions = {},
   ): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion> {
+    this.operations.push(operation);
     this.requests.push(params);
     return Promise.resolve({
       choices: [
@@ -77,6 +85,48 @@ describe("AnyLLM registry and facade", () => {
     metadata.capabilities.completion = false;
     expect(AnyLLM.getProviderMetadata("openai").capabilities.completion).toBe(true);
     expect(AnyLLM.getAllProviderMetadata().length).toBe(AnyLLM.getSupportedProviders().length);
+  });
+
+  it("exposes complete stable descriptors without a provider switch", () => {
+    const descriptors = getProviderDescriptors();
+    expect(descriptors.length).toBe(AnyLLM.getSupportedProviders().length);
+    expect(descriptors.every((descriptor) => descriptor.id === descriptor.name)).toBe(true);
+    expect(descriptors.every((descriptor) => descriptor.provenance.libraryVersion.length > 0)).toBe(
+      true,
+    );
+
+    const openai = getProviderDescriptor("openai");
+    expect(openai).toMatchObject({
+      configuration: {
+        additionalProperties: false,
+        authenticationModes: [{ id: "api_key", kind: "stored" }],
+        id: "any-llm-ts.openai.credential",
+        status: "supported",
+        version: 1,
+      },
+      displayName: "OpenAI",
+      gateway: {
+        completion: {
+          abortSignal: "supported",
+          dispatchEvidence: "provider_sdk",
+          providerOptions: "normalized_fields_win",
+          retryControl: "per_operation",
+        },
+        version: 1,
+      },
+      id: "openai",
+      name: "openai",
+      provenance: {
+        adapterId: "any-llm-ts/openai",
+        adapterVersion: "1",
+        libraryName: "any-llm-ts",
+      },
+    });
+    expect(getProviderDescriptor("anthropic").configuration.status).toBe("supported");
+    expect(getProviderDescriptor("ollama").configuration).toEqual({
+      reason: "provider_specific_contract_pending",
+      status: "unavailable",
+    });
   });
 
   it("normalizes provider names and exposes the selected provider", () => {
@@ -138,6 +188,34 @@ describe("AnyLLM registry and facade", () => {
         metadata: fakeMetadata,
       });
     }).toThrow(TypeError);
+    const incompleteDescriptors = [
+      (metadata: ProviderMetadata) => {
+        Reflect.deleteProperty(metadata, "gateway");
+      },
+      (metadata: ProviderMetadata) => {
+        Reflect.deleteProperty(metadata, "requiresApiKey");
+      },
+      (metadata: ProviderMetadata) => {
+        Reflect.deleteProperty(metadata.gateway.completion.normalizedOutput, "tools");
+      },
+    ];
+    for (const [index, makeIncomplete] of incompleteDescriptors.entries()) {
+      const id = `incomplete-${index}`;
+      const incomplete = structuredClone(fakeMetadata);
+      incomplete.id = id;
+      incomplete.name = id;
+      makeIncomplete(incomplete);
+      expect(() => {
+        registerProvider(id, () => new FakeProvider(), {
+          metadata: incomplete,
+        });
+      }).toThrow(TypeError);
+    }
+    expect(() => {
+      registerProvider("mismatched", () => new FakeProvider(), {
+        metadata: { ...fakeMetadata, id: "different", name: "different" },
+      });
+    }).toThrow(/must match/u);
 
     const llm = AnyLLM.create("FAKE");
     const response = await llm.completion({
@@ -213,14 +291,25 @@ describe("AnyLLM registry and facade", () => {
         instance = new FakeProvider();
         return instance;
       },
-      { metadata: { ...fakeMetadata, name: "direct-fake" }, override: true },
+      {
+        metadata: { ...fakeMetadata, id: "direct-fake", name: "direct-fake" },
+        override: true,
+      },
     );
-    const result = await completion({
-      messages: [{ content: "Hi", role: "user" }],
-      model: "direct-fake:model-b",
-    });
+    const controller = new AbortController();
+    const result = await completion(
+      {
+        messages: [{ content: "Hi", role: "user" }],
+        model: "direct-fake:model-b",
+      },
+      { retryPolicy: "none", signal: controller.signal },
+    );
     expect(result.model).toBe("model-b");
     expect(instance?.requests[0]?.model).toBe("model-b");
+    expect(instance?.operations[0]).toEqual({
+      retryPolicy: "none",
+      signal: controller.signal,
+    });
   });
 
   it("uses default unsupported-operation implementations", async () => {

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { completeProviderMetadata } from "../src/provider-metadata.js";
+
 import {
   AnyLLM,
   BaseProvider,
@@ -24,7 +26,7 @@ import type {
   ProviderMetadata,
 } from "../src/index.js";
 
-const metadata: ProviderMetadata = {
+const metadata: ProviderMetadata = completeProviderMetadata({
   capabilities: {
     audioSpeech: false,
     audioTranscription: false,
@@ -47,7 +49,7 @@ const metadata: ProviderMetadata = {
   promptCacheKeySupport: "passthrough",
   requiresApiKey: false,
   tier: "community",
-};
+});
 
 function chunk(
   delta: ChatCompletionChunk["choices"][number]["delta"],
