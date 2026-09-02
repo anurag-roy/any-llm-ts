@@ -1,5 +1,15 @@
 # any-llm-ts
 
+## 0.5.0
+
+### Minor Changes
+
+- fb5d118: Add validated self-describing Provider descriptors and gateway-safe completion controls. OpenAI and Anthropic now accept per-operation abort signals, can disable SDK retries, expose the Provider SDK dispatch boundary, and prevent Provider extensions from overriding normalized completion fields.
+
+### Patch Changes
+
+- c839ab6: Sync with Python any-llm through `511b193`: keep assistant text on tool-call turns, and preserve thinking, tool-result attachments, and sequential tool use on the Messages bridge.
+
 ## 0.4.3
 
 ### Patch Changes
