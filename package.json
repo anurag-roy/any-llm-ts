@@ -57,7 +57,7 @@
     "test": "vitest run --coverage",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "version-packages": "changeset version"
+    "version-packages": "changeset version && npm run docs:generate"
   },
   "dependencies": {
     "@anthropic-ai/foundry-sdk": "^0.4.1",
