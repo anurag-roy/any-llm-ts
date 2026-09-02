@@ -1,5 +1,9 @@
 import type { JsonObject } from "../types.js";
-import { UnsupportedOperationError, normalizeProviderError } from "../errors.js";
+import {
+  UnsupportedOperationError,
+  UnsupportedParameterError,
+  normalizeProviderError,
+} from "../errors.js";
 import type {
   ChatCompletion,
   ChatCompletionChunk,
@@ -103,10 +107,24 @@ export abstract class BaseProvider {
         this.metadata.name,
       );
     }
-    const result = await this.completion(messagesToCompletionParams(params));
-    return Symbol.asyncIterator in result
-      ? completionStreamToMessageEvents(result)
-      : completionToMessageResponse(result);
+    try {
+      const result = await this.completion(messagesToCompletionParams(params));
+      return Symbol.asyncIterator in result
+        ? completionStreamToMessageEvents(result)
+        : completionToMessageResponse(result);
+    } catch (error) {
+      if (
+        error instanceof UnsupportedParameterError &&
+        error.parameterName === "parallelToolCalls" &&
+        params.toolChoice?.disableParallelToolUse === true
+      ) {
+        throw new UnsupportedParameterError(
+          "toolChoice.disableParallelToolUse",
+          this.metadata.name,
+        );
+      }
+      throw error;
+    }
   }
 
   protected async execute<T>(operation: () => Promise<T>): Promise<T> {

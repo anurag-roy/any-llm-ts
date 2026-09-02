@@ -3,6 +3,8 @@ import type { JsonValue } from "./types.js";
 import { parseJsonObject, parseJsonValue } from "./utils.js";
 import type { JsonObject } from "./types.js";
 import { isNumber, isObject, isString } from "./utils.js";
+import { InvalidRequestError } from "./errors.js";
+import { normalizeOutputConfig } from "./structured-output.js";
 import type {
   ChatCompletion,
   ChatCompletionChunk,
@@ -10,14 +12,16 @@ import type {
   CompletionParams,
   ContentBlockStartEvent,
   ContentBlockStopEvent,
+  FileContentPart,
+  ImageUrlContentPart,
   MessageContentBlock,
+  MessageContentPart,
   MessageDeltaEvent,
   MessageResponse,
   MessageStopReason,
   MessageStreamEvent,
   MessagesInputContentBlock,
   MessagesParams,
-  MessagesTextBlock,
   MessageUsage,
   TextContentPart,
   ToolCallDelta,
@@ -28,37 +32,107 @@ function systemText(system: MessagesParams["system"]): string | undefined {
   return system.map((block) => block.text).join("");
 }
 
-function toolResultText(content: JsonValue | MessagesTextBlock[] | undefined): string {
-  if (isString(content)) return content;
-  if (Array.isArray(content)) {
-    return content
-      .flatMap((block): string[] =>
-        isObject(block) && "text" in block && isString(block.text) ? [block.text] : [],
-      )
-      .join("");
-  }
-  return content === undefined ? "" : JSON.stringify(content);
+function mediaType(source: JsonObject, fallback: string): string {
+  if (isString(source.mediaType)) return source.mediaType;
+  if (isString(source.media_type)) return source.media_type;
+  return fallback;
 }
 
-function imageUrl(block: MessagesInputContentBlock): string | undefined {
-  if (block.type !== "image" || !("source" in block)) return undefined;
-  const source = parseJsonObject(block.source);
-  if (source.type === "url" && isString(source.url)) return source.url;
-  if (source.type === "base64" && isString(source.data)) {
-    const mediaType = isString(source.mediaType) ? source.mediaType : "image/png";
-    return `data:${mediaType};base64,${source.data}`;
+function convertImageBlock(block: JsonObject): ImageUrlContentPart {
+  const source = isObject(block.source) ? parseJsonObject(block.source) : {};
+  if (source.type === "base64") {
+    if (!isString(source.data) || source.data.length === 0) {
+      throw new InvalidRequestError("image block base64 source carries no data");
+    }
+    return {
+      image_url: { url: `data:${mediaType(source, "image/png")};base64,${source.data}` },
+      type: "image_url",
+    };
   }
-  return undefined;
+  const url = isString(source.url) ? source.url : "";
+  if (url.length === 0) {
+    throw new InvalidRequestError(
+      `image block source carries no payload (source type ${JSON.stringify(source.type)})`,
+    );
+  }
+  return { image_url: { url }, type: "image_url" };
+}
+
+function flattenDocumentContent(content: JsonValue | undefined): string {
+  if (isString(content)) return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .flatMap((block): string[] => {
+      if (!isObject(block)) return [];
+      const record = parseJsonObject(block);
+      return record.type === "text" && isString(record.text) ? [record.text] : [];
+    })
+    .join("");
+}
+
+function convertDocumentBlock(block: JsonObject): FileContentPart | TextContentPart {
+  const source = isObject(block.source) ? parseJsonObject(block.source) : {};
+  if (source.type === "text") {
+    return { text: isString(source.data) ? source.data : "", type: "text" };
+  }
+  if (source.type === "content") {
+    return { text: flattenDocumentContent(source.content), type: "text" };
+  }
+  if (source.type === "base64") {
+    if (!isString(source.data) || source.data.length === 0) {
+      throw new InvalidRequestError("document block base64 source carries no data");
+    }
+    return {
+      file: { file_data: `data:${mediaType(source, "application/pdf")};base64,${source.data}` },
+      type: "file",
+    };
+  }
+  const url = isString(source.url) ? source.url : "";
+  if (url.length === 0) {
+    throw new InvalidRequestError(
+      `document block source carries no payload (source type ${JSON.stringify(source.type)})`,
+    );
+  }
+  return { file: { file_data: url }, type: "file" };
+}
+
+function convertToolResultContent(
+  content: JsonValue | MessagesInputContentBlock[] | undefined,
+): [string, MessageContentPart[]] {
+  if (!Array.isArray(content)) {
+    if (isString(content)) return [content, []];
+    return [content === undefined ? "" : JSON.stringify(content), []];
+  }
+  const textParts: string[] = [];
+  const extraParts: MessageContentPart[] = [];
+  for (const block of content) {
+    if (!isObject(block)) continue;
+    const record = parseJsonObject(block);
+    if (record.type === "text" && isString(record.text)) {
+      textParts.push(record.text);
+      continue;
+    }
+    if (record.type === "image") {
+      extraParts.push(convertImageBlock(record));
+      continue;
+    }
+    if (record.type === "document") extraParts.push(convertDocumentBlock(record));
+  }
+  return [textParts.join(""), extraParts];
 }
 
 function assistantMessage(content: MessagesInputContentBlock[]): ChatMessage {
   const text: string[] = [];
   const reasoning: string[] = [];
   const toolCalls: NonNullable<ChatMessage["toolCalls"]> = [];
+  let signature: string | undefined;
   for (const block of content) {
     if (block.type === "text" && "text" in block && isString(block.text)) text.push(block.text);
     if (block.type === "thinking" && "thinking" in block && isString(block.thinking)) {
       reasoning.push(block.thinking);
+      if ("signature" in block && isString(block.signature) && block.signature.length > 0) {
+        signature = block.signature;
+      }
     }
     if (
       block.type === "tool_use" &&
@@ -77,18 +151,23 @@ function assistantMessage(content: MessagesInputContentBlock[]): ChatMessage {
       });
     }
   }
+  const thinkingCount = content.filter((block) => block.type === "thinking").length;
   return {
     content: text.length === 0 ? null : text.join(""),
     role: "assistant",
     ...includeWhen(!(reasoning.length === 0), { reasoning: reasoning.join("") }),
     ...includeWhen(!(toolCalls.length === 0), { toolCalls }),
+    ...includeWhen(isString(signature) && thinkingCount === 1, {
+      extraContent: { anthropic: { signature } },
+    }),
   };
 }
 
 function userMessages(content: MessagesInputContentBlock[]): ChatMessage[] {
   const messages: ChatMessage[] = [];
-  let parts: NonNullable<Exclude<ChatMessage["content"], string | null>> = [];
-  const flush = (): void => {
+  let parts: MessageContentPart[] = [];
+  const heldParts: MessageContentPart[] = [];
+  const flushUser = (): void => {
     if (parts.length === 0) return;
     messages.push({ content: parts, role: "user" });
     parts = [];
@@ -96,26 +175,32 @@ function userMessages(content: MessagesInputContentBlock[]): ChatMessage[] {
 
   for (const block of content) {
     if (block.type === "tool_result" && "toolUseId" in block && isString(block.toolUseId)) {
-      flush();
+      flushUser();
+      const [toolText, extraParts] = convertToolResultContent(
+        "content" in block ? block.content : "",
+      );
       messages.push({
-        content: toolResultText("content" in block ? block.content : ""),
+        content: toolText,
         role: "tool",
         toolCallId: block.toolUseId,
+        ...includeWhen(block.isError === true, { isError: true }),
       });
+      heldParts.push(...extraParts);
       continue;
     }
     if (block.type === "text" && "text" in block && isString(block.text)) {
       parts.push({ text: block.text, type: "text" });
       continue;
     }
-    const url = imageUrl(block);
-    if (url !== undefined) {
-      parts.push({ image_url: { url }, type: "image_url" });
+    if (block.type === "image") {
+      parts.push(convertImageBlock(parseJsonObject(block, "image block")));
       continue;
     }
     parts.push({ ...parseJsonObject(block, "message content block") });
   }
-  flush();
+  if (heldParts.length > 0 || parts.length > 0) {
+    messages.push({ content: [...heldParts, ...parts], role: "user" });
+  }
   return messages;
 }
 
@@ -138,10 +223,14 @@ function toChatMessages(params: MessagesParams): ChatMessage[] {
 
 function outputFormat(value: MessagesParams["outputFormat"]) {
   if (value === undefined) return undefined;
-  const format = value.format;
-  if (!isObject(format)) return value;
-  const schema = parseJsonObject(format).schema;
-  if (!isObject(schema)) return value;
+  const format = normalizeOutputConfig(value).format;
+  if (format === undefined) return undefined;
+  const schema = isObject(format) ? parseJsonObject(format).schema : undefined;
+  if (!isObject(schema) || Object.keys(schema).length === 0) {
+    throw new InvalidRequestError(
+      'outputFormat names a format but carries no JSON schema. Expected an Anthropic output_config ({"format": {"type": "json_schema", "schema": {...}}}) or the bare format object ({"type": "json_schema", "schema": {...}}).',
+    );
+  }
   const title = parseJsonObject(schema).title;
   return {
     json_schema: {
@@ -181,6 +270,7 @@ export function messagesToCompletionParams(params: MessagesParams): CompletionPa
   const format = outputFormat(params.outputFormat);
   const selectedToolChoice =
     params.toolChoice === undefined ? undefined : toolChoice(params.toolChoice);
+  const disableParallel = params.toolChoice?.disableParallelToolUse === true;
   const tools = params.tools?.map((tool) => ({
     function: {
       name: tool.name,
@@ -201,6 +291,7 @@ export function messagesToCompletionParams(params: MessagesParams): CompletionPa
     ...includeWhen(!(params.temperature === undefined), { temperature: params.temperature }),
     ...includeWhen(!(params.timeout === undefined), { timeout: params.timeout }),
     ...includeWhen(!(selectedToolChoice === undefined), { toolChoice: selectedToolChoice }),
+    ...includeWhen(disableParallel, { parallelToolCalls: false }),
     ...includeWhen(!(tools === undefined), { tools }),
     ...includeWhen(!(params.topP === undefined), { topP: params.topP }),
     ...includeWhen(!(params.serviceTier === undefined), { serviceTier: params.serviceTier }),

@@ -64,13 +64,14 @@ export interface ToolCall {
 export interface ChatMessage {
   content: MessageContentPart[] | string | null;
   role: MessageRole;
+  extraContent?: JsonObject;
+  isError?: boolean;
   name?: string;
   reasoning?: string | null;
   /** Provider-typed safety refusal; present when finishReason is content_filter. */
   refusal?: string | null;
   toolCallId?: string;
   toolCalls?: ToolCall[];
-  extraContent?: JsonObject;
 }
 
 export interface FunctionTool {
@@ -526,7 +527,7 @@ export interface MessagesToolUseBlock {
 export interface MessagesToolResultBlock {
   toolUseId: string;
   type: "tool_result";
-  content?: string | MessagesTextBlock[];
+  content?: string | MessagesToolResultContent[];
   isError?: boolean;
 }
 
@@ -540,7 +541,25 @@ export interface MessagesImageBlock {
   type: "image";
 }
 
+export interface MessagesDocumentBlock {
+  source: {
+    type: "base64" | "content" | "text" | "url";
+    content?: JsonValue;
+    data?: string;
+    mediaType?: string;
+    url?: string;
+  };
+  type: "document";
+}
+
+export type MessagesToolResultContent =
+  | MessagesDocumentBlock
+  | MessagesImageBlock
+  | MessagesTextBlock
+  | ({ type: string } & JsonObject);
+
 export type MessagesInputContentBlock =
+  | MessagesDocumentBlock
   | MessagesImageBlock
   | MessagesTextBlock
   | MessagesThinkingBlock

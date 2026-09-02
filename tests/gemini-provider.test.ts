@@ -520,6 +520,28 @@ describe("Gemini provider", () => {
     });
   });
 
+  it("omits an empty text part from a tool-call turn", async () => {
+    const contents = await convertedContents([
+      {
+        content: "",
+        role: "assistant",
+        toolCalls: [
+          {
+            function: { arguments: "{}", name: "get_weather" },
+            id: "call-empty",
+            type: "function",
+          },
+        ],
+      },
+    ]);
+    expect(contents[0]?.parts).toEqual([
+      {
+        functionCall: { args: {}, id: "call-empty", name: "get_weather" },
+        thoughtSignature: "skip_thought_signature_validator",
+      },
+    ]);
+  });
+
   it.each([
     [{ name: "get_weather", arguments: '{"location": "Paris"}' }, { location: "Paris" }],
     [

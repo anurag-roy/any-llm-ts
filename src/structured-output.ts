@@ -1,6 +1,10 @@
 import type { JsonObject } from "./types.js";
 import { isFunction, isObject, isString, parseJsonObject } from "./utils.js";
-import { ContentFilterFinishReasonError, LengthFinishReasonError } from "./errors.js";
+import {
+  ContentFilterFinishReasonError,
+  InvalidRequestError,
+  LengthFinishReasonError,
+} from "./errors.js";
 import type {
   ChatCompletion,
   MessageContentBlock,
@@ -13,6 +17,20 @@ import type {
   MessagesTextBlock,
   StructuredOutputFormat,
 } from "./types.js";
+
+export function normalizeOutputConfig(outputConfig: JsonObject): JsonObject {
+  const rawFormat = outputConfig.format;
+  if (isObject(rawFormat)) return outputConfig;
+  if (rawFormat !== undefined) {
+    throw new InvalidRequestError(
+      `outputFormat dict has a non-object format value: ${JSON.stringify(rawFormat)}`,
+    );
+  }
+  if ("schema" in outputConfig || outputConfig.type === "json_schema") {
+    return { format: outputConfig };
+  }
+  return outputConfig;
+}
 
 export function isStructuredOutputFormat<T>(
   value: JsonObject | StructuredOutputFormat<T> | undefined,

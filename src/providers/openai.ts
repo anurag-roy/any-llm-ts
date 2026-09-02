@@ -112,6 +112,8 @@ interface AzureProviderOptions extends ProviderOptions {
 
 interface OpenAIMessageRequest {
   content: ChatMessage["content"];
+  extra_content?: JsonObject;
+  is_error?: boolean;
   name?: string;
   reasoning_content?: string;
   refusal?: string | null;
@@ -166,6 +168,11 @@ function toOpenAIMessage(message: ChatMessage, provider: string) {
       ...(toolCall.extraContent ?? {}),
     }));
   }
+  if (message.isError === true) converted.is_error = true;
+  if (isString(message.reasoning) && message.reasoning.length > 0) {
+    converted.reasoning_content = message.reasoning;
+  }
+  if (message.extraContent !== undefined) converted.extra_content = message.extraContent;
   if (provider === "deepseek" && message.role === "assistant") {
     const deepseek = message.extraContent?.deepseek;
     if (isObject(deepseek)) {

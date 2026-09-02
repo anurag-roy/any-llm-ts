@@ -3,10 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   AnyLLM,
   BaseProvider,
+  InvalidRequestError,
   UnsupportedOperationError,
+  UnsupportedParameterError,
   messages,
   registerProvider,
 } from "../src/index.js";
+import { normalizeOutputConfig } from "../src/structured-output.js";
 import {
   completionStreamToMessageEvents,
   completionToMessageResponse,
@@ -360,7 +363,7 @@ describe("Messages compatibility API", () => {
               role: "assistant",
             },
           ],
-          outputFormat: { format: {} },
+          outputFormat: { format: { schema: { type: "object" }, type: "json_schema" } },
           providerOptions: { custom: true },
           serviceTier: "priority",
           stopSequences: ["STOP"],
@@ -399,11 +402,9 @@ describe("Messages compatibility API", () => {
       topP: 0.9,
     });
 
-    expect(
-      messagesToCompletionParams(params({ outputFormat: { format: "json" } })).responseFormat,
-    ).toEqual({
-      format: "json",
-    });
+    expect(() => messagesToCompletionParams(params({ outputFormat: { format: "json" } }))).toThrow(
+      InvalidRequestError,
+    );
     expect(
       messagesToCompletionParams(params({ thinking: { type: "disabled" } })).reasoningEffort,
     ).toBe("none");
@@ -558,6 +559,213 @@ describe("Messages compatibility API", () => {
       { index: 0, type: "content_block_stop" },
       { index: 1, type: "content_block_stop" },
     ]);
+  });
+
+  it("preserves thinking, tool-result attachments, and sequential tool use", () => {
+    const png = "abc123";
+    const params = messagesToCompletionParams({
+      maxTokens: 32,
+      messages: [
+        { content: "take a screenshot", role: "user" },
+        {
+          content: [
+            { signature: "sig-abc", thinking: "call the tool", type: "thinking" },
+            { id: "toolu_1", input: {}, name: "screenshot", type: "tool_use" },
+          ],
+          role: "assistant",
+        },
+        {
+          content: [
+            {
+              content: [
+                { text: "partial capture:", type: "text" },
+                {
+                  source: { data: png, mediaType: "image/png", type: "base64" },
+                  type: "image",
+                },
+              ],
+              isError: true,
+              toolUseId: "toolu_1",
+              type: "tool_result",
+            },
+          ],
+          role: "user",
+        },
+      ],
+      model: "model-a",
+      toolChoice: { disableParallelToolUse: true, type: "auto" },
+      tools: [
+        {
+          description: "grab the screen",
+          inputSchema: { type: "object" },
+          name: "screenshot",
+        },
+      ],
+    });
+
+    expect(params.parallelToolCalls).toBe(false);
+    expect(params.toolChoice).toBe("auto");
+    expect(params.messages[1]).toMatchObject({
+      extraContent: { anthropic: { signature: "sig-abc" } },
+      reasoning: "call the tool",
+      role: "assistant",
+    });
+    expect(params.messages[2]).toEqual({
+      content: "partial capture:",
+      isError: true,
+      role: "tool",
+      toolCallId: "toolu_1",
+    });
+    expect(params.messages[3]).toEqual({
+      content: [{ image_url: { url: `data:image/png;base64,${png}` }, type: "image_url" }],
+      role: "user",
+    });
+  });
+
+  it("accepts a bare outputFormat schema and rejects empty ones", () => {
+    expect(
+      messagesToCompletionParams({
+        maxTokens: 10,
+        messages: [{ content: "Hello", role: "user" }],
+        model: "model-a",
+        outputFormat: { schema: { title: "City", type: "object" }, type: "json_schema" },
+      }).responseFormat,
+    ).toEqual({
+      json_schema: { name: "City", schema: { title: "City", type: "object" } },
+      type: "json_schema",
+    });
+    expect(
+      messagesToCompletionParams({
+        maxTokens: 10,
+        messages: [{ content: "Hello", role: "user" }],
+        model: "model-a",
+        outputFormat: { effort: "high" },
+      }).responseFormat,
+    ).toBeUndefined();
+    expect(() =>
+      messagesToCompletionParams({
+        maxTokens: 10,
+        messages: [{ content: "Hello", role: "user" }],
+        model: "model-a",
+        outputFormat: { format: { type: "json_schema" } },
+      }),
+    ).toThrow(/carries no JSON schema/u);
+    expect(() =>
+      messagesToCompletionParams({
+        maxTokens: 10,
+        messages: [{ content: "Hello", role: "user" }],
+        model: "model-a",
+        outputFormat: { schema: {}, type: "json_schema" },
+      }),
+    ).toThrow(/carries no JSON schema/u);
+    expect(normalizeOutputConfig({ schema: { type: "object" }, type: "json_schema" })).toEqual({
+      format: { schema: { type: "object" }, type: "json_schema" },
+    });
+    expect(normalizeOutputConfig({ effort: "high" })).toEqual({ effort: "high" });
+  });
+
+  it("keeps parallel tool-result attachments contiguous and validates media", () => {
+    const result = messagesToCompletionParams({
+      maxTokens: 10,
+      messages: [
+        {
+          content: [
+            {
+              content: [
+                { text: "one", type: "text" },
+                {
+                  source: { data: "abc123", mediaType: "image/png", type: "base64" },
+                  type: "image",
+                },
+              ],
+              toolUseId: "call_1",
+              type: "tool_result",
+            },
+            {
+              content: [
+                { text: "two", type: "text" },
+                {
+                  source: { data: "cGRm", mediaType: "application/pdf", type: "base64" },
+                  type: "document",
+                },
+              ],
+              toolUseId: "call_2",
+              type: "tool_result",
+            },
+            { text: "what is in them", type: "text" },
+          ],
+          role: "user",
+        },
+      ],
+      model: "model-a",
+    });
+    expect(result.messages.map((message) => message.role)).toEqual(["tool", "tool", "user"]);
+    expect(result.messages[2]?.content).toEqual([
+      { image_url: { url: "data:image/png;base64,abc123" }, type: "image_url" },
+      { file: { file_data: "data:application/pdf;base64,cGRm" }, type: "file" },
+      { text: "what is in them", type: "text" },
+    ]);
+
+    expect(() =>
+      messagesToCompletionParams({
+        maxTokens: 10,
+        messages: [
+          {
+            content: [{ source: { type: "unknown_source" }, type: "image" }],
+            role: "user",
+          },
+        ],
+        model: "model-a",
+      }),
+    ).toThrow(/carries no payload/u);
+  });
+
+  it("omits a thinking signature when several thinking blocks are joined", () => {
+    const params = messagesToCompletionParams({
+      maxTokens: 10,
+      messages: [
+        {
+          content: [
+            { signature: "sig-1", thinking: "first ", type: "thinking" },
+            { signature: "sig-2", thinking: "second", type: "thinking" },
+            { text: "answer", type: "text" },
+          ],
+          role: "assistant",
+        },
+      ],
+      model: "model-a",
+    });
+    expect(params.messages[0]).toMatchObject({
+      content: "answer",
+      reasoning: "first second",
+    });
+    expect(params.messages[0]).not.toHaveProperty("extraContent");
+  });
+
+  it("relabels a synthesized parallelToolCalls rejection", async () => {
+    class RejectingProvider extends BaseProvider {
+      readonly metadata = metadata;
+      override completion(): Promise<ChatCompletion> {
+        return Promise.reject(new UnsupportedParameterError("parallelToolCalls", metadata.name));
+      }
+    }
+    const llm = AnyLLM.fromProvider(new RejectingProvider());
+    await expect(
+      llm.messages({
+        maxTokens: 32,
+        messages: [{ content: "hi", role: "user" }],
+        model: "model-a",
+        toolChoice: { disableParallelToolUse: true, type: "auto" },
+        tools: [{ inputSchema: { type: "object" }, name: "t" }],
+      }),
+    ).rejects.toMatchObject({ parameterName: "toolChoice.disableParallelToolUse" });
+    await expect(
+      llm.messages({
+        maxTokens: 32,
+        messages: [{ content: "hi", role: "user" }],
+        model: "model-a",
+      }),
+    ).rejects.toMatchObject({ parameterName: "parallelToolCalls" });
   });
 
   it("exposes the stateless Messages helper", async () => {

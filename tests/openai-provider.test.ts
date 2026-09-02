@@ -181,6 +181,49 @@ describe("OpenAI-compatible provider", () => {
     });
   });
 
+  it("forwards reasoning, extraContent, and tool-result errors on the wire", async () => {
+    const create = vi.fn().mockResolvedValue(completionResponse());
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+    await provider.completion({
+      messages: [
+        {
+          content: null,
+          extraContent: { anthropic: { signature: "sig-abc" } },
+          reasoning: "call the tool",
+          role: "assistant",
+          toolCalls: [
+            {
+              function: { arguments: "{}", name: "screenshot" },
+              id: "toolu_1",
+              type: "function",
+            },
+          ],
+        },
+        {
+          content: "partial capture:",
+          isError: true,
+          role: "tool",
+          toolCallId: "toolu_1",
+        },
+      ],
+      model: "model-a",
+    });
+    const request = parseJsonObject(create.mock.calls[0]?.[0]);
+    expect(request.messages[0]).toMatchObject({
+      extra_content: { anthropic: { signature: "sig-abc" } },
+      reasoning_content: "call the tool",
+    });
+    expect(request.messages[1]).toMatchObject({
+      content: "partial capture:",
+      is_error: true,
+      tool_call_id: "toolu_1",
+    });
+  });
+
   it("maps per-request timeout seconds to OpenAI request milliseconds", async () => {
     const create = vi.fn().mockResolvedValue(completionResponse());
     const provider = new OpenAIProvider(
