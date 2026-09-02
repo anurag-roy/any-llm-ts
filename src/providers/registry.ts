@@ -1,7 +1,11 @@
 import { includeWhen } from "../utils.js";
 import { UnsupportedProviderError } from "../errors.js";
 import type { ProviderCapabilities, ProviderMetadata, ProviderOptions } from "../types.js";
-import { providerPromptCacheKeySupport, providerTier } from "../provider-metadata.js";
+import {
+  completeProviderMetadata,
+  validateProviderMetadata,
+  type ProviderAdapterFamily,
+} from "../provider-metadata.js";
 import { AnthropicProvider } from "./anthropic.js";
 import { AzureProvider } from "./azure.js";
 import { AzureAnthropicProvider } from "./azureanthropic.js";
@@ -36,8 +40,8 @@ interface ProviderRegistration {
 
 interface BuiltInProviderRegistration {
   create: ProviderFactory;
-  metadata: Omit<ProviderMetadata, "promptCacheKeySupport" | "tier"> &
-    Partial<Pick<ProviderMetadata, "promptCacheKeySupport" | "tier">>;
+  metadata: Parameters<typeof completeProviderMetadata>[0];
+  adapterFamily?: ProviderAdapterFamily;
 }
 
 interface RegisterProviderOptions {
@@ -481,18 +485,21 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
 ];
 
 function metadataFromConfig(config: OpenAIProviderConfig): ProviderMetadata {
-  return {
-    capabilities: { ...conservativeCapabilities, ...config.capabilities },
-    documentationUrl: config.documentationUrl,
-    name: config.name,
-    promptCacheKeySupport:
-      config.promptCacheKeySupport ?? providerPromptCacheKeySupport(config.name),
-    requiresApiKey: config.requiresApiKey !== false,
-    tier: providerTier(config.name),
-    ...includeWhen(!(config.apiBase === undefined), { apiBase: config.apiBase }),
-    ...includeWhen(!(config.envApiBase === undefined), { envApiBase: config.envApiBase }),
-    ...includeWhen(!(config.envApiKey === undefined), { envApiKey: config.envApiKey }),
-  };
+  return completeProviderMetadata(
+    {
+      capabilities: { ...conservativeCapabilities, ...config.capabilities },
+      documentationUrl: config.documentationUrl,
+      name: config.name,
+      requiresApiKey: config.requiresApiKey !== false,
+      ...includeWhen(!(config.apiBase === undefined), { apiBase: config.apiBase }),
+      ...includeWhen(!(config.envApiBase === undefined), { envApiBase: config.envApiBase }),
+      ...includeWhen(!(config.envApiKey === undefined), { envApiKey: config.envApiKey }),
+      ...includeWhen(!(config.promptCacheKeySupport === undefined), {
+        promptCacheKeySupport: config.promptCacheKeySupport,
+      }),
+    },
+    "openai",
+  );
 }
 
 const registrations = new Map<string, ProviderRegistration>();
@@ -500,16 +507,15 @@ const registrations = new Map<string, ProviderRegistration>();
 function addBuiltIn(name: string, registration: BuiltInProviderRegistration): void {
   registrations.set(name, {
     create: registration.create,
-    metadata: {
-      ...registration.metadata,
-      promptCacheKeySupport:
-        registration.metadata.promptCacheKeySupport ?? providerPromptCacheKeySupport(name),
-      tier: registration.metadata.tier ?? providerTier(name),
-    },
+    metadata: completeProviderMetadata(
+      { ...registration.metadata, name },
+      registration.adapterFamily,
+    ),
   });
 }
 
 addBuiltIn("openai", {
+  adapterFamily: "openai",
   create: createOpenAIProvider,
   metadata: {
     apiBase: "https://api.openai.com/v1",
@@ -533,6 +539,7 @@ addBuiltIn("openai", {
 });
 
 addBuiltIn("anthropic", {
+  adapterFamily: "anthropic",
   create: (options) => new AnthropicProvider(options),
   metadata: {
     capabilities: capabilities({
@@ -550,6 +557,7 @@ addBuiltIn("anthropic", {
 });
 
 addBuiltIn("azureanthropic", {
+  adapterFamily: "anthropic",
   create: (options) => new AzureAnthropicProvider(options),
   metadata: {
     capabilities: capabilities({
@@ -568,6 +576,7 @@ addBuiltIn("azureanthropic", {
 });
 
 addBuiltIn("vertexaianthropic", {
+  adapterFamily: "anthropic",
   create: (options) => new VertexAIAnthropicProvider(options),
   metadata: {
     capabilities: capabilities({
@@ -673,6 +682,7 @@ addBuiltIn("vertexai", {
 });
 
 addBuiltIn("mistral", {
+  adapterFamily: "openai",
   create: (options) => new MistralProvider(options),
   metadata: {
     apiBase: "https://api.mistral.ai/v1",
@@ -691,6 +701,7 @@ addBuiltIn("mistral", {
 });
 
 addBuiltIn("together", {
+  adapterFamily: "openai",
   create: (options) => new TogetherProvider(options),
   metadata: {
     apiBase: "https://api.together.xyz/v1",
@@ -709,6 +720,7 @@ addBuiltIn("together", {
 });
 
 addBuiltIn("cohere", {
+  adapterFamily: "openai",
   create: (options) => new CohereProvider(options),
   metadata: {
     apiBase: "https://api.cohere.com/compatibility/v1",
@@ -769,6 +781,7 @@ addBuiltIn("otari", {
 });
 
 addBuiltIn("github", {
+  adapterFamily: "openai",
   create: (options) => new GitHubProvider(options),
   metadata: {
     apiBase: "https://models.github.ai/inference",
@@ -786,6 +799,7 @@ addBuiltIn("github", {
 });
 
 addBuiltIn("meta", {
+  adapterFamily: "openai",
   create: (options) => new MetaProvider(options),
   metadata: {
     apiBase: "https://api.meta.ai/v1",
@@ -822,6 +836,7 @@ addBuiltIn("huggingface", {
 });
 
 addBuiltIn("azureopenai", {
+  adapterFamily: "openai",
   create: (options) => new AzureOpenAIProvider(options),
   metadata: {
     capabilities: capabilities({
@@ -881,9 +896,10 @@ export function registerProvider(
       `Provider "${key}" is already registered. Pass override: true to replace it.`,
     );
   }
+  validateProviderMetadata(options.metadata, key);
   registrations.set(key, {
     create: factory,
-    metadata: { ...options.metadata, name: key },
+    metadata: structuredClone(options.metadata),
   });
 }
 
@@ -906,4 +922,12 @@ export function getProviderMetadata(name: string): ProviderMetadata {
 
 export function getAllProviderMetadata(): ProviderMetadata[] {
   return getSupportedProviders().map(getProviderMetadata);
+}
+
+export function getProviderDescriptor(name: string): ProviderMetadata {
+  return getProviderMetadata(name);
+}
+
+export function getProviderDescriptors(): ProviderMetadata[] {
+  return getAllProviderMetadata();
 }

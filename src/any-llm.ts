@@ -7,6 +7,7 @@ import type {
   BatchResult,
   ChatCompletion,
   ChatCompletionChunk,
+  CompletionOperationOptions,
   CompletionParams,
   CompletionResult,
   CreateBatchParams,
@@ -51,6 +52,7 @@ import {
   responsesTextFormat,
 } from "./structured-output.js";
 import { isAsyncIterable } from "./utils.js";
+import { validateProviderMetadata } from "./provider-metadata.js";
 import type { BaseProvider } from "./providers/base.js";
 import { OpenAIProvider } from "./providers/openai.js";
 import {
@@ -65,8 +67,9 @@ export class AnyLLM {
   private readonly adapter: BaseProvider;
 
   private constructor(adapter: BaseProvider) {
+    validateProviderMetadata(adapter.metadata);
     this.adapter = adapter;
-    this.metadata = adapter.metadata;
+    this.metadata = structuredClone(adapter.metadata);
   }
 
   static create(provider: string, options: ProviderOptions = {}): AnyLLM {
@@ -114,7 +117,15 @@ export class AnyLLM {
     return getProviderMetadata(provider);
   }
 
+  static getProviderDescriptor(provider: string): ProviderMetadata {
+    return getProviderMetadata(provider);
+  }
+
   static getAllProviderMetadata(): ProviderMetadata[] {
+    return getAllProviderMetadata();
+  }
+
+  static getAllProviderDescriptors(): ProviderMetadata[] {
     return getAllProviderMetadata();
   }
 
@@ -152,16 +163,25 @@ export class AnyLLM {
     }
   }
 
-  completion<T>(params: StructuredCompletionParams<T>): Promise<ParsedChatCompletion<T>>;
+  completion<T>(
+    params: StructuredCompletionParams<T>,
+    operation?: CompletionOperationOptions,
+  ): Promise<ParsedChatCompletion<T>>;
   completion(
     params: CompletionParams & { stream: true },
+    operation?: CompletionOperationOptions,
   ): Promise<AsyncIterable<ChatCompletionChunk>>;
-  completion(params: CompletionParams & { stream?: false | undefined }): Promise<ChatCompletion>;
+  completion(
+    params: CompletionParams & { stream?: false | undefined },
+    operation?: CompletionOperationOptions,
+  ): Promise<ChatCompletion>;
   completion<TStream extends boolean | undefined>(
     params: CompletionParams & { stream?: TStream },
+    operation?: CompletionOperationOptions,
   ): Promise<CompletionResult<TStream>>;
   async completion(
     params: CompletionParams | StructuredCompletionParams<unknown>,
+    operation: CompletionOperationOptions = {},
   ): Promise<
     AsyncIterable<ChatCompletionChunk> | ChatCompletion | ParsedChatCompletion<JsonValue>
   > {
@@ -171,17 +191,20 @@ export class AnyLLM {
         throw new TypeError("stream is not supported with structured responseFormat.");
       const format = params.responseFormat;
       const { stream, ...request } = params;
-      const response = await this.adapter.completion({
-        ...request,
-        responseFormat: completionResponseFormat(format),
-        ...includeWhen(!(stream === undefined), { stream }),
-      });
+      const response = await this.adapter.completion(
+        {
+          ...request,
+          responseFormat: completionResponseFormat(format),
+          ...includeWhen(!(stream === undefined), { stream }),
+        },
+        operation,
+      );
       if (isAsyncIterable(response))
         throw new TypeError("A provider returned a stream for a non-streaming request.");
       return parseCompletion(response, format);
     }
     // SAFETY: The provider contract establishes the asserted representation at this boundary.
-    return this.adapter.completion(params as CompletionParams);
+    return this.adapter.completion(params as CompletionParams, operation);
   }
 
   responses<T>(params: StructuredResponsesParams<T>): Promise<ParsedResponse<T>>;

@@ -130,7 +130,12 @@ describe("OpenAI-compatible provider", () => {
         { content: "done", role: "tool", toolCallId: "old-1" },
       ],
       model: "model-a",
-      providerOptions: { metadata: { trace: "one" } },
+      providerOptions: {
+        messages: [{ content: "overridden", role: "user" }],
+        metadata: { trace: "one" },
+        model: "overridden",
+        stream: true,
+      },
       reasoningEffort: "high",
       serviceTier: "priority",
       temperature: 0.4,
@@ -154,6 +159,9 @@ describe("OpenAI-compatible provider", () => {
       }),
     );
     const request = parseJsonObject(create.mock.calls[0]?.[0]);
+    expect(request.model).toBe("model-a");
+    expect(request.stream).toBe(false);
+    expect(request.messages[0].content).toBe("system");
     expect(request.messages[1].tool_calls[0].function.name).toBe("old_call");
     expect(request.messages[2].tool_call_id).toBe("old-1");
     expect(response).toMatchObject({
@@ -242,6 +250,41 @@ describe("OpenAI-compatible provider", () => {
     );
   });
 
+  it("propagates abort, disables SDK retries, and exposes the dispatch boundary", async () => {
+    const create = vi.fn().mockResolvedValue(completionResponse());
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+    const controller = new AbortController();
+    const evidence: object[] = [];
+
+    await provider.completion(
+      {
+        messages: [{ content: "hello", role: "user" }],
+        model: "model-a",
+      },
+      {
+        onDispatch: (event) => evidence.push(event),
+        retryPolicy: "none",
+        signal: controller.signal,
+      },
+    );
+
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "model-a", stream: false }),
+      { maxRetries: 0, signal: controller.signal },
+    );
+    expect(evidence).toEqual([
+      {
+        boundary: "provider_sdk",
+        operation: "completion",
+        providerId: "test-openai",
+      },
+    ]);
+  });
+
   it("normalizes completion streams and protects iteration errors", async () => {
     async function* chunks() {
       yield {
@@ -277,11 +320,25 @@ describe("OpenAI-compatible provider", () => {
       {},
       fakeClient({ chat: { completions: { create } } }),
     );
-    const result = await provider.completion({
-      messages: [{ content: "Hi", role: "user" }],
-      model: "model-a",
-      stream: true,
-    });
+    const controller = new AbortController();
+    const evidence: object[] = [];
+    const result = await provider.completion(
+      {
+        messages: [{ content: "Hi", role: "user" }],
+        model: "model-a",
+        stream: true,
+      },
+      {
+        onDispatch: (event) => evidence.push(event),
+        retryPolicy: "none",
+        signal: controller.signal,
+      },
+    );
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "model-a", stream: true }),
+      { maxRetries: 0, signal: controller.signal },
+    );
+    expect(evidence).toHaveLength(1);
     // SAFETY: This test double implements the provider surface exercised by this test.
     const iterator = (result as AsyncIterable<ChatCompletionChunk>)[Symbol.asyncIterator]();
     const first = await iterator.next();
@@ -345,10 +402,15 @@ describe("OpenAI-compatible provider", () => {
       {},
       fakeClient({ chat: { completions: { create } } }),
     );
-    await expect(provider.completion({ messages: [], model: "model-a" })).rejects.toThrow(
-      "messages array cannot be empty",
-    );
+    const evidence: object[] = [];
+    await expect(
+      provider.completion(
+        { messages: [], model: "model-a" },
+        { onDispatch: (event) => evidence.push(event), retryPolicy: "none" },
+      ),
+    ).rejects.toThrow("messages array cannot be empty");
     expect(create).not.toHaveBeenCalled();
+    expect(evidence).toEqual([]);
   });
 
   it("passes through responses and wraps streaming responses", async () => {

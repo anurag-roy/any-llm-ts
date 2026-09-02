@@ -7,6 +7,7 @@ import type {
   BatchResult,
   ChatCompletion,
   ChatCompletionChunk,
+  CompletionOperationOptions,
   CompletionResult,
   CreateBatchParams,
   DirectCompletionParams,
@@ -79,28 +80,34 @@ function directOptions(
 
 export function completion<T>(
   params: DirectStructuredCompletionParams<T>,
+  operation?: CompletionOperationOptions,
 ): Promise<ParsedChatCompletion<T>>;
 export function completion(
   params: DirectCompletionParams & { stream: true },
+  operation?: CompletionOperationOptions,
 ): Promise<AsyncIterable<ChatCompletionChunk>>;
 export function completion(
   params: DirectCompletionParams & { stream?: false | undefined },
+  operation?: CompletionOperationOptions,
 ): Promise<ChatCompletion>;
 export function completion<TStream extends boolean | undefined>(
   params: DirectCompletionParams & { stream?: TStream },
+  operation?: CompletionOperationOptions,
 ): Promise<CompletionResult<TStream>>;
 export async function completion(
   params: DirectCompletionParams | DirectStructuredCompletionParams<unknown>,
+  operation: CompletionOperationOptions = {},
 ): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion | ParsedChatCompletion<JsonValue>> {
   const { apiBase, apiKey, clientOptions, provider, ...request } = params;
   const target = resolveTarget(request.model, provider);
   // SAFETY: The provider contract establishes the asserted representation at this boundary.
-  return client(target.provider, directOptions(apiBase, apiKey, clientOptions)).completion({
-    ...request,
-    model: target.model,
-  } as never) as Promise<
-    AsyncIterable<ChatCompletionChunk> | ChatCompletion | ParsedChatCompletion<unknown>
-  >;
+  return client(target.provider, directOptions(apiBase, apiKey, clientOptions)).completion(
+    {
+      ...request,
+      model: target.model,
+    } as never,
+    operation,
+  ) as Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion | ParsedChatCompletion<unknown>>;
 }
 
 export interface DirectResponsesParams extends ResponsesParams, DirectProviderOptions {}

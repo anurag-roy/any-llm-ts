@@ -92,6 +92,10 @@ export type { VoyageAIClientLike } from "./providers/voyage.js";
 export { WatsonxProvider } from "./providers/watsonx.js";
 export type { WatsonxClientLike, WatsonxProviderClientOptions } from "./providers/watsonx.js";
 export { AzureOpenAIProvider, OpenAIProvider } from "./providers/openai.js";
-export { registerProvider } from "./providers/registry.js";
+export {
+  getProviderDescriptor,
+  getProviderDescriptors,
+  registerProvider,
+} from "./providers/registry.js";
 export type { ProviderFactory } from "./providers/registry.js";
 export type * from "./types.js";

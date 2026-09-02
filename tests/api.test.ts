@@ -1,5 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
+import { completeProviderMetadata } from "../src/provider-metadata.js";
+
 import {
   BaseProvider,
   cancelBatch,
@@ -43,7 +45,7 @@ import type {
   TranscriptionParams,
 } from "../src/index.js";
 
-const metadata: ProviderMetadata = {
+const metadata: ProviderMetadata = completeProviderMetadata({
   capabilities: {
     audioSpeech: true,
     audioTranscription: true,
@@ -66,7 +68,7 @@ const metadata: ProviderMetadata = {
   promptCacheKeySupport: "unsupported",
   requiresApiKey: false,
   tier: "community",
-};
+});
 
 class ApiProvider extends BaseProvider {
   readonly metadata = metadata;

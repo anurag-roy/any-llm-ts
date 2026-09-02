@@ -5,7 +5,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BatchNotCompleteError, MissingApiKeyError, ProviderError } from "../src/index.js";
 import { AnthropicProvider } from "../src/providers/anthropic.js";
-import type { ChatCompletion, ChatCompletionChunk, JsonObject } from "../src/types.js";
+import type {
+  ChatCompletion,
+  ChatCompletionChunk,
+  JsonObject,
+  ProviderDispatchEvidence,
+} from "../src/types.js";
 
 interface AnthropicTestOverrides {
   messages?: object;
@@ -110,7 +115,13 @@ describe("Anthropic provider", () => {
         { content: "Sunny", role: "tool", toolCallId: "old-tool" },
       ],
       model: "claude-test",
-      providerOptions: { metadata: { user_id: "123" } },
+      providerOptions: {
+        max_tokens: 1,
+        messages: [{ content: "overridden", role: "user" }],
+        metadata: { user_id: "123" },
+        model: "overridden",
+        stream: true,
+      },
       reasoningEffort: "high",
       serviceTier: "auto",
       stop: "END",
@@ -250,6 +261,80 @@ describe("Anthropic provider", () => {
     expect(create.mock.calls[0]?.[0]).toMatchObject({
       output_config: { format: { schema: { type: "object" }, type: "json_schema" } },
     });
+  });
+
+  it("propagates abort, disables SDK retries, and exposes dispatch for responses and streams", async () => {
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce(anthropicResponse())
+      .mockResolvedValueOnce(
+        (async function* events(): AsyncIterable<JsonObject> {
+          yield { message: { id: "msg-stream", model: "claude-test" }, type: "message_start" };
+        })(),
+      );
+    const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
+    const controller = new AbortController();
+    const evidence: object[] = [];
+    const operation = {
+      onDispatch: (event: ProviderDispatchEvidence) => evidence.push(event),
+      retryPolicy: "none" as const,
+      signal: controller.signal,
+    };
+
+    await provider.completion(
+      {
+        messages: [{ content: "hello", role: "user" }],
+        model: "claude-test",
+      },
+      operation,
+    );
+    await provider.completion(
+      {
+        messages: [{ content: "hello", role: "user" }],
+        model: "claude-test",
+        stream: true,
+      },
+      operation,
+    );
+
+    expect(create.mock.calls[0]?.[1]).toEqual({
+      maxRetries: 0,
+      signal: controller.signal,
+    });
+    expect(create.mock.calls[1]?.[1]).toEqual({
+      maxRetries: 0,
+      signal: controller.signal,
+    });
+    expect(evidence).toEqual([
+      {
+        boundary: "provider_sdk",
+        operation: "completion",
+        providerId: "anthropic",
+      },
+      {
+        boundary: "provider_sdk",
+        operation: "completion",
+        providerId: "anthropic",
+      },
+    ]);
+
+    const aborted = new AbortController();
+    aborted.abort();
+    await expect(
+      provider.completion(
+        {
+          messages: [{ content: "hello", role: "user" }],
+          model: "claude-test",
+        },
+        {
+          onDispatch: (event) => evidence.push(event),
+          retryPolicy: "none",
+          signal: aborted.signal,
+        },
+      ),
+    ).rejects.toThrow();
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(evidence).toHaveLength(2);
   });
 
   it("uses sensible defaults and maps common stop reasons", async () => {
@@ -982,9 +1067,15 @@ describe("Anthropic provider", () => {
   it("rejects empty messages and normalizes provider failures", async () => {
     const create = vi.fn().mockRejectedValue({ message: "failed", status: 500 });
     const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
-    await expect(provider.completion({ messages: [], model: "claude" })).rejects.toThrow(
-      "messages array cannot be empty",
-    );
+    const evidence: object[] = [];
+    await expect(
+      provider.completion(
+        { messages: [], model: "claude" },
+        { onDispatch: (event) => evidence.push(event), retryPolicy: "none" },
+      ),
+    ).rejects.toThrow("messages array cannot be empty");
+    expect(create).not.toHaveBeenCalled();
+    expect(evidence).toEqual([]);
     await expect(
       provider.completion({
         messages: [{ content: "Hi", role: "user" }],

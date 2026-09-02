@@ -2,6 +2,8 @@ import { isNumber } from "../src/utils.js";
 import { parseCompletion, parseMessage, parseResponse } from "../src/structured-output.js";
 import { describe, expect, it } from "vitest";
 
+import { completeProviderMetadata } from "../src/provider-metadata.js";
+
 import {
   AnyLLM,
   BaseProvider,
@@ -46,7 +48,7 @@ const format: StructuredOutputFormat<Result> = {
   },
 };
 
-const metadata: ProviderMetadata = {
+const metadata: ProviderMetadata = completeProviderMetadata({
   capabilities: {
     audioSpeech: false,
     audioTranscription: false,
@@ -69,7 +71,7 @@ const metadata: ProviderMetadata = {
   promptCacheKeySupport: "unsupported",
   requiresApiKey: false,
   tier: "community",
-};
+});
 
 class StructuredProvider extends BaseProvider {
   readonly metadata = metadata;

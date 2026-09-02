@@ -14,6 +14,7 @@ import type {
   BatchStatus,
   ChatCompletion,
   ChatCompletionChunk,
+  CompletionOperationOptions,
   CompletionParams,
   CreateBatchParams,
   ListBatchesParams,
@@ -143,16 +144,20 @@ export class TogetherProvider extends OpenAIProvider {
 
   override completion(
     params: CompletionParams,
+    operation: CompletionOperationOptions = {},
   ): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion> {
-    return super.completion({
-      ...params,
-      messages: params.messages.map((message) => {
-        if (message.toolCalls?.length !== 0) return message;
-        const cleaned = { ...message };
-        delete cleaned.toolCalls;
-        return cleaned;
-      }),
-    });
+    return super.completion(
+      {
+        ...params,
+        messages: params.messages.map((message) => {
+          if (message.toolCalls?.length !== 0) return message;
+          const cleaned = { ...message };
+          delete cleaned.toolCalls;
+          return cleaned;
+        }),
+      },
+      operation,
+    );
   }
 
   override createBatch(params: CreateBatchParams): Promise<Batch> {

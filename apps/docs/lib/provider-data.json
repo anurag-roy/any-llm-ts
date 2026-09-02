@@ -22,7 +22,65 @@
     "envApiKey": "ANTHROPIC_API_KEY",
     "name": "anthropic",
     "requiresApiKey": true,
+    "configuration": {
+      "additionalProperties": false,
+      "authenticationModes": [
+        {
+          "fieldIds": ["apiKey", "apiBase"],
+          "id": "api_key",
+          "kind": "stored",
+          "label": "API key"
+        }
+      ],
+      "backwardCompatibleVersions": [1],
+      "fields": [
+        {
+          "connectionAffecting": true,
+          "id": "apiKey",
+          "label": "API key",
+          "required": true,
+          "secret": true,
+          "type": "secret"
+        },
+        {
+          "allowedSchemes": ["https"],
+          "connectionAffecting": true,
+          "id": "apiBase",
+          "label": "API base URL",
+          "required": false,
+          "secret": false,
+          "type": "url"
+        }
+      ],
+      "id": "any-llm-ts.anthropic.credential",
+      "status": "supported",
+      "version": 1
+    },
+    "displayName": "Anthropic",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "anthropic",
     "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/anthropic",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
     "tier": "verified"
   },
   {
@@ -45,12 +103,40 @@
     },
     "documentationUrl": "https://www.atlascloud.ai/docs",
     "name": "atlascloud",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": true,
-    "tier": "community",
     "apiBase": "https://api.atlascloud.ai/v1",
     "envApiBase": "ATLASCLOUD_API_BASE",
-    "envApiKey": "ATLASCLOUD_API_KEY"
+    "envApiKey": "ATLASCLOUD_API_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Atlascloud",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "atlascloud",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "community"
   },
   {
     "capabilities": {
@@ -75,7 +161,35 @@
     "envApiKey": "AZURE_API_KEY",
     "name": "azure",
     "requiresApiKey": true,
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Azure",
+    "gateway": {
+      "completion": {
+        "abortSignal": "unsupported",
+        "dispatchEvidence": "unsupported",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": false,
+          "text": false,
+          "tools": false,
+          "usage": false
+        },
+        "providerOptions": "unbounded",
+        "retryControl": "unsupported"
+      },
+      "version": 1
+    },
+    "id": "azure",
     "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/azure",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
     "tier": "community"
   },
   {
@@ -101,7 +215,35 @@
     "envApiKey": "AZURE_ANTHROPIC_API_KEY",
     "name": "azureanthropic",
     "requiresApiKey": true,
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Azure Anthropic",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "azureanthropic",
     "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/anthropic",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
     "tier": "community"
   },
   {
@@ -127,7 +269,35 @@
     "envApiKey": "AZURE_OPENAI_API_KEY",
     "name": "azureopenai",
     "requiresApiKey": true,
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Azure OpenAI",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "azureopenai",
     "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
     "tier": "verified"
   },
   {
@@ -153,7 +323,35 @@
     "envApiKey": "AWS_BEARER_TOKEN_BEDROCK",
     "name": "bedrock",
     "requiresApiKey": false,
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Amazon Bedrock",
+    "gateway": {
+      "completion": {
+        "abortSignal": "unsupported",
+        "dispatchEvidence": "unsupported",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": false,
+          "text": false,
+          "tools": false,
+          "usage": false
+        },
+        "providerOptions": "unbounded",
+        "retryControl": "unsupported"
+      },
+      "version": 1
+    },
+    "id": "bedrock",
     "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/bedrock",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
     "tier": "verified"
   },
   {
@@ -176,12 +374,40 @@
     },
     "documentationUrl": "https://cascadia.to",
     "name": "cascadia",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": true,
-    "tier": "community",
     "apiBase": "http://localhost:9090/v1",
     "envApiBase": "CASCADIA_API_BASE",
-    "envApiKey": "CASCADIA_API_KEY"
+    "envApiKey": "CASCADIA_API_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Cascadia",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "cascadia",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "community"
   },
   {
     "capabilities": {
@@ -203,12 +429,40 @@
     },
     "documentationUrl": "https://inference-docs.cerebras.ai/",
     "name": "cerebras",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": true,
-    "tier": "verified",
     "apiBase": "https://api.cerebras.ai/v1",
     "envApiBase": "CEREBRAS_API_BASE",
-    "envApiKey": "CEREBRAS_API_KEY"
+    "envApiKey": "CEREBRAS_API_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Cerebras",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "cerebras",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "verified"
   },
   {
     "apiBase": "https://api.cohere.com/compatibility/v1",
@@ -234,7 +488,35 @@
     "envApiKey": "COHERE_API_KEY",
     "name": "cohere",
     "requiresApiKey": true,
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Cohere",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "cohere",
     "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
     "tier": "community"
   },
   {
@@ -257,12 +539,40 @@
     },
     "documentationUrl": "https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope",
     "name": "dashscope",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": true,
-    "tier": "community",
     "apiBase": "https://dashscope.aliyuncs.com/compatible-mode/v1",
     "envApiBase": "DASHSCOPE_API_BASE",
-    "envApiKey": "DASHSCOPE_API_KEY"
+    "envApiKey": "DASHSCOPE_API_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Dashscope",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "dashscope",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "community"
   },
   {
     "capabilities": {
@@ -284,11 +594,39 @@
     },
     "documentationUrl": "https://docs.databricks.com/aws/en/machine-learning/model-serving/score-foundation-models",
     "name": "databricks",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": true,
-    "tier": "community",
     "envApiBase": "DATABRICKS_HOST",
-    "envApiKey": "DATABRICKS_TOKEN"
+    "envApiKey": "DATABRICKS_TOKEN",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Databricks",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "databricks",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "community"
   },
   {
     "capabilities": {
@@ -310,12 +648,40 @@
     },
     "documentationUrl": "https://deepinfra.com/docs/openai_api",
     "name": "deepinfra",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": true,
-    "tier": "community",
     "apiBase": "https://api.deepinfra.com/v1/openai",
     "envApiBase": "DEEPINFRA_API_BASE",
-    "envApiKey": "DEEPINFRA_API_KEY"
+    "envApiKey": "DEEPINFRA_API_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Deepinfra",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "deepinfra",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "community"
   },
   {
     "capabilities": {
@@ -337,12 +703,40 @@
     },
     "documentationUrl": "https://api-docs.deepseek.com/",
     "name": "deepseek",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": true,
-    "tier": "verified",
     "apiBase": "https://api.deepseek.com",
     "envApiBase": "DEEPSEEK_API_BASE",
-    "envApiKey": "DEEPSEEK_API_KEY"
+    "envApiKey": "DEEPSEEK_API_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Deepseek",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "deepseek",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "verified"
   },
   {
     "capabilities": {
@@ -364,12 +758,40 @@
     },
     "documentationUrl": "https://docs.edenai.co/",
     "name": "edenai",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": true,
-    "tier": "community",
     "apiBase": "https://api.edenai.run/v3",
     "envApiBase": "EDENAI_API_BASE",
-    "envApiKey": "EDENAI_API_KEY"
+    "envApiKey": "EDENAI_API_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Edenai",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "edenai",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "community"
   },
   {
     "capabilities": {
@@ -391,12 +813,40 @@
     },
     "documentationUrl": "https://docs.fireworks.ai/api-reference/introduction",
     "name": "fireworks",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": true,
-    "tier": "verified",
     "apiBase": "https://api.fireworks.ai/inference/v1",
     "envApiBase": "FIREWORKS_API_BASE",
-    "envApiKey": "FIREWORKS_API_KEY"
+    "envApiKey": "FIREWORKS_API_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Fireworks",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "fireworks",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "verified"
   },
   {
     "capabilities": {
@@ -421,7 +871,35 @@
     "envApiKey": "GEMINI_API_KEY or GOOGLE_API_KEY",
     "name": "gemini",
     "requiresApiKey": true,
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Google Gemini",
+    "gateway": {
+      "completion": {
+        "abortSignal": "unsupported",
+        "dispatchEvidence": "unsupported",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": false,
+          "text": false,
+          "tools": false,
+          "usage": false
+        },
+        "providerOptions": "unbounded",
+        "retryControl": "unsupported"
+      },
+      "version": 1
+    },
+    "id": "gemini",
     "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/gemini",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
     "tier": "verified"
   },
   {
@@ -448,7 +926,35 @@
     "envApiKey": "GITHUB_TOKEN",
     "name": "github",
     "requiresApiKey": true,
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "GitHub Models",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "github",
     "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
     "tier": "community"
   },
   {
@@ -471,12 +977,40 @@
     },
     "documentationUrl": "https://docs.gmicloud.ai/inference-engine/llm-api",
     "name": "gmi",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": true,
-    "tier": "community",
     "apiBase": "https://api.gmi-serving.com/v1",
     "envApiBase": "GMI_API_BASE",
-    "envApiKey": "GMI_API_KEY"
+    "envApiKey": "GMI_API_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Gmi",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "gmi",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "community"
   },
   {
     "capabilities": {
@@ -498,12 +1032,40 @@
     },
     "documentationUrl": "https://console.groq.com/docs/openai",
     "name": "groq",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": true,
-    "tier": "verified",
     "apiBase": "https://api.groq.com/openai/v1",
     "envApiBase": "GROQ_BASE_URL",
-    "envApiKey": "GROQ_API_KEY"
+    "envApiKey": "GROQ_API_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Groq",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "groq",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "verified"
   },
   {
     "capabilities": {
@@ -528,7 +1090,35 @@
     "envApiKey": "HF_TOKEN",
     "name": "huggingface",
     "requiresApiKey": true,
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Hugging Face",
+    "gateway": {
+      "completion": {
+        "abortSignal": "unsupported",
+        "dispatchEvidence": "unsupported",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": false,
+          "text": false,
+          "tools": false,
+          "usage": false
+        },
+        "providerOptions": "unbounded",
+        "retryControl": "unsupported"
+      },
+      "version": 1
+    },
+    "id": "huggingface",
     "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/huggingface",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
     "tier": "community"
   },
   {
@@ -551,12 +1141,40 @@
     },
     "documentationUrl": "https://docs.inceptionlabs.ai/",
     "name": "inception",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": true,
-    "tier": "verified",
     "apiBase": "https://api.inceptionlabs.ai/v1",
     "envApiBase": "INCEPTION_API_BASE",
-    "envApiKey": "INCEPTION_API_KEY"
+    "envApiKey": "INCEPTION_API_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Inception",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "inception",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "verified"
   },
   {
     "capabilities": {
@@ -578,12 +1196,40 @@
     },
     "documentationUrl": "https://kenari.id/docs",
     "name": "kenari",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": true,
-    "tier": "community",
     "apiBase": "https://kenari.id/v1",
     "envApiBase": "KENARI_API_BASE",
-    "envApiKey": "KENARI_API_KEY"
+    "envApiKey": "KENARI_API_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Kenari",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "kenari",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "community"
   },
   {
     "capabilities": {
@@ -605,12 +1251,40 @@
     },
     "documentationUrl": "https://www.llama.com/products/llama-api/",
     "name": "llama",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": true,
-    "tier": "community",
     "apiBase": "https://api.llama.com/compat/v1",
     "envApiBase": "LLAMA_API_BASE",
-    "envApiKey": "LLAMA_API_KEY"
+    "envApiKey": "LLAMA_API_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Llama",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "llama",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "community"
   },
   {
     "capabilities": {
@@ -632,11 +1306,39 @@
     },
     "documentationUrl": "https://github.com/ggml-org/llama.cpp",
     "name": "llamacpp",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": false,
-    "tier": "verified",
     "apiBase": "http://127.0.0.1:8080/v1",
-    "envApiBase": "LLAMACPP_API_BASE"
+    "envApiBase": "LLAMACPP_API_BASE",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Llamacpp",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "llamacpp",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "verified"
   },
   {
     "capabilities": {
@@ -658,11 +1360,39 @@
     },
     "documentationUrl": "https://github.com/Mozilla-Ocho/llamafile",
     "name": "llamafile",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": false,
-    "tier": "verified",
     "apiBase": "http://127.0.0.1:8080/v1",
-    "envApiBase": "LLAMAFILE_API_BASE"
+    "envApiBase": "LLAMAFILE_API_BASE",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Llamafile",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "llamafile",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "verified"
   },
   {
     "capabilities": {
@@ -684,12 +1414,40 @@
     },
     "documentationUrl": "https://lmstudio.ai/docs/developer/openai-compat",
     "name": "lmstudio",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": false,
-    "tier": "verified",
     "apiBase": "http://localhost:1234/v1",
     "envApiBase": "LM_STUDIO_API_BASE",
-    "envApiKey": "LM_STUDIO_API_KEY"
+    "envApiKey": "LM_STUDIO_API_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "LM Studio",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "lmstudio",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "verified"
   },
   {
     "apiBase": "https://api.meta.ai/v1",
@@ -715,7 +1473,35 @@
     "envApiKey": "MODEL_API_KEY",
     "name": "meta",
     "requiresApiKey": true,
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Meta",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "meta",
     "promptCacheKeySupport": "supported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
     "tier": "community"
   },
   {
@@ -738,12 +1524,40 @@
     },
     "documentationUrl": "https://platform.minimax.io/docs/api-reference/text-openai-api",
     "name": "minimax",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": true,
-    "tier": "verified",
     "apiBase": "https://api.minimax.io/v1",
     "envApiBase": "MINIMAX_API_BASE",
-    "envApiKey": "MINIMAX_API_KEY"
+    "envApiKey": "MINIMAX_API_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Minimax",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "minimax",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "verified"
   },
   {
     "apiBase": "https://api.mistral.ai/v1",
@@ -769,7 +1583,35 @@
     "envApiKey": "MISTRAL_API_KEY",
     "name": "mistral",
     "requiresApiKey": true,
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Mistral",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "mistral",
     "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
     "tier": "verified"
   },
   {
@@ -792,12 +1634,40 @@
     },
     "documentationUrl": "https://platform.moonshot.ai/docs/api/chat",
     "name": "moonshot",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": true,
-    "tier": "verified",
     "apiBase": "https://api.moonshot.ai/v1",
     "envApiBase": "MOONSHOT_API_BASE",
-    "envApiKey": "MOONSHOT_API_KEY"
+    "envApiKey": "MOONSHOT_API_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Moonshot",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "moonshot",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "verified"
   },
   {
     "capabilities": {
@@ -819,12 +1689,40 @@
     },
     "documentationUrl": "https://any-llm.ai",
     "name": "mzai",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": true,
-    "tier": "community",
     "apiBase": "https://platform-api.any-llm.ai/api/v1",
     "envApiBase": "ANY_LLM_PLATFORM_URL",
-    "envApiKey": "ANY_LLM_KEY"
+    "envApiKey": "ANY_LLM_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Mzai",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "mzai",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "community"
   },
   {
     "capabilities": {
@@ -846,12 +1744,40 @@
     },
     "documentationUrl": "https://studio.nebius.com/api-reference/",
     "name": "nebius",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": true,
-    "tier": "verified",
     "apiBase": "https://api.studio.nebius.ai/v1",
     "envApiBase": "NEBIUS_API_BASE",
-    "envApiKey": "NEBIUS_API_KEY"
+    "envApiKey": "NEBIUS_API_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Nebius",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "nebius",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "verified"
   },
   {
     "capabilities": {
@@ -873,12 +1799,40 @@
     },
     "documentationUrl": "https://docs.neosantara.xyz/",
     "name": "neosantara",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": true,
-    "tier": "community",
     "apiBase": "https://api.neosantara.xyz/v1",
     "envApiBase": "NEOSANTARA_API_BASE",
-    "envApiKey": "NEOSANTARA_API_KEY"
+    "envApiKey": "NEOSANTARA_API_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Neosantara",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "neosantara",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "community"
   },
   {
     "capabilities": {
@@ -900,11 +1854,39 @@
     },
     "documentationUrl": "https://docs.ollama.com/api/openai-compatibility",
     "name": "ollama",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": false,
-    "tier": "verified",
     "apiBase": "http://localhost:11434/v1",
-    "envApiBase": "OLLAMA_HOST"
+    "envApiBase": "OLLAMA_HOST",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Ollama",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "ollama",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "verified"
   },
   {
     "apiBase": "https://api.openai.com/v1",
@@ -930,7 +1912,66 @@
     "envApiKey": "OPENAI_API_KEY",
     "name": "openai",
     "requiresApiKey": true,
+    "configuration": {
+      "additionalProperties": false,
+      "authenticationModes": [
+        {
+          "fieldIds": ["apiKey", "apiBase"],
+          "id": "api_key",
+          "kind": "stored",
+          "label": "API key"
+        }
+      ],
+      "backwardCompatibleVersions": [1],
+      "fields": [
+        {
+          "connectionAffecting": true,
+          "id": "apiKey",
+          "label": "API key",
+          "required": true,
+          "secret": true,
+          "type": "secret"
+        },
+        {
+          "allowedSchemes": ["https"],
+          "connectionAffecting": true,
+          "id": "apiBase",
+          "label": "API base URL",
+          "required": false,
+          "secret": false,
+          "type": "url",
+          "defaultValue": "https://api.openai.com/v1"
+        }
+      ],
+      "id": "any-llm-ts.openai.credential",
+      "status": "supported",
+      "version": 1
+    },
+    "displayName": "OpenAI",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "openai",
     "promptCacheKeySupport": "supported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
     "tier": "verified"
   },
   {
@@ -953,12 +1994,40 @@
     },
     "documentationUrl": "https://openrouter.ai/docs/api-reference/overview",
     "name": "openrouter",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": true,
-    "tier": "verified",
     "apiBase": "https://openrouter.ai/api/v1",
     "envApiBase": "OPENROUTER_API_BASE",
-    "envApiKey": "OPENROUTER_API_KEY"
+    "envApiKey": "OPENROUTER_API_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "OpenRouter",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "openrouter",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "verified"
   },
   {
     "capabilities": {
@@ -983,7 +2052,35 @@
     "envApiKey": "OTARI_AI_TOKEN or GATEWAY_API_KEY",
     "name": "otari",
     "requiresApiKey": false,
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Otari",
+    "gateway": {
+      "completion": {
+        "abortSignal": "unsupported",
+        "dispatchEvidence": "unsupported",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": false,
+          "text": false,
+          "tools": false,
+          "usage": false
+        },
+        "providerOptions": "unbounded",
+        "retryControl": "unsupported"
+      },
+      "version": 1
+    },
+    "id": "otari",
     "promptCacheKeySupport": "passthrough",
+    "provenance": {
+      "adapterId": "any-llm-ts/otari",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
     "tier": "verified"
   },
   {
@@ -1006,12 +2103,40 @@
     },
     "documentationUrl": "https://docs.ovhcloud.com/en/guides/public-cloud/ai-machine-learning/ai-endpoints-getting-started",
     "name": "ovhcloud",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": true,
-    "tier": "community",
     "apiBase": "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
     "envApiBase": "OVHCLOUD_API_BASE",
-    "envApiKey": "OVHCLOUD_API_KEY"
+    "envApiKey": "OVHCLOUD_API_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Ovhcloud",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "ovhcloud",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "community"
   },
   {
     "capabilities": {
@@ -1033,12 +2158,40 @@
     },
     "documentationUrl": "https://docs.perplexity.ai/api-reference/chat-completions-post",
     "name": "perplexity",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": true,
-    "tier": "community",
     "apiBase": "https://api.perplexity.ai",
     "envApiBase": "PERPLEXITY_BASE_URL",
-    "envApiKey": "PERPLEXITY_API_KEY"
+    "envApiKey": "PERPLEXITY_API_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Perplexity",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "perplexity",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "community"
   },
   {
     "capabilities": {
@@ -1060,12 +2213,40 @@
     },
     "documentationUrl": "https://portkey.ai/docs/api-reference/inference-api/introduction",
     "name": "portkey",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": true,
-    "tier": "verified",
     "apiBase": "https://api.portkey.ai/v1",
     "envApiBase": "PORTKEY_API_BASE",
-    "envApiKey": "PORTKEY_API_KEY"
+    "envApiKey": "PORTKEY_API_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Portkey",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "portkey",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "verified"
   },
   {
     "capabilities": {
@@ -1087,12 +2268,40 @@
     },
     "documentationUrl": "https://developer.qiniu.com/aitokenapi",
     "name": "qiniu",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": true,
-    "tier": "community",
     "apiBase": "https://api.qnaigc.com/v1",
     "envApiBase": "QINIU_API_BASE",
-    "envApiKey": "QINIU_API_KEY"
+    "envApiKey": "QINIU_API_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Qiniu",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "qiniu",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "community"
   },
   {
     "capabilities": {
@@ -1114,12 +2323,40 @@
     },
     "documentationUrl": "https://docs.requesty.ai/",
     "name": "requesty",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": true,
-    "tier": "community",
     "apiBase": "https://router.requesty.ai/v1",
     "envApiBase": "REQUESTY_API_BASE",
-    "envApiKey": "REQUESTY_API_KEY"
+    "envApiKey": "REQUESTY_API_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Requesty",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "requesty",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "community"
   },
   {
     "capabilities": {
@@ -1144,7 +2381,35 @@
     "envApiKey": "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY",
     "name": "sagemaker",
     "requiresApiKey": false,
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Amazon SageMaker",
+    "gateway": {
+      "completion": {
+        "abortSignal": "unsupported",
+        "dispatchEvidence": "unsupported",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": false,
+          "text": false,
+          "tools": false,
+          "usage": false
+        },
+        "providerOptions": "unbounded",
+        "retryControl": "unsupported"
+      },
+      "version": 1
+    },
+    "id": "sagemaker",
     "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/sagemaker",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
     "tier": "community"
   },
   {
@@ -1167,12 +2432,40 @@
     },
     "documentationUrl": "https://docs.sambanova.ai/cloud/docs/api-reference/overview",
     "name": "sambanova",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": true,
-    "tier": "verified",
     "apiBase": "https://api.sambanova.ai/v1",
     "envApiBase": "SAMBANOVA_API_BASE",
-    "envApiKey": "SAMBANOVA_API_KEY"
+    "envApiKey": "SAMBANOVA_API_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Sambanova",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "sambanova",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "verified"
   },
   {
     "capabilities": {
@@ -1194,12 +2487,40 @@
     },
     "documentationUrl": "https://developers.telnyx.com/docs/inference/getting-started",
     "name": "telnyx",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": true,
-    "tier": "community",
     "apiBase": "https://api.telnyx.com/v2/ai",
     "envApiBase": "TELNYX_API_BASE",
-    "envApiKey": "TELNYX_API_KEY"
+    "envApiKey": "TELNYX_API_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Telnyx",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "telnyx",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "community"
   },
   {
     "apiBase": "https://api.together.xyz/v1",
@@ -1225,7 +2546,35 @@
     "envApiKey": "TOGETHER_API_KEY",
     "name": "together",
     "requiresApiKey": true,
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Together",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "together",
     "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
     "tier": "verified"
   },
   {
@@ -1251,7 +2600,35 @@
     "envApiKey": "GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION",
     "name": "vertexai",
     "requiresApiKey": false,
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Google Vertex AI",
+    "gateway": {
+      "completion": {
+        "abortSignal": "unsupported",
+        "dispatchEvidence": "unsupported",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": false,
+          "text": false,
+          "tools": false,
+          "usage": false
+        },
+        "providerOptions": "unbounded",
+        "retryControl": "unsupported"
+      },
+      "version": 1
+    },
+    "id": "vertexai",
     "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/vertexai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
     "tier": "community"
   },
   {
@@ -1277,7 +2654,35 @@
     "envApiKey": "GOOGLE_CLOUD_PROJECT",
     "name": "vertexaianthropic",
     "requiresApiKey": false,
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Vertex AI Anthropic",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "vertexaianthropic",
     "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/anthropic",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
     "tier": "community"
   },
   {
@@ -1300,12 +2705,40 @@
     },
     "documentationUrl": "https://docs.vllm.ai/en/latest/serving/openai_compatible_server/",
     "name": "vllm",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": false,
-    "tier": "community",
     "apiBase": "http://localhost:8000/v1",
     "envApiBase": "VLLM_API_BASE",
-    "envApiKey": "VLLM_API_KEY"
+    "envApiKey": "VLLM_API_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Vllm",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "vllm",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "community"
   },
   {
     "capabilities": {
@@ -1330,7 +2763,35 @@
     "envApiKey": "VOYAGE_API_KEY",
     "name": "voyage",
     "requiresApiKey": true,
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Voyage",
+    "gateway": {
+      "completion": {
+        "abortSignal": "unsupported",
+        "dispatchEvidence": "unsupported",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": false,
+          "text": false,
+          "tools": false,
+          "usage": false
+        },
+        "providerOptions": "unbounded",
+        "retryControl": "unsupported"
+      },
+      "version": 1
+    },
+    "id": "voyage",
     "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/voyage",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
     "tier": "verified"
   },
   {
@@ -1356,7 +2817,35 @@
     "envApiKey": "WATSONX_API_KEY",
     "name": "watsonx",
     "requiresApiKey": true,
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "IBM watsonx",
+    "gateway": {
+      "completion": {
+        "abortSignal": "unsupported",
+        "dispatchEvidence": "unsupported",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": false,
+          "text": false,
+          "tools": false,
+          "usage": false
+        },
+        "providerOptions": "unbounded",
+        "retryControl": "unsupported"
+      },
+      "version": 1
+    },
+    "id": "watsonx",
     "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/watsonx",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
     "tier": "community"
   },
   {
@@ -1379,12 +2868,40 @@
     },
     "documentationUrl": "https://docs.x.ai/docs/api-reference",
     "name": "xai",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": true,
-    "tier": "verified",
     "apiBase": "https://api.x.ai/v1",
     "envApiBase": "XAI_API_BASE",
-    "envApiKey": "XAI_API_KEY"
+    "envApiKey": "XAI_API_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Xai",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "xai",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "verified"
   },
   {
     "capabilities": {
@@ -1406,11 +2923,39 @@
     },
     "documentationUrl": "https://docs.z.ai/guides/develop/openai/introduction",
     "name": "zai",
-    "promptCacheKeySupport": "unsupported",
     "requiresApiKey": true,
-    "tier": "verified",
     "apiBase": "https://api.z.ai/api/paas/v4",
     "envApiBase": "ZAI_BASE_URL",
-    "envApiKey": "ZAI_API_KEY"
+    "envApiKey": "ZAI_API_KEY",
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Zai",
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "zai",
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.4.3"
+    },
+    "tier": "verified"
   }
 ]

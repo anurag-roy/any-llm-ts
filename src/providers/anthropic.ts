@@ -20,6 +20,7 @@ import type {
   ChatCompletion,
   ChatCompletionChunk,
   ChatMessage,
+  CompletionOperationOptions,
   CompletionParams,
   CompletionUsage,
   CreateBatchParams,
@@ -40,9 +41,11 @@ import type {
 } from "../types.js";
 import {
   compactObject,
+  completionRequestOptions,
   getEnvironmentVariable,
   isAsyncIterable,
   mapAsyncIterable,
+  notifyCompletionDispatch,
   timeoutRequestOptions,
   unixTimestamp,
 } from "../utils.js";
@@ -559,27 +562,32 @@ export class AnthropicProvider extends BaseProvider {
         apiKey: resolveApiKey(options),
         ...includeWhen(!(apiBase === undefined), { baseURL: apiBase }),
       });
-    this.metadata = completeProviderMetadata({
-      capabilities: { ...anthropicCapabilities, ...config.capabilities },
-      documentationUrl: config.documentationUrl ?? "https://docs.anthropic.com/en/api/",
-      envApiBase: config.envApiBase ?? "ANTHROPIC_BASE_URL",
-      envApiKey: config.envApiKey ?? "ANTHROPIC_API_KEY",
-      name: this.providerName,
-      requiresApiKey: config.requiresApiKey ?? true,
-      ...includeWhen(!(apiBase === undefined), { apiBase }),
-    });
+    this.metadata = completeProviderMetadata(
+      {
+        capabilities: { ...anthropicCapabilities, ...config.capabilities },
+        documentationUrl: config.documentationUrl ?? "https://docs.anthropic.com/en/api/",
+        envApiBase: config.envApiBase ?? "ANTHROPIC_BASE_URL",
+        envApiKey: config.envApiKey ?? "ANTHROPIC_API_KEY",
+        name: this.providerName,
+        requiresApiKey: config.requiresApiKey ?? true,
+        ...includeWhen(!(apiBase === undefined), { apiBase }),
+      },
+      "anthropic",
+    );
   }
 
   override completion(
     params: CompletionParams,
+    operation: CompletionOperationOptions = {},
   ): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion> {
     if (params.messages.length === 0) {
       return Promise.reject(new TypeError("The messages array cannot be empty."));
     }
     const request = this.completionRequest(params);
     return this.execute(async () => {
-      const requestOptions = timeoutRequestOptions(params.timeout);
+      const requestOptions = completionRequestOptions(params.timeout, operation);
       if (params.stream === true) {
+        notifyCompletionDispatch(this.metadata.id, operation);
         // SAFETY: The provider contract establishes the asserted representation at this boundary.
         const stream =
           requestOptions === undefined
@@ -601,6 +609,7 @@ export class AnthropicProvider extends BaseProvider {
           ),
         );
       }
+      notifyCompletionDispatch(this.metadata.id, operation);
       // SAFETY: The provider contract establishes the asserted representation at this boundary.
       const response =
         requestOptions === undefined
@@ -775,6 +784,7 @@ export class AnthropicProvider extends BaseProvider {
       (toolChoice ??= { type: "auto" }).disable_parallel_tool_use = !params.parallelToolCalls;
     }
     return {
+      ...params.providerOptions,
       ...convertedMessages,
       max_tokens: maxTokens,
       model: params.model,
@@ -787,7 +797,6 @@ export class AnthropicProvider extends BaseProvider {
       tool_choice: toolChoice,
       tools: convertTools(params.tools),
       top_p: params.topP,
-      ...params.providerOptions,
     };
   }
 

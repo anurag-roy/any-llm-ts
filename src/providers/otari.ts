@@ -485,6 +485,7 @@ export class OtariProvider extends OpenAIProvider {
         documentationUrl: "https://mozilla-ai.github.io/otari/",
         envApiBase: "OTARI_API_BASE or GATEWAY_API_BASE",
         envApiKey: "OTARI_AI_TOKEN or GATEWAY_API_KEY",
+        gatewayControls: false,
         name: "otari",
         requiresApiKey: false,
       },

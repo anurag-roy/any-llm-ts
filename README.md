@@ -158,6 +158,36 @@ const providers = AnyLLM.getAllProviderMetadata();
 
 Metadata also exposes the Python project's `verified`/`community` tier and prompt-cache-key policy. Provider registration reflects API compatibility, not a claim that every provider, model, region, and operation is continuously integration-tested with live credentials.
 
+## Gateway contracts
+
+Provider descriptors expose stable IDs, adapter and package provenance, capability metadata, and a closed credential-configuration contract. OpenAI and Anthropic publish versioned API-key schemas; providers whose configuration is not yet safely self-describing remain discoverable with `configuration.status === "unavailable"`.
+
+Use the second completion argument for controls that must never enter the Provider JSON payload:
+
+```ts
+import { completion, getProviderDescriptors } from "any-llm-ts";
+
+const controller = new AbortController();
+const dispatches = [];
+
+const response = await completion(
+  {
+    provider: "openai",
+    model: "gpt-4.1-mini",
+    messages: [{ role: "user", content: "Hello!" }],
+  },
+  {
+    signal: controller.signal,
+    retryPolicy: "none",
+    onDispatch: (evidence) => dispatches.push(evidence),
+  },
+);
+
+console.log(getProviderDescriptors());
+```
+
+`retryPolicy: "none"` sets the qualified Provider SDK's per-request retry count to zero. Dispatch evidence records that the adapter crossed into the Provider SDK; it does not claim that the Provider received or completed the request. A signal aborted before that boundary produces no dispatch event. For descriptors declaring `providerOptions: "normalized_fields_win"`, Provider extensions may add fields but cannot replace normalized completion fields.
+
 ## Other operations
 
 The reusable client exposes:
@@ -205,6 +235,7 @@ Extend `BaseProvider`, then register a factory. This keeps provider-specific tra
 import { registerProvider } from "any-llm-ts";
 
 // CompanyProvider extends BaseProvider and implements metadata and completion().
+// companyMetadata must include the complete, versioned Provider descriptor.
 registerProvider("company", (options) => new CompanyProvider(options), {
   metadata: companyMetadata,
 });

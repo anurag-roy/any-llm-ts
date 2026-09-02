@@ -126,6 +126,24 @@ export interface CompletionParams {
   user?: string;
 }
 
+/** Controls one completion invocation without adding transport concerns to its JSON payload. */
+export interface CompletionOperationOptions {
+  /** Receives the adapter boundary crossed immediately before a Provider SDK invocation. */
+  onDispatch?: (evidence: ProviderDispatchEvidence) => void;
+  /** Controls application-level retries performed by the Provider SDK. */
+  retryPolicy?: ProviderRetryPolicy;
+  /** Cancels this invocation and, for streams, continued upstream iteration. */
+  signal?: AbortSignal;
+}
+
+export interface ProviderDispatchEvidence {
+  boundary: "provider_sdk";
+  operation: "completion";
+  providerId: string;
+}
+
+export type ProviderRetryPolicy = "none" | "provider_default";
+
 export interface DirectCompletionParams extends CompletionParams {
   apiBase?: string;
   apiKey?: string;
@@ -724,20 +742,111 @@ export interface ProviderCapabilities {
   vision: boolean;
 }
 
+export type ProviderAuthenticationKind = "ambient" | "none" | "stored";
+
+export type ProviderConfigurationFieldType =
+  | "boolean"
+  | "enum"
+  | "integer"
+  | "multiline"
+  | "secret"
+  | "secret_document"
+  | "string"
+  | "url";
+
+export interface ProviderConfigurationChoice {
+  label: string;
+  value: string;
+}
+
+export interface ProviderConfigurationField {
+  connectionAffecting: boolean;
+  id: string;
+  label: string;
+  required: boolean;
+  secret: boolean;
+  type: ProviderConfigurationFieldType;
+  allowedSchemes?: string[];
+  choices?: ProviderConfigurationChoice[];
+  defaultValue?: JsonPrimitive;
+  description?: string;
+  maximum?: number;
+  minimum?: number;
+}
+
+export interface ProviderAuthenticationMode {
+  fieldIds: string[];
+  id: string;
+  kind: ProviderAuthenticationKind;
+  label: string;
+}
+
+export interface SupportedProviderConfiguration {
+  additionalProperties: false;
+  authenticationModes: ProviderAuthenticationMode[];
+  backwardCompatibleVersions: number[];
+  fields: ProviderConfigurationField[];
+  id: string;
+  status: "supported";
+  version: number;
+}
+
+export interface UnavailableProviderConfiguration {
+  reason: "provider_specific_contract_pending";
+  status: "unavailable";
+}
+
+export type ProviderConfiguration =
+  | SupportedProviderConfiguration
+  | UnavailableProviderConfiguration;
+
+export interface ProviderAdapterProvenance {
+  adapterId: string;
+  adapterVersion: string;
+  libraryName: "any-llm-ts";
+  libraryVersion: string;
+}
+
+export interface CompletionGatewayContract {
+  abortSignal: "supported" | "unsupported";
+  dispatchEvidence: "provider_sdk" | "unsupported";
+  normalizedOutput: {
+    safeErrors: boolean;
+    streaming: boolean;
+    text: boolean;
+    tools: boolean;
+    usage: boolean;
+  };
+  providerOptions: "normalized_fields_win" | "unbounded";
+  retryControl: "per_operation" | "unsupported";
+}
+
+export interface ProviderGatewayContract {
+  completion: CompletionGatewayContract;
+  version: 1;
+}
+
 export type PromptCacheKeySupport = "passthrough" | "supported" | "unsupported";
 export type ProviderTier = "community" | "verified";
 
 export interface ProviderMetadata {
   apiBase?: string;
   capabilities: ProviderCapabilities;
+  configuration: ProviderConfiguration;
+  displayName: string;
   documentationUrl: string;
   envApiBase?: string;
   envApiKey?: string;
+  gateway: ProviderGatewayContract;
+  id: string;
   name: string;
   promptCacheKeySupport: PromptCacheKeySupport;
+  provenance: ProviderAdapterProvenance;
   requiresApiKey: boolean;
   tier: ProviderTier;
 }
+
+export type ProviderDescriptor = ProviderMetadata;
 
 export interface ProviderOptions {
   apiBase?: string;

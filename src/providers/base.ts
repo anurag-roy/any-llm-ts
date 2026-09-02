@@ -9,6 +9,7 @@ import type {
   ChatCompletionChunk,
   Batch,
   BatchResult,
+  CompletionOperationOptions,
   CompletionParams,
   CreateBatchParams,
   EmbeddingParams,
@@ -44,6 +45,7 @@ export abstract class BaseProvider {
 
   abstract completion(
     params: CompletionParams,
+    options?: CompletionOperationOptions,
   ): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion>;
 
   responses(_params: ResponsesParams): Promise<AsyncIterable<ResponseStreamEvent> | Response> {
@@ -100,6 +102,7 @@ export abstract class BaseProvider {
 
   async messages(
     params: MessagesParams,
+    options?: CompletionOperationOptions,
   ): Promise<AsyncIterable<MessageStreamEvent> | MessageResponse> {
     if (params.contextManagement !== undefined || (params.betas?.length ?? 0) > 0) {
       throw new UnsupportedOperationError(
@@ -108,7 +111,7 @@ export abstract class BaseProvider {
       );
     }
     try {
-      const result = await this.completion(messagesToCompletionParams(params));
+      const result = await this.completion(messagesToCompletionParams(params), options);
       return Symbol.asyncIterator in result
         ? completionStreamToMessageEvents(result)
         : completionToMessageResponse(result);

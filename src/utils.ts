@@ -1,5 +1,5 @@
 import { normalizeProviderError } from "./errors.js";
-import type { JsonObject, JsonValue } from "./types.js";
+import type { CompletionOperationOptions, JsonObject, JsonValue } from "./types.js";
 
 type OptionalKeys<Value extends object> = {
   [Key in keyof Value]-?: undefined extends Value[Key] ? Key : never;
@@ -147,6 +147,40 @@ export function timeoutRequestOptions(
 ): { timeout: number } | undefined {
   const milliseconds = timeoutMilliseconds(timeout);
   return milliseconds === undefined ? undefined : { timeout: milliseconds };
+}
+
+interface CompletionSdkRequestOptions {
+  maxRetries?: number;
+  signal?: AbortSignal;
+  timeout?: number;
+}
+
+export function completionRequestOptions(
+  timeout: number | undefined,
+  operation: CompletionOperationOptions = {},
+): CompletionSdkRequestOptions | undefined {
+  const requestOptions: CompletionSdkRequestOptions = {};
+  const milliseconds = timeoutMilliseconds(timeout);
+  if (milliseconds !== undefined) requestOptions.timeout = milliseconds;
+  if (operation.signal !== undefined) requestOptions.signal = operation.signal;
+  if (operation.retryPolicy === "none") requestOptions.maxRetries = 0;
+  return Object.keys(requestOptions).length === 0 ? undefined : requestOptions;
+}
+
+export function notifyCompletionDispatch(
+  providerId: string,
+  operation: CompletionOperationOptions = {},
+): void {
+  operation.signal?.throwIfAborted();
+  try {
+    operation.onDispatch?.({
+      boundary: "provider_sdk",
+      operation: "completion",
+      providerId,
+    });
+  } catch {
+    // Evidence observers cannot alter whether an already-admitted operation is dispatched.
+  }
 }
 
 export function timeoutAbortOptions(

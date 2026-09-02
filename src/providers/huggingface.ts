@@ -103,6 +103,7 @@ export class HuggingFaceProvider extends OpenAIProvider {
         documentationUrl: "https://huggingface.co/docs/huggingface.js/inference/README",
         envApiBase: "HUGGINGFACE_API_BASE",
         envApiKey: "HF_TOKEN",
+        gatewayControls: false,
         name: "huggingface",
       },
       { ...options, apiKey },
