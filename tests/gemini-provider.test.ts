@@ -18,6 +18,7 @@ import {
   GeminiProvider,
   MissingApiKeyError,
   RateLimitError,
+  UnsupportedParameterError,
 } from "../src/index.js";
 import type {
   ChatCompletion,
@@ -511,10 +512,33 @@ describe("Gemini provider", () => {
 
     await provider.completion({
       messages: [{ content: "hi", role: "user" }],
+      model: "gemini-test",
+      toolChoice: {
+        allowed_tools: {
+          mode: "required",
+          tools: [
+            { function: { name: "get_weather" }, type: "function" },
+            { function: { name: "get_time" }, type: "function" },
+          ],
+        },
+        type: "allowed_tools",
+      },
+    });
+    expect(sdk.models.generateContent.mock.calls[3]?.[0].config).toMatchObject({
+      toolConfig: {
+        functionCallingConfig: {
+          allowedFunctionNames: ["get_weather", "get_time"],
+          mode: FunctionCallingConfigMode.ANY,
+        },
+      },
+    });
+
+    await provider.completion({
+      messages: [{ content: "hi", role: "user" }],
       model: "publishers/google/models/gemini-3.5-pro",
       reasoningEffort: "high",
     });
-    expect(sdk.models.generateContent.mock.calls[3]?.[0].config.thinkingConfig).toEqual({
+    expect(sdk.models.generateContent.mock.calls[4]?.[0].config.thinkingConfig).toEqual({
       includeThoughts: true,
       thinkingLevel: "HIGH",
     });
@@ -866,7 +890,7 @@ describe("Gemini provider", () => {
         model: "gemini-test",
         toolChoice: "something-else",
       }),
-    ).toThrow(/Unsupported Gemini toolChoice/u);
+    ).toThrow(UnsupportedParameterError);
     expect(() =>
       provider.completion({
         messages: [{ content: "Hi", role: "user" }],
@@ -937,6 +961,50 @@ describe("Gemini provider", () => {
         model: "gemini-test",
       }),
     ).toThrow(/valid base64 data URL/u);
+  });
+
+  it("rejects unsupported toolChoice forms instead of dropping them", () => {
+    const provider = new GeminiProvider({}, fakeGemini().client);
+    const unsupported = [
+      { type: "custom", custom: { name: "get_weather" } },
+      { type: "function" },
+      { function: { name: 1 }, type: "function" },
+      {
+        allowed_tools: {
+          mode: "auto",
+          tools: [{ function: { name: "get_weather" }, type: "function" }],
+        },
+        type: "allowed_tools",
+      },
+      { allowed_tools: { mode: "required", tools: [] }, type: "allowed_tools" },
+      { allowed_tools: { mode: "required" }, type: "allowed_tools" },
+      {
+        allowed_tools: {
+          mode: "required",
+          tools: [{ function: { name: "get_weather" }, type: "function" }, "get_time"],
+        },
+        type: "allowed_tools",
+      },
+      {
+        allowed_tools: {
+          mode: "required",
+          tools: [
+            { function: { name: "get_weather" }, type: "function" },
+            { function: { name: "" }, type: "function" },
+          ],
+        },
+        type: "allowed_tools",
+      },
+    ];
+    for (const toolChoice of unsupported) {
+      expect(() =>
+        provider.completion({
+          messages: [{ content: "Hi", role: "user" }],
+          model: "gemini-test",
+          toolChoice,
+        }),
+      ).toThrow(UnsupportedParameterError);
+    }
   });
 
   it("creates float embeddings and lists every model page", async () => {

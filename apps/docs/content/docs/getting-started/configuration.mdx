@@ -52,11 +52,13 @@ hard-code these options rather than accepting them directly from untrusted calle
 
 ## Azure OpenAI
 
-Azure OpenAI requires both an endpoint and an API key:
+Azure OpenAI requires an endpoint and either an API key or a Microsoft Entra credential:
 
 ```bash
 export AZURE_OPENAI_ENDPOINT="https://example.openai.azure.com"
 export AZURE_OPENAI_API_KEY="..."
+# or
+export AZURE_OPENAI_AD_TOKEN="..."
 export OPENAI_API_VERSION="2024-10-21" # optional
 ```
 
@@ -65,7 +67,7 @@ const azure = AnyLLM.create("azureopenai");
 ```
 
 The default API version is `2024-10-21`. You can pass Azure SDK constructor fields through
-`clientOptions` when necessary.
+`clientOptions` when necessary, including `azureADTokenProvider` for Entra ID.
 
 ## Inspect effective metadata
 
