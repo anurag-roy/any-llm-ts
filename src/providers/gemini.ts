@@ -480,8 +480,37 @@ function convertFunctionTools(
   return converted.length === 0 ? undefined : converted;
 }
 
+function toolFunctionName(value: JsonObject | undefined): string | undefined {
+  const name = value?.name;
+  return isString(name) && name.length > 0 ? name : undefined;
+}
+
+function allowedFunctionNames(value: JsonObject): string[] | undefined {
+  if (value.type === "allowed_tools") {
+    const allowed = asRecord(value.allowed_tools);
+    if (allowed === undefined || allowed.mode !== "required" || !Array.isArray(allowed.tools)) {
+      return undefined;
+    }
+    const names: string[] = [];
+    for (const tool of allowed.tools) {
+      const record = asRecord(tool);
+      if (record === undefined || record.type !== "function") return undefined;
+      const name = toolFunctionName(asRecord(record.function));
+      if (name === undefined) return undefined;
+      names.push(name);
+    }
+    return names.length === 0 ? undefined : names;
+  }
+  if (value.type === "function") {
+    const name = toolFunctionName(asRecord(value.function));
+    return name === undefined ? undefined : [name];
+  }
+  return undefined;
+}
+
 function convertToolChoice(
   value: CompletionParams["toolChoice"],
+  provider: string,
 ): GenerateContentConfig["toolConfig"] {
   if (value === undefined) return undefined;
   if (value === "auto") {
@@ -499,18 +528,22 @@ function convertToolChoice(
     };
   }
   if (isObject(value)) {
-    const name = asRecord(value.function)?.name;
-    if (isString(name) && name.length > 0) {
+    const names = allowedFunctionNames(value);
+    if (names !== undefined) {
       return {
         functionCallingConfig: {
-          allowedFunctionNames: [name],
+          allowedFunctionNames: names,
           mode: FunctionCallingConfigMode.ANY,
         },
       };
     }
   }
   const description = isString(value) ? value : JSON.stringify(value);
-  throw new TypeError(`Unsupported Gemini toolChoice value: ${description}.`);
+  throw new UnsupportedParameterError(
+    "toolChoice",
+    provider,
+    `Unsupported toolChoice: ${description}`,
+  );
 }
 
 function structuredOutput(
@@ -993,7 +1026,7 @@ export class GeminiProvider extends BaseProvider {
   private completionRequest(params: CompletionParams): GenerateContentParameters {
     const converted = convertMessages(params.messages);
     const tools = convertFunctionTools(params.tools, this.providerName);
-    const toolConfig = convertToolChoice(params.toolChoice);
+    const toolConfig = convertToolChoice(params.toolChoice, this.providerName);
     const thinkingConfig = thinkingConfiguration(params.reasoningEffort, params.model);
     const output = structuredOutput(params.responseFormat);
     // SAFETY: The provider contract establishes the asserted representation at this boundary.

@@ -100,7 +100,9 @@ function completionResponse() {
 afterEach(() => {
   delete process.env.TEST_API_BASE;
   delete process.env.TEST_API_KEY;
+  delete process.env.AZURE_OPENAI_AD_TOKEN;
   delete process.env.AZURE_OPENAI_API_KEY;
+  delete process.env.AZURE_OPENAI_ENDPOINT;
 });
 
 describe("OpenAI-compatible provider", () => {
@@ -816,5 +818,20 @@ describe("Azure OpenAI provider", () => {
       apiBase: "https://resource.openai.azure.com",
       name: "azureopenai",
     });
+  });
+
+  it("accepts an Entra token or token provider instead of an API key", () => {
+    expect(
+      () =>
+        new AzureOpenAIProvider({
+          apiBase: "https://resource.openai.azure.com",
+          clientOptions: { azureADTokenProvider: async () => "token" },
+        }),
+    ).not.toThrow();
+
+    process.env.AZURE_OPENAI_AD_TOKEN = "token";
+    expect(
+      () => new AzureOpenAIProvider({ apiBase: "https://resource.openai.azure.com" }),
+    ).not.toThrow();
   });
 });

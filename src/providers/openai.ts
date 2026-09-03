@@ -114,6 +114,11 @@ interface AzureProviderOptions extends ProviderOptions {
   apiVersion?: string;
 }
 
+interface AzureOpenAIClientOptions {
+  azureADToken?: string;
+  azureADTokenProvider?: () => Promise<string>;
+}
+
 interface OpenAIMessageRequest {
   content: ChatMessage["content"];
   extra_content?: JsonObject;
@@ -1347,7 +1352,25 @@ export class AzureOpenAIProvider extends OpenAIProvider {
   constructor(options: AzureProviderOptions = {}) {
     const endpoint = options.apiBase ?? getEnvironmentVariable("AZURE_OPENAI_ENDPOINT");
     const apiKey = options.apiKey ?? getEnvironmentVariable("AZURE_OPENAI_API_KEY");
-    if (apiKey === undefined) throw new MissingApiKeyError("azureopenai", "AZURE_OPENAI_API_KEY");
+    // SAFETY: The provider contract establishes the asserted representation at this boundary.
+    const clientOptions = {
+      ...options.clientOptions,
+    } as AzureOpenAIClientOptions;
+    const {
+      azureADToken: clientAzureADToken,
+      azureADTokenProvider: clientAzureADTokenProvider,
+      ...sdkClientOptions
+    } = clientOptions;
+    const azureADToken =
+      (isString(clientAzureADToken) && clientAzureADToken.length > 0
+        ? clientAzureADToken
+        : undefined) ?? getEnvironmentVariable("AZURE_OPENAI_AD_TOKEN");
+    const tokenProvider =
+      clientAzureADTokenProvider ??
+      (azureADToken === undefined ? undefined : () => Promise.resolve(azureADToken));
+    if (apiKey === undefined && tokenProvider === undefined) {
+      throw new MissingApiKeyError("azureopenai", "AZURE_OPENAI_API_KEY");
+    }
     if (endpoint === undefined) {
       throw new TypeError(
         "Azure OpenAI requires apiBase or the AZURE_OPENAI_ENDPOINT environment variable.",
@@ -1357,8 +1380,9 @@ export class AzureOpenAIProvider extends OpenAIProvider {
       options.apiVersion ?? getEnvironmentVariable("OPENAI_API_VERSION") ?? "2024-10-21";
     // SAFETY: The provider contract establishes the asserted representation at this boundary.
     const azureOptions = {
-      ...options.clientOptions,
-      apiKey,
+      ...sdkClientOptions,
+      ...includeWhen(!(apiKey === undefined), { apiKey }),
+      ...includeWhen(!(tokenProvider === undefined), { azureADTokenProvider: tokenProvider }),
       apiVersion,
       endpoint,
     } as ConstructorParameters<typeof AzureOpenAI>[0];
