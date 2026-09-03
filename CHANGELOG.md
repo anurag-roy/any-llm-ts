@@ -1,5 +1,11 @@
 # any-llm-ts
 
+## 0.5.1
+
+### Patch Changes
+
+- fe699f8: Sync with Python any-llm through `909d26e`: map Gemini `allowed_tools` toolChoice, report unsupported Gemini toolChoice as `UnsupportedParameterError`, and accept Azure OpenAI Entra tokens.
+
 ## 0.5.0
 
 ### Minor Changes
