@@ -5,7 +5,7 @@ import type { JsonObject } from "../types.js";
 import { isFunction, isJsonValue, isNumber, isObject, isString } from "../utils.js";
 import { readFile } from "node:fs/promises";
 
-import { BatchNotCompleteError } from "../errors.js";
+import { BatchNotCompleteError, UnsupportedParameterError } from "../errors.js";
 import type {
   Batch,
   BatchResult,
@@ -575,6 +575,9 @@ export class OtariProvider extends OpenAIProvider {
   override messages(
     params: MessagesParams,
   ): Promise<AsyncIterable<MessageStreamEvent> | MessageResponse> {
+    if (params.container !== undefined) {
+      return Promise.reject(new UnsupportedParameterError("container", this.metadata.name));
+    }
     return this.execute(async () => {
       const { providerOptions, ...request } = params;
       const messageRequest: JsonObject = parseJsonObject(

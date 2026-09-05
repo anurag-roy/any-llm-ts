@@ -104,6 +104,9 @@ export abstract class BaseProvider {
     params: MessagesParams,
     options?: CompletionOperationOptions,
   ): Promise<AsyncIterable<MessageStreamEvent> | MessageResponse> {
+    if (params.container !== undefined) {
+      throw new UnsupportedOperationError("Messages container continuity", this.metadata.name);
+    }
     if (params.contextManagement !== undefined || (params.betas?.length ?? 0) > 0) {
       throw new UnsupportedOperationError(
         "Messages context management and beta features",

@@ -86,6 +86,7 @@ export class MetaProvider extends OpenAIProvider {
       );
     }
     for (const [name, value] of [
+      ["container", params.container],
       ["promptCacheKey", params.promptCacheKey],
       ["stopSequences", params.stopSequences],
       ["topK", params.topK],
