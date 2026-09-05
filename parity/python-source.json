@@ -1,7 +1,7 @@
 {
   "source": {
     "repository": "mozilla-ai/any-llm",
-    "commit": "c1f167bc0d24d6321e2e02a61cf4363ccb6c3246"
+    "commit": "2388f5903c3a34c081657bbe23b9320cd17264f5"
   },
   "providers": [
     "anthropic",
