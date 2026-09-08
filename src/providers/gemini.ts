@@ -641,7 +641,9 @@ function normalizeUsage(
   value: GenerateContentResponse["usageMetadata"],
 ): CompletionUsage | undefined {
   if (value === undefined) return undefined;
-  const promptTokens = value.promptTokenCount ?? 0;
+  // Gemini excludes tool-use prompt tokens from promptTokenCount but includes
+  // them in totalTokenCount. OpenAI-shaped usage folds that category into promptTokens.
+  const promptTokens = (value.promptTokenCount ?? 0) + (value.toolUsePromptTokenCount ?? 0);
   const completionTokens = (value.candidatesTokenCount ?? 0) + (value.thoughtsTokenCount ?? 0);
   const totalTokens = value.totalTokenCount ?? promptTokens + completionTokens;
   const promptTokensDetails =
