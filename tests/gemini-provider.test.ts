@@ -408,6 +408,41 @@ describe("Gemini provider", () => {
     expect(result.raw).toBe(generated);
   });
 
+  it("includes tool-use prompt tokens in promptTokens", async () => {
+    const sdk = fakeGemini({
+      generateContent: vi.fn().mockResolvedValue(
+        response({
+          candidates: [
+            {
+              content: { parts: [{ text: "Hello!" }], role: "model" },
+              finishReason: GeminiFinishReason.STOP,
+            },
+          ],
+          usageMetadata: {
+            cachedContentTokenCount: 80,
+            candidatesTokenCount: 20,
+            promptTokenCount: 100,
+            toolUsePromptTokenCount: 10,
+            totalTokenCount: 130,
+          },
+        }),
+      ),
+    });
+    const provider = new GeminiProvider({}, sdk.client);
+    // SAFETY: stream is unset, so completion returns ChatCompletion.
+    const result = (await provider.completion({
+      messages: [{ content: "Hello", role: "user" }],
+      model: "gemini-test",
+    })) as ChatCompletion;
+
+    expect(result.usage).toEqual({
+      completionTokens: 20,
+      promptTokens: 110,
+      promptTokensDetails: { cachedTokens: 80 },
+      totalTokens: 130,
+    });
+  });
+
   it("uses defaults, supports tool modes, and adds the thought-signature sentinel", async () => {
     const sdk = fakeGemini({
       generateContent: vi.fn().mockResolvedValue(
@@ -744,6 +779,45 @@ describe("Gemini provider", () => {
       },
     });
     expect(chunks[1]?.choices[0]?.delta.role).toBeUndefined();
+  });
+
+  it("includes tool-use prompt tokens in streaming usage", async () => {
+    const stream = responses(
+      response({
+        candidates: [
+          {
+            content: { parts: [{ text: "Hello!" }], role: "model" },
+            finishReason: GeminiFinishReason.STOP,
+          },
+        ],
+        modelVersion: "gemini-2.5-flash",
+        usageMetadata: {
+          cachedContentTokenCount: 80,
+          candidatesTokenCount: 20,
+          promptTokenCount: 100,
+          toolUsePromptTokenCount: 10,
+          totalTokenCount: 130,
+        },
+      }),
+    );
+    const sdk = fakeGemini({
+      generateContentStream: vi.fn().mockResolvedValue(stream),
+    });
+    const provider = new GeminiProvider({}, sdk.client);
+    const result = await provider.completion({
+      messages: [{ content: "Hello", role: "user" }],
+      model: "gemini-test",
+      stream: true,
+    });
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    const chunks = await collect(result as AsyncIterable<ChatCompletionChunk>);
+
+    expect(chunks[0]?.usage).toEqual({
+      completionTokens: 20,
+      promptTokens: 110,
+      promptTokensDetails: { cachedTokens: 80 },
+      totalTokens: 130,
+    });
   });
 
   it("surfaces blocked prompts and structured-output terminal failures", async () => {
