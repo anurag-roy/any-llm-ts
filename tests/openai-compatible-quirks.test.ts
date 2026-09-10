@@ -3,10 +3,12 @@ import OpenAI from "openai";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  InvalidRequestError,
   UnsupportedParameterError,
   type ChatCompletion,
   type ChatCompletionChunk,
   type JsonObject,
+  type ReasoningEffort,
 } from "../src/index.js";
 import { OpenAIProvider } from "../src/providers/openai.js";
 
@@ -110,6 +112,12 @@ describe("OpenAI-compatible provider quirks", () => {
         },
         type: "json_schema",
       },
+      tools: [
+        {
+          function: { name: "lookup", parameters: { type: "object" } },
+          type: "function",
+        },
+      ],
     });
     expect(Symbol.asyncIterator in result).toBe(false);
     if (!(Symbol.asyncIterator in result)) {
@@ -123,15 +131,42 @@ describe("OpenAI-compatible provider quirks", () => {
     expect(request).toMatchObject({
       max_tokens: 100,
       response_format: { type: "json_object" },
-      thinking: { type: "disabled" },
     });
     expect(request).not.toHaveProperty("max_completion_tokens");
+    expect(request).not.toHaveProperty("thinking");
+    expect(request).not.toHaveProperty("reasoning_effort");
     expect(request.messages[0].reasoning_content).toBe("prior thought");
+    expect(request.messages[0]).not.toHaveProperty("extra_content");
     expect(request.messages[1].content).toContain("JSON object");
     expect(request.messages[1].content).toContain("Return an answer");
   });
 
-  it("keeps legacy DeepSeek models free of the thinking toggle", async () => {
+  it("leaves DeepSeek thinking and effort unset for auto and omitted reasoningEffort", async () => {
+    const create = vi.fn().mockResolvedValue(response("ok"));
+    const provider = new OpenAIProvider(
+      config("deepseek", {
+        maxCompletionTokensAsMaxTokens: true,
+        reasoningDirective: "deepseek",
+      }),
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+    await provider.completion({
+      messages: [{ content: "hello", role: "user" }],
+      model: "deepseek-v4-flash",
+    });
+    await provider.completion({
+      messages: [{ content: "hello", role: "user" }],
+      model: "deepseek-v4-flash",
+      reasoningEffort: "auto",
+    });
+    expect(create.mock.calls[0]?.[0]).not.toHaveProperty("thinking");
+    expect(create.mock.calls[0]?.[0]).not.toHaveProperty("reasoning_effort");
+    expect(create.mock.calls[1]?.[0]).not.toHaveProperty("thinking");
+    expect(create.mock.calls[1]?.[0]).not.toHaveProperty("reasoning_effort");
+  });
+
+  it("disables DeepSeek thinking for an explicit none effort", async () => {
     const create = vi.fn().mockResolvedValue(response("ok"));
     const provider = new OpenAIProvider(
       config("deepseek", { reasoningDirective: "deepseek" }),
@@ -140,10 +175,187 @@ describe("OpenAI-compatible provider quirks", () => {
     );
     await provider.completion({
       messages: [{ content: "hello", role: "user" }],
-      model: "deepseek-chat",
-      reasoningEffort: "high",
+      model: "deepseek-v4-pro",
+      reasoningEffort: "none",
     });
-    expect(create.mock.calls[0]?.[0]).not.toHaveProperty("thinking");
+    expect(create.mock.calls[0]?.[0]).toMatchObject({
+      thinking: { type: "disabled" },
+    });
+    expect(create.mock.calls[0]?.[0]).not.toHaveProperty("reasoning_effort");
+  });
+
+  it.each([
+    ["low", "low"],
+    ["medium", "high"],
+    ["high", "high"],
+    ["xhigh", "high"],
+    ["max", "max"],
+  ] as const)(
+    "maps DeepSeek reasoningEffort %s to %s with thinking enabled",
+    async (effort, mapped) => {
+      const create = vi.fn().mockResolvedValue(response("ok"));
+      const provider = new OpenAIProvider(
+        config("deepseek", { reasoningDirective: "deepseek" }),
+        {},
+        fakeClient({ chat: { completions: { create } } }),
+      );
+      await provider.completion({
+        messages: [{ content: "hello", role: "user" }],
+        model: "deepseek-v4-flash",
+        reasoningEffort: effort satisfies ReasoningEffort,
+      });
+      expect(create.mock.calls[0]?.[0]).toMatchObject({
+        reasoning_effort: mapped,
+        thinking: { type: "enabled" },
+      });
+    },
+  );
+
+  it("rejects DeepSeek reasoningEffort values the Chat API does not accept", async () => {
+    const provider = new OpenAIProvider(
+      config("deepseek", { reasoningDirective: "deepseek" }),
+      {},
+      fakeClient(),
+    );
+    await expect(
+      provider.completion({
+        messages: [{ content: "hello", role: "user" }],
+        model: "deepseek-v4-pro",
+        reasoningEffort: "minimal",
+      }),
+    ).rejects.toBeInstanceOf(InvalidRequestError);
+  });
+
+  it("maps DeepSeek user to user_id and drops unsupported Chat fields", async () => {
+    const create = vi.fn().mockResolvedValue(response("ok"));
+    const providerOptions = { custom: "value" };
+    const provider = new OpenAIProvider(
+      config("deepseek", {
+        maxCompletionTokensAsMaxTokens: true,
+        reasoningDirective: "deepseek",
+      }),
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+    const userId = "a".repeat(512);
+    await provider.completion({
+      frequencyPenalty: 0.5,
+      logitBias: { "123": 1 },
+      messages: [
+        {
+          content: "hello",
+          extraContent: { deepseek: { reasoning_content: "I should use lookup." } },
+          role: "assistant",
+        },
+        { content: "Use the lookup tool", role: "user" },
+      ],
+      model: "deepseek-v4-pro",
+      n: 2,
+      parallelToolCalls: false,
+      presencePenalty: 0.5,
+      providerOptions,
+      reasoningEffort: "medium",
+      seed: 7,
+      serviceTier: "priority",
+      tools: [
+        {
+          function: { name: "lookup", parameters: { type: "object" } },
+          type: "function",
+        },
+      ],
+      user: userId,
+    });
+    const request = create.mock.calls[0]?.[0];
+    expect(request).toMatchObject({
+      custom: "value",
+      reasoning_effort: "high",
+      thinking: { type: "enabled" },
+      user_id: userId,
+    });
+    expect(request.messages[0].reasoning_content).toBe("I should use lookup.");
+    expect(request.messages[0]).not.toHaveProperty("extra_content");
+    expect(request).not.toHaveProperty("user");
+    expect(request).not.toHaveProperty("n");
+    expect(request).not.toHaveProperty("frequency_penalty");
+    expect(request).not.toHaveProperty("presence_penalty");
+    expect(request).not.toHaveProperty("seed");
+    expect(request).not.toHaveProperty("parallel_tool_calls");
+    expect(request).not.toHaveProperty("logit_bias");
+    expect(request).not.toHaveProperty("service_tier");
+    expect(providerOptions).toEqual({ custom: "value" });
+  });
+
+  it.each([
+    ["empty", ""],
+    ["punctuation", "account.42"],
+    ["too long", "a".repeat(513)],
+  ])("rejects an invalid DeepSeek user_id (%s)", async (_label, userId) => {
+    const provider = new OpenAIProvider(
+      config("deepseek", { reasoningDirective: "deepseek" }),
+      {},
+      fakeClient(),
+    );
+    await expect(
+      provider.completion({
+        messages: [{ content: "hello", role: "user" }],
+        model: "deepseek-v4-flash",
+        user: userId,
+      }),
+    ).rejects.toBeInstanceOf(InvalidRequestError);
+  });
+
+  it("keeps caller DeepSeek thinking and user_id overrides without validating the shared user", async () => {
+    const create = vi.fn().mockResolvedValue(response("ok"));
+    const provider = new OpenAIProvider(
+      config("deepseek", { reasoningDirective: "deepseek" }),
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+    await provider.completion({
+      messages: [{ content: "hello", role: "user" }],
+      model: "deepseek-v4-flash",
+      providerOptions: {
+        thinking: { type: "disabled" },
+        user_id: "caller-user",
+      },
+      reasoningEffort: "max",
+      user: "ignored.invalid-user",
+    });
+    expect(create.mock.calls[0]?.[0]).toMatchObject({
+      reasoning_effort: "max",
+      thinking: { type: "disabled" },
+      user_id: "caller-user",
+    });
+    expect(create.mock.calls[0]?.[0]).not.toHaveProperty("user");
+  });
+
+  it("replays DeepSeek reasoning on every assistant turn only when tools are present", async () => {
+    const create = vi.fn().mockResolvedValue(response("ok"));
+    const provider = new OpenAIProvider(
+      config("deepseek", { reasoningDirective: "deepseek" }),
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+    const messages = [
+      {
+        content: "hello",
+        extraContent: { deepseek: { reasoning_content: "greeting" } },
+        role: "assistant" as const,
+      },
+    ];
+    await provider.completion({
+      messages,
+      model: "deepseek-v4-pro",
+      tools: [{ function: { name: "lookup" }, type: "function" }],
+    });
+    await provider.completion({
+      messages,
+      model: "deepseek-v4-pro",
+    });
+    expect(create.mock.calls[0]?.[0].messages[0].reasoning_content).toBe("greeting");
+    expect(create.mock.calls[0]?.[0].messages[0]).not.toHaveProperty("extra_content");
+    expect(create.mock.calls[1]?.[0].messages[0]).not.toHaveProperty("reasoning_content");
+    expect(create.mock.calls[1]?.[0].messages[0]).not.toHaveProperty("extra_content");
   });
 
   it.each(["openrouter", "requesty"] as const)("maps reasoning directives for %s", async (name) => {

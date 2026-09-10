@@ -1,8 +1,8 @@
 {
   "source": {
     "repository": "mozilla-ai/any-llm",
-    "commit": "c2420fac99c438518249dc56880aaee565a20efd"  },
-  "providers": [
+    "commit": "d1378116f9fc9528892044712e0ab2bb17d0aa6e"
+  },  "providers": [
     "anthropic",
     "atlascloud",
     "azure",
