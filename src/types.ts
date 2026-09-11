@@ -605,6 +605,7 @@ export interface MessagesParams {
   cacheControl?: JsonObject;
   contextManagement?: JsonObject;
   metadata?: JsonObject;
+  /** Raw Anthropic `output_config`, or a bare `{ type: "json_schema", schema }` format object. */
   outputFormat?: JsonObject;
   promptCacheKey?: string;
   providerOptions?: JsonObject;

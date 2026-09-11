@@ -42,6 +42,8 @@ import { mapAsyncIterableErrors } from "../utils.js";
 
 export abstract class BaseProvider {
   abstract readonly metadata: ProviderMetadata;
+  /** Whether native Messages structured output can be streamed. */
+  readonly supportsMessagesStructuredOutputStreaming: boolean = false;
 
   abstract completion(
     params: CompletionParams,

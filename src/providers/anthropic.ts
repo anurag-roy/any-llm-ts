@@ -541,6 +541,7 @@ function anthropicUsage(value: JsonObject): CompletionUsage {
 }
 
 export class AnthropicProvider extends BaseProvider {
+  override readonly supportsMessagesStructuredOutputStreaming = true;
   readonly metadata: ProviderMetadata;
   private readonly client: Anthropic;
   private readonly providerName: string;

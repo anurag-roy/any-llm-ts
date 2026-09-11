@@ -72,3 +72,7 @@ for await (const event of events) {
 Compatibility streams emit the standard message-start, content-block, message-delta, and
 message-stop lifecycle. Native-only beta and context-management options reject on adapters that
 cannot preserve their semantics.
+
+Anthropic and Otari can stream schema-constrained Messages events together with `outputFormat`.
+Other providers reject that combination because structured Messages parsing needs a complete
+response.
