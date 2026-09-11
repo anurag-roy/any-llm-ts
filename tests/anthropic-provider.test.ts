@@ -285,6 +285,30 @@ describe("Anthropic provider", () => {
     });
   });
 
+  it("streams a nested outputFormat on the native Messages call", async () => {
+    const create = vi.fn().mockResolvedValue(
+      (async function* events(): AsyncIterable<JsonObject> {
+        yield { type: "message_stop" };
+      })(),
+    );
+    const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
+    const stream = await provider.messages({
+      maxTokens: 1024,
+      messages: [{ content: "Capital of France?", role: "user" }],
+      model: "claude-test",
+      outputFormat: { schema: { type: "object" }, type: "json_schema" },
+      stream: true,
+    });
+    const values: { type: string }[] = [];
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    for await (const event of stream as AsyncIterable<{ type: string }>) values.push(event);
+    expect(values).toEqual([{ type: "message_stop" }]);
+    expect(create.mock.calls[0]?.[0]).toMatchObject({
+      output_config: { format: { schema: { type: "object" }, type: "json_schema" } },
+      stream: true,
+    });
+  });
+
   it("propagates abort, disables SDK retries, and exposes dispatch for responses and streams", async () => {
     const create = vi
       .fn()

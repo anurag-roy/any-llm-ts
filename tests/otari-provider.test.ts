@@ -576,4 +576,98 @@ describe("Otari provider", () => {
       provider.retrieveBatchResults("batch-1", { provider: "openai" }),
     ).rejects.toBeInstanceOf(BatchNotCompleteError);
   });
+
+  it("keeps structured Messages on the native endpoint", async () => {
+    const message = vi.fn().mockResolvedValue({
+      content: [{ text: '{"city":"Paris"}', type: "text" }],
+      id: "message-1",
+      model: "anthropic:claude",
+      role: "assistant",
+      stopReason: "end_turn",
+      type: "message",
+      usage: { inputTokens: 2, outputTokens: 1 },
+    });
+    const completion = vi.fn();
+    const provider = new OtariProvider(
+      { apiBase: "https://otari.example" },
+      fakeClient({ completion, message }),
+    );
+    await provider.messages({
+      betas: ["compact-2026-01-12"],
+      cacheControl: { type: "ephemeral" },
+      contextManagement: { edits: [{ type: "compact_20260112" }] },
+      maxTokens: 100,
+      messages: [{ content: "Capital of France?", role: "user" }],
+      model: "anthropic:claude",
+      outputFormat: { schema: { type: "object" }, type: "json_schema" },
+    });
+    expect(completion).not.toHaveBeenCalled();
+    expect(message).toHaveBeenCalledWith(
+      expect.objectContaining({
+        betas: ["compact-2026-01-12"],
+        cache_control: { type: "ephemeral" },
+        context_management: { edits: [{ type: "compact_20260112" }] },
+        output_format: { format: { schema: { type: "object" }, type: "json_schema" } },
+      }),
+    );
+  });
+
+  it("streams structured Messages on the native endpoint", async () => {
+    async function* events() {
+      yield { type: "message_stop" };
+    }
+    const message = vi.fn().mockResolvedValue(events());
+    const completion = vi.fn();
+    const provider = new OtariProvider(
+      { apiBase: "https://otari.example" },
+      fakeClient({ completion, message }),
+    );
+    const stream = await provider.messages({
+      maxTokens: 100,
+      messages: [{ content: "Capital of France?", role: "user" }],
+      model: "anthropic:claude",
+      outputFormat: { schema: { type: "object" }, type: "json_schema" },
+      stream: true,
+    });
+    const collected: { type: string }[] = [];
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    for await (const event of stream as AsyncIterable<{ type: string }>) collected.push(event);
+    expect(collected).toEqual([{ type: "message_stop" }]);
+    expect(completion).not.toHaveBeenCalled();
+    expect(message).toHaveBeenCalledWith(
+      expect.objectContaining({
+        output_format: { format: { schema: { type: "object" }, type: "json_schema" } },
+        stream: true,
+      }),
+    );
+  });
+
+  it("forwards schema-less outputFormat as a native Messages configuration", async () => {
+    const message = vi.fn().mockResolvedValue({
+      content: [{ text: "hi", type: "text" }],
+      id: "message-1",
+      model: "anthropic:claude",
+      role: "assistant",
+      stopReason: "end_turn",
+      type: "message",
+      usage: { inputTokens: 1, outputTokens: 1 },
+    });
+    const provider = new OtariProvider(
+      { apiBase: "https://otari.example" },
+      fakeClient({ message }),
+    );
+    await expect(
+      provider.messages({
+        maxTokens: 100,
+        messages: [{ content: "Hello", role: "user" }],
+        model: "anthropic:claude",
+        outputFormat: { effort: "high" },
+      }),
+    ).resolves.toMatchObject({
+      content: [{ text: "hi", type: "text" }],
+    });
+    expect(message).toHaveBeenCalledWith(
+      expect.objectContaining({ output_format: { effort: "high" } }),
+    );
+  });
 });

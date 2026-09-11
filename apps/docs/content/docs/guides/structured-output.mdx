@@ -41,7 +41,9 @@ console.log(response.choices[0]?.message.parsed?.city);
 ```
 
 Use `responseFormat` for completions and Responses, and `outputFormat` for Messages. Typed parsing
-is non-streaming because a complete JSON value is required. `LengthFinishReasonError` and
+returns a complete JSON value, so it is non-streaming. Anthropic and Otari can still stream
+schema-constrained Messages events when `outputFormat` is set; those streams are unparsed events
+rather than `ParsedMessageResponse`. `LengthFinishReasonError` and
 `ContentFilterFinishReasonError` preserve the partial normalized completion when parsing cannot
 finish for those reasons.
 

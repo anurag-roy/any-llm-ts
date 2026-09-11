@@ -67,14 +67,46 @@ import { completeProviderMetadata } from "../provider-metadata.js";
 const INLINE_DATA_LIMIT_BYTES = 20 * 1024 * 1024;
 const SKIP_THOUGHT_SIGNATURE_VALIDATOR = "skip_thought_signature_validator";
 
+type GeminiThinkingLevel = "HIGH" | "LOW" | "MEDIUM" | "MINIMAL";
+
 const reasoningBudgets = {
   high: 24_576,
   low: 1_024,
   max: 32_768,
   medium: 8_192,
-  minimal: 256,
+  minimal: 1_024,
   xhigh: 32_768,
 } as const;
+
+const reasoningEffortToThinkingLevels = {
+  high: "HIGH",
+  low: "LOW",
+  max: "HIGH",
+  medium: "MEDIUM",
+  minimal: "MINIMAL",
+  xhigh: "HIGH",
+} as const satisfies Record<string, GeminiThinkingLevel>;
+
+const allThinkingLevels = new Set<GeminiThinkingLevel>(["HIGH", "LOW", "MEDIUM", "MINIMAL"]);
+
+const thinkingLevelsByModel: [string, ReadonlySet<GeminiThinkingLevel>][] = [
+  ["gemini-3.8-flash", new Set(["HIGH", "LOW", "MEDIUM"])],
+  ["gemini-3.7-flash", new Set(["HIGH", "LOW", "MEDIUM"])],
+  ["gemini-3.6-flash", allThinkingLevels],
+  ["gemini-3.5-flash", allThinkingLevels],
+  ["gemini-3.5-flash-lite", allThinkingLevels],
+  ["gemini-3.1-flash-lite", allThinkingLevels],
+  ["gemini-3.1-pro-preview", new Set(["HIGH", "LOW", "MEDIUM"])],
+  ["gemini-3.1-flash-image", new Set(["HIGH", "MINIMAL"])],
+  ["gemini-3.1-flash-lite-image", new Set(["HIGH", "MINIMAL"])],
+  ["gemini-3-flash-preview", allThinkingLevels],
+];
+
+const maxThinkingBudgetByModel: [string, number][] = [
+  ["gemini-2.5-pro", 32_768],
+  ["gemini-2.5-flash", 24_576],
+  ["gemini-2.5-flash-lite", 24_576],
+];
 
 const geminiCapabilities: ProviderCapabilities = {
   audioSpeech: false,
@@ -560,7 +592,14 @@ function convertToolChoice(
 function structuredOutput(
   responseFormat: CompletionParams["responseFormat"],
 ): Partial<GenerateContentConfig> {
-  if (responseFormat === undefined || responseFormat.type === "text") return {};
+  if (
+    responseFormat === undefined ||
+    responseFormat.type === undefined ||
+    responseFormat.type === null ||
+    responseFormat.type === "text"
+  ) {
+    return {};
+  }
   if (responseFormat.type === "json_object") return { responseMimeType: "application/json" };
   if (responseFormat.type !== "json_schema") {
     const type = isString(responseFormat.type) ? responseFormat.type : "unknown";
@@ -578,33 +617,82 @@ const GEMINI_CONTENT_FILTER_REFUSAL = "Response blocked by Gemini content filter
 
 function usesThinkingLevel(model: string): boolean {
   const match = /(?:^|\/)gemini-(\d+)(?:\.(\d+))?/iu.exec(model);
-  if (match?.[1] === undefined) return false;
-  const version = [Number(match[1]), Number(match[2] ?? 0)] as const;
-  return version[0] > 3 || (version[0] === 3 && version[1] >= 5);
+  return match?.[1] !== undefined && Number(match[1]) >= 3;
+}
+
+function matchesKnownModel(modelName: string, knownModel: string): boolean {
+  if (modelName === knownModel) return true;
+  if (!modelName.startsWith(knownModel)) return false;
+  return /^(?:-\d+)+$/u.test(modelName.slice(knownModel.length));
+}
+
+function knownThinkingLevels(modelName: string): ReadonlySet<GeminiThinkingLevel> | undefined {
+  for (const [knownModel, supportedLevels] of thinkingLevelsByModel) {
+    if (matchesKnownModel(modelName, knownModel)) return supportedLevels;
+  }
+  return undefined;
+}
+
+function knownMaxThinkingBudget(modelName: string): number | undefined {
+  for (const [knownModel, maxBudget] of maxThinkingBudgetByModel) {
+    if (matchesKnownModel(modelName, knownModel)) return maxBudget;
+  }
+  return undefined;
+}
+
+function lookupNamedValue<Value>(table: Record<string, Value>, key: string): Value | undefined {
+  for (const [name, value] of Object.entries(table)) {
+    if (name === key) return value;
+  }
+  return undefined;
+}
+
+function thinkingLevelForEffort(
+  effort: string,
+  modelName: string,
+): GeminiThinkingLevel | undefined {
+  if (matchesKnownModel(modelName, "gemini-3.1-pro-preview") && effort === "minimal") return "LOW";
+  return lookupNamedValue(reasoningEffortToThinkingLevels, effort);
 }
 
 function thinkingConfiguration(
   value: CompletionParams["reasoningEffort"],
   model: string,
+  provider: string,
 ): GenerateContentConfig["thinkingConfig"] {
   if (value === undefined || value === "auto") return undefined;
-  if (value === "none") return { includeThoughts: false };
-  if (usesThinkingLevel(model)) {
-    const levels = {
-      high: "HIGH",
-      low: "LOW",
-      max: "HIGH",
-      medium: "MEDIUM",
-      minimal: "MINIMAL",
-      xhigh: "HIGH",
-    } as const;
+  const modelName = model.split("/").at(-1)?.toLowerCase() ?? model.toLowerCase();
+  const additionalMessage = `'${value}' is not available for model '${model}'.`;
+  if (value === "none") {
+    if (usesThinkingLevel(model) || matchesKnownModel(modelName, "gemini-2.5-pro")) {
+      throw new UnsupportedParameterError("reasoningEffort", provider, additionalMessage);
+    }
+    return { thinkingBudget: 0 };
+  }
+  const supportedLevels = knownThinkingLevels(modelName);
+  if (supportedLevels !== undefined || usesThinkingLevel(model)) {
+    const thinkingLevel = thinkingLevelForEffort(value, modelName);
+    if (
+      thinkingLevel === undefined ||
+      (supportedLevels !== undefined && !supportedLevels.has(thinkingLevel))
+    ) {
+      throw new UnsupportedParameterError("reasoningEffort", provider, additionalMessage);
+    }
     // SAFETY: The provider contract establishes the asserted representation at this boundary.
     return {
       includeThoughts: true,
-      thinkingLevel: levels[value],
+      thinkingLevel,
     } as GenerateContentConfig["thinkingConfig"];
   }
-  return { includeThoughts: true, thinkingBudget: reasoningBudgets[value] };
+  const mappedBudget = lookupNamedValue(reasoningBudgets, value);
+  if (mappedBudget === undefined) {
+    throw new UnsupportedParameterError("reasoningEffort", provider, additionalMessage);
+  }
+  const maxBudget = knownMaxThinkingBudget(modelName);
+  return {
+    includeThoughts: true,
+    thinkingBudget: maxBudget === undefined ? mappedBudget : Math.min(mappedBudget, maxBudget),
+  };
 }
 
 function promptWasBlocked(response: GenerateContentResponse): boolean {
@@ -1040,7 +1128,11 @@ export class GeminiProvider extends BaseProvider {
     const converted = convertMessages(params.messages, this.providerName);
     const tools = convertFunctionTools(params.tools, this.providerName);
     const toolConfig = convertToolChoice(params.toolChoice, this.providerName);
-    const thinkingConfig = thinkingConfiguration(params.reasoningEffort, params.model);
+    const thinkingConfig = thinkingConfiguration(
+      params.reasoningEffort,
+      params.model,
+      this.providerName,
+    );
     const output = structuredOutput(params.responseFormat);
     // SAFETY: The provider contract establishes the asserted representation at this boundary.
     const config = compactObject({

@@ -297,10 +297,22 @@ export class AnyLLM {
     AsyncIterable<MessageStreamEvent> | MessageResponse | ParsedMessageResponse<JsonValue>
   > {
     this.validatePromptCacheKey(params.promptCacheKey);
+    if (
+      params.outputFormat !== undefined &&
+      params.stream === true &&
+      !this.adapter.supportsMessagesStructuredOutputStreaming
+    ) {
+      throw new TypeError("stream is not supported with structured outputFormat.");
+    }
     if (isStructuredOutputFormat(params.outputFormat)) {
-      if (params.stream === true)
-        throw new TypeError("stream is not supported with structured outputFormat.");
       const format = params.outputFormat;
+      if (params.stream === true) {
+        return this.adapter.messages({
+          ...params,
+          outputFormat: messagesOutputFormat(format),
+          stream: true,
+        });
+      }
       const { stream, ...request } = params;
       const response = await this.adapter.messages({
         ...request,

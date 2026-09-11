@@ -492,7 +492,7 @@ describe("Gemini provider", () => {
     const contents = sdk.models.generateContent.mock.calls[0]?.[0].contents as any[];
     expect(config).toMatchObject({
       responseMimeType: "application/json",
-      thinkingConfig: { includeThoughts: false },
+      thinkingConfig: { thinkingBudget: 0 },
       toolConfig: {
         functionCallingConfig: { mode: FunctionCallingConfigMode.ANY },
       },
@@ -578,6 +578,94 @@ describe("Gemini provider", () => {
       includeThoughts: true,
       thinkingLevel: "HIGH",
     });
+  });
+
+  it.each([
+    ["gemini-3.8-flash", "low", { includeThoughts: true, thinkingLevel: "LOW" }],
+    ["gemini-3.7-flash", "medium", { includeThoughts: true, thinkingLevel: "MEDIUM" }],
+    ["gemini-3.6-flash", "minimal", { includeThoughts: true, thinkingLevel: "MINIMAL" }],
+    ["gemini-3.5-flash", "high", { includeThoughts: true, thinkingLevel: "HIGH" }],
+    ["gemini-3.5-flash-lite", "minimal", { includeThoughts: true, thinkingLevel: "MINIMAL" }],
+    ["gemini-3.1-flash-lite", "medium", { includeThoughts: true, thinkingLevel: "MEDIUM" }],
+    ["models/gemini-3.1-pro-preview", "minimal", { includeThoughts: true, thinkingLevel: "LOW" }],
+    ["gemini-3.1-flash-image", "minimal", { includeThoughts: true, thinkingLevel: "MINIMAL" }],
+    ["gemini-3.1-flash-lite-image", "high", { includeThoughts: true, thinkingLevel: "HIGH" }],
+    ["gemini-3-flash-preview", "minimal", { includeThoughts: true, thinkingLevel: "MINIMAL" }],
+    ["gemini-2.5-flash", "none", { thinkingBudget: 0 }],
+    ["gemini-2.5-flash", "minimal", { includeThoughts: true, thinkingBudget: 1024 }],
+    ["gemini-2.5-flash", "low", { includeThoughts: true, thinkingBudget: 1024 }],
+    ["gemini-2.5-flash-lite", "none", { thinkingBudget: 0 }],
+    ["gemini-2.5-flash-lite", "minimal", { includeThoughts: true, thinkingBudget: 1024 }],
+    ["gemini-2.5-flash-lite", "medium", { includeThoughts: true, thinkingBudget: 8192 }],
+    ["gemini-2.5-pro", "minimal", { includeThoughts: true, thinkingBudget: 1024 }],
+    ["gemini-2.5-pro", "high", { includeThoughts: true, thinkingBudget: 24576 }],
+    ["gemini-2.5-pro", "xhigh", { includeThoughts: true, thinkingBudget: 32768 }],
+    ["gemini-2.5-flash", "max", { includeThoughts: true, thinkingBudget: 24576 }],
+    ["gemini-2.5-flash-lite", "xhigh", { includeThoughts: true, thinkingBudget: 24576 }],
+    ["gemini-3.8-flash", "xhigh", { includeThoughts: true, thinkingLevel: "HIGH" }],
+    ["-001", "minimal", { includeThoughts: true, thinkingBudget: 1024 }],
+    ["custom-gemini-model", "minimal", { includeThoughts: true, thinkingBudget: 1024 }],
+    ["gemini-3.1-custom", "high", { includeThoughts: true, thinkingLevel: "HIGH" }],
+    [
+      "models/gemini-3.10-flash-preview-202609",
+      "max",
+      { includeThoughts: true, thinkingLevel: "HIGH" },
+    ],
+    ["gemini-3.8-flash-custom", "minimal", { includeThoughts: true, thinkingLevel: "MINIMAL" }],
+    [
+      "projects/p/locations/l/publishers/google/models/gemini-3.8-flash-001",
+      "low",
+      { includeThoughts: true, thinkingLevel: "LOW" },
+    ],
+  ] as const)(
+    "maps reasoningEffort %s for %s to the documented thinking config",
+    async (model, reasoningEffort, expected) => {
+      const sdk = okSdk();
+      const provider = new GeminiProvider({}, sdk.client);
+      await provider.completion({
+        messages: [{ content: "Hello", role: "user" }],
+        model,
+        reasoningEffort,
+      });
+      expect(sdk.models.generateContent.mock.calls[0]?.[0].config.thinkingConfig).toEqual(expected);
+    },
+  );
+
+  it.each([
+    ["gemini-3.8-flash", "minimal"],
+    ["gemini-3.1-flash-image", "low"],
+    ["gemini-3.1-flash-lite-image", "low"],
+    ["gemini-3.8-flash-001", "minimal"],
+    ["gemini-3.8-flash", "none"],
+    ["gemini-3.1-flash-image", "none"],
+    ["gemini-2.5-pro", "none"],
+  ] as const)("rejects undocumented reasoningEffort %s for %s", (model, reasoningEffort) => {
+    const provider = new GeminiProvider({}, okSdk().client);
+    expect(() =>
+      provider.completion({
+        messages: [{ content: "Hello", role: "user" }],
+        model,
+        reasoningEffort,
+      }),
+    ).toThrow(
+      `"reasoningEffort" is not supported for gemini.\n'${reasoningEffort}' is not available for model '${model}'.`,
+    );
+  });
+
+  it("leaves thinkingConfig unset for auto and omitted reasoningEffort", async () => {
+    const sdk = okSdk();
+    const provider = new GeminiProvider({}, sdk.client);
+    await provider.completion({
+      messages: [{ content: "Hello", role: "user" }],
+      model: "gemini-3.8-flash",
+      reasoningEffort: "auto",
+    });
+    await provider.completion({
+      messages: [{ content: "Hello", role: "user" }],
+      model: "gemini-3.8-flash",
+    });
+    expect(sdk.models.generateContent.mock.calls[0]?.[0].config.thinkingConfig).toBeUndefined();
+    expect(sdk.models.generateContent.mock.calls[1]?.[0].config.thinkingConfig).toBeUndefined();
   });
 
   it("omits an empty text part from a tool-call turn", async () => {
