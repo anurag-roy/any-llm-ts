@@ -35,7 +35,9 @@ import type {
   BatchResult,
   BatchStatus,
   ChatCompletion,
+  ChatCompletionAudio,
   ChatCompletionChunk,
+  ChatCompletionDeltaAudio,
   ChatMessage,
   CompletionParams,
   CompletionUsage,
@@ -44,6 +46,7 @@ import type {
   EmbeddingResponse,
   FinishReason,
   FunctionTool,
+  ImageContent,
   ListBatchesParams,
   Model,
   ProviderCapabilities,
@@ -757,10 +760,101 @@ function createdAt(value: string | undefined): number {
   return Number.isNaN(parsed) ? unixTimestamp() : Math.floor(parsed / 1_000);
 }
 
+type GeminiInlinePayload = string | Uint8Array | undefined;
+
+function inlineDataBytes(data: GeminiInlinePayload): Buffer | undefined {
+  if (data instanceof Uint8Array) {
+    return data.byteLength === 0 ? undefined : Buffer.from(data);
+  }
+  if (!isString(data) || data.length === 0) return undefined;
+  const decoded = Buffer.from(data, "base64");
+  const normalizedInput = data.replace(/=+$/u, "");
+  const normalizedOutput = decoded.toString("base64").replace(/=+$/u, "");
+  if (normalizedInput !== normalizedOutput || decoded.byteLength === 0) return undefined;
+  return decoded;
+}
+
+function wavFromPcm(pcm: Buffer, mimeType: string): Buffer {
+  let rate = 24_000;
+  for (const parameter of mimeType.split(";")) {
+    const trimmed = parameter.trim();
+    if (trimmed.startsWith("rate=")) {
+      const parsed = Number.parseInt(trimmed.slice("rate=".length), 10);
+      if (Number.isFinite(parsed) && parsed > 0) rate = parsed;
+      break;
+    }
+  }
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(rate, 24);
+  header.writeUInt32LE(rate * 2, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([header, pcm]);
+}
+
+function inlineDataImage(part: Part): ImageContent | undefined {
+  const blob = part.inlineData;
+  if (blob === undefined || !isString(blob.mimeType) || !blob.mimeType.startsWith("image/")) {
+    return undefined;
+  }
+  const bytes = inlineDataBytes(blob.data);
+  if (bytes === undefined) return undefined;
+  return {
+    type: "image_url",
+    image_url: { url: `data:${blob.mimeType};base64,${bytes.toString("base64")}` },
+  };
+}
+
+function inlineAudioBlob(part: Part): { data: Buffer; mimeType: string } | undefined {
+  const blob = part.inlineData;
+  if (blob === undefined || !isString(blob.mimeType) || !blob.mimeType.startsWith("audio/")) {
+    return undefined;
+  }
+  const bytes = inlineDataBytes(blob.data);
+  if (bytes === undefined) return undefined;
+  return { data: bytes, mimeType: blob.mimeType };
+}
+
+function inlineDataAudio(
+  blobs: { data: Buffer; mimeType: string }[],
+  transcript: string,
+  playable: boolean,
+): ChatCompletionAudio | undefined {
+  if (blobs.length === 0) return undefined;
+  const combined = Buffer.concat(blobs.map((blob) => blob.data));
+  const mimeType = blobs[0]?.mimeType ?? "";
+  const data =
+    playable && mimeType.startsWith("audio/L16") ? wavFromPcm(combined, mimeType) : combined;
+  return {
+    data: data.toString("base64"),
+    expiresAt: 0,
+    id: "google_genai_audio",
+    transcript,
+  };
+}
+
+function streamAudioDelta(audio: ChatCompletionAudio): ChatCompletionDeltaAudio {
+  return {
+    data: audio.data,
+    ...includeWhen(audio.transcript.length > 0, { transcript: audio.transcript }),
+  };
+}
+
 function completionParts(parts: Part[] | undefined, candidateIndex: number) {
   let content = "";
   let reasoning = "";
   let messageSignature: string | undefined;
+  const audioBlobs: { data: Buffer; mimeType: string }[] = [];
+  const images: ImageContent[] = [];
   const toolCalls: ToolCall[] = [];
 
   for (const part of parts ?? []) {
@@ -785,12 +879,18 @@ function completionParts(parts: Part[] | undefined, candidateIndex: number) {
       });
       continue;
     }
+    const image = inlineDataImage(part);
+    if (image !== undefined) images.push(image);
+    const audioBlob = inlineAudioBlob(part);
+    if (audioBlob !== undefined) audioBlobs.push(audioBlob);
     if (isString(part.text)) content += part.text;
     messageSignature = part.thoughtSignature ?? messageSignature;
   }
 
   return {
+    audio: inlineDataAudio(audioBlobs, content, true),
     content: content.length === 0 ? null : content,
+    ...includeWhen(images.length > 0, { images }),
     ...includeWhen(!(messageSignature === undefined), {
       messageExtraContent: {
         google: { thoughtSignature: messageSignature },
@@ -1182,11 +1282,17 @@ export class GeminiProvider extends BaseProvider {
           message: {
             content: normalized.content,
             role: "assistant" as const,
+            ...includeWhen(!(normalized.audio === undefined), {
+              audio: normalized.audio,
+            }),
             ...includeWhen(finishReason === "content_filter", {
               refusal: GEMINI_CONTENT_FILTER_REFUSAL,
             }),
             ...includeWhen(!(normalized.messageExtraContent === undefined), {
               extraContent: normalized.messageExtraContent,
+            }),
+            ...includeWhen(!(normalized.images === undefined), {
+              images: normalized.images,
             }),
             ...includeWhen(!(normalized.reasoning === undefined), {
               reasoning: normalized.reasoning,
@@ -1267,6 +1373,8 @@ export class GeminiProvider extends BaseProvider {
           let content = "";
           let reasoning = "";
           let messageSignature: string | undefined;
+          const audioBlobs: { data: Buffer; mimeType: string }[] = [];
+          const images: ImageContent[] = [];
           const toolCalls: ToolCallDelta[] = [];
 
           for (const part of candidate.content?.parts ?? []) {
@@ -1292,6 +1400,10 @@ export class GeminiProvider extends BaseProvider {
               });
               continue;
             }
+            const image = inlineDataImage(part);
+            if (image !== undefined) images.push(image);
+            const audioBlob = inlineAudioBlob(part);
+            if (audioBlob !== undefined) audioBlobs.push(audioBlob);
             if (isString(part.text)) content += part.text;
             messageSignature = part.thoughtSignature ?? messageSignature;
           }
@@ -1303,6 +1415,9 @@ export class GeminiProvider extends BaseProvider {
               google: { thoughtSignature: messageSignature },
             };
           }
+          if (images.length > 0) delta.images = images;
+          const audio = inlineDataAudio(audioBlobs, content, false);
+          if (audio !== undefined) delta.audio = streamAudioDelta(audio);
           if (toolCalls.length > 0) delta.toolCalls = toolCalls;
           const mappedFinishReason = promptBlocked
             ? "content_filter"
