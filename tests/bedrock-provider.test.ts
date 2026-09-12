@@ -20,6 +20,7 @@ import {
   AnyLLM,
   BatchNotCompleteError,
   BedrockProvider,
+  ContentFilterFinishReasonError,
   InvalidRequestError,
   UnsupportedParameterError,
 } from "../src/index.js";
@@ -540,6 +541,89 @@ describe("Bedrock provider", () => {
     ]);
     expect(chunks[6]?.choices[0]?.finishReason).toBe("tool_calls");
     expect(chunks[7]?.usage).toMatchObject({ promptTokens: 3, totalTokens: 6 });
+  });
+
+  const bedrockStopReasons = {
+    content_filtered: "content_filter",
+    end_turn: "stop",
+    guardrail_intervened: "content_filter",
+    malformed_model_output: "stop",
+    malformed_tool_use: "stop",
+    max_tokens: "length",
+    model_context_window_exceeded: "length",
+    stop_sequence: "stop",
+    tool_use: "tool_calls",
+  } as const;
+
+  it.each(Object.entries(bedrockStopReasons))(
+    "maps Converse stopReason %s to finishReason %s",
+    async (stopReason, finishReason) => {
+      const send = vi.fn(async () => ({
+        output: { message: { content: [{ text: "Hello!" }] } },
+        stopReason,
+      }));
+      // SAFETY: The non-streaming request makes this completion result concrete in the test.
+      const result = (await provider(send).completion({
+        messages: [{ content: "Hi", role: "user" }],
+        model: "model",
+      })) as ChatCompletion;
+      expect(result.choices[0]?.finishReason).toBe(finishReason);
+    },
+  );
+
+  it.each(Object.entries(bedrockStopReasons))(
+    "maps streaming Converse stopReason %s to finishReason %s",
+    async (stopReason, finishReason) => {
+      const send = vi.fn(async (command: BedrockTestCommand) => {
+        expect(command).toBeInstanceOf(ConverseStreamCommand);
+        return { stream: events({ messageStop: { stopReason } }) };
+      });
+      const result = await provider(send).completion({
+        messages: [{ content: "Hi", role: "user" }],
+        model: "model",
+        stream: true,
+      });
+      const chunks: ChatCompletionChunk[] = [];
+      // SAFETY: This test double implements the provider surface exercised by this test.
+      for await (const chunk of result as AsyncIterable<ChatCompletionChunk>) chunks.push(chunk);
+      expect(chunks[0]?.choices[0]?.finishReason).toBe(finishReason);
+    },
+  );
+
+  it("finishes as stop when Converse omits stopReason", async () => {
+    const send = vi.fn(async () => ({
+      output: { message: { content: [{ text: "Hello!" }] } },
+    }));
+    // SAFETY: The non-streaming request makes this completion result concrete in the test.
+    const result = (await provider(send).completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "model",
+    })) as ChatCompletion;
+    expect(result.choices[0]?.finishReason).toBe("stop");
+  });
+
+  it("raises ContentFilterFinishReasonError when a guardrail blocks structured output", async () => {
+    const send = vi.fn(async () => ({
+      output: { message: { content: [{ text: "Sorry, I cannot answer that." }] } },
+      stopReason: "guardrail_intervened",
+    }));
+    await expect(
+      AnyLLM.fromProvider(provider(send)).completion({
+        messages: [{ content: "Hello", role: "user" }],
+        model: "us.anthropic.claude-sonnet-4-20250514-v1:0",
+        responseFormat: {
+          jsonSchema: {
+            properties: { name: { type: "string" } },
+            required: ["name"],
+            type: "object",
+          },
+          name: "city",
+          parse() {
+            return { name: "Paris" };
+          },
+        },
+      }),
+    ).rejects.toBeInstanceOf(ContentFilterFinishReasonError);
   });
 
   it("invokes embedding models once per input", async () => {

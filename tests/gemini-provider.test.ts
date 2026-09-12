@@ -746,6 +746,296 @@ describe("Gemini provider", () => {
     expect(chunks[1]?.choices[0]?.delta.role).toBeUndefined();
   });
 
+  it("preserves inline images as data URLs and still emits image-only choices", async () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64");
+    const imageUrl = `data:image/png;base64,${png}`;
+    const generateContent = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  { inlineData: { data: png, mimeType: "image/png" } },
+                  { text: "Described." },
+                ],
+                role: "model",
+              },
+              finishReason: GeminiFinishReason.STOP,
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          candidates: [
+            {
+              content: {
+                parts: [{ inlineData: { data: png, mimeType: "image/png" } }],
+                role: "model",
+              },
+              finishReason: GeminiFinishReason.STOP,
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          candidates: [
+            {
+              content: {
+                parts: [{ inlineData: { data: "", mimeType: "image/png" } }],
+                role: "model",
+              },
+              finishReason: GeminiFinishReason.STOP,
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          candidates: [
+            {
+              content: {
+                parts: [{ inlineData: { data: png, mimeType: "application/pdf" } }],
+                role: "model",
+              },
+              finishReason: GeminiFinishReason.STOP,
+            },
+          ],
+        }),
+      );
+    const sdk = fakeGemini({ generateContent });
+    const provider = new GeminiProvider({}, sdk.client);
+    // SAFETY: The non-streaming request makes this completion result concrete in the test.
+    const mixed = (await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "gemini-test",
+    })) as ChatCompletion;
+    expect(mixed.choices[0]).toMatchObject({
+      message: {
+        content: "Described.",
+        images: [{ image_url: { url: imageUrl }, type: "image_url" }],
+      },
+    });
+    expect(mixed.choices[0]?.message.toolCalls).toBeUndefined();
+
+    // SAFETY: The non-streaming request makes this completion result concrete in the test.
+    const imageOnly = (await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "gemini-test",
+    })) as ChatCompletion;
+    expect(imageOnly.choices[0]).toMatchObject({
+      message: {
+        content: null,
+        images: [{ image_url: { url: imageUrl }, type: "image_url" }],
+      },
+    });
+
+    // SAFETY: The non-streaming request makes this completion result concrete in the test.
+    const empty = (await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "gemini-test",
+    })) as ChatCompletion;
+    expect(empty.choices[0]?.message.images).toBeUndefined();
+
+    // SAFETY: The non-streaming request makes this completion result concrete in the test.
+    const pdf = (await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "gemini-test",
+    })) as ChatCompletion;
+    expect(pdf.choices[0]?.message.images).toBeUndefined();
+  });
+
+  it("preserves inline audio and wraps complete PCM as WAV", async () => {
+    const generateContent = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  { text: "Here is the audio." },
+                  {
+                    inlineData: {
+                      data: "V0FWRQ==",
+                      mimeType: "audio/wav",
+                    },
+                  },
+                ],
+                role: "model",
+              },
+              finishReason: GeminiFinishReason.STOP,
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    inlineData: {
+                      data: Buffer.from([1, 2]).toString("base64"),
+                      mimeType: "audio/L16;codec=pcm;rate=16000",
+                    },
+                  },
+                  {
+                    inlineData: {
+                      data: Buffer.from([3, 4]).toString("base64"),
+                      mimeType: "audio/L16;codec=pcm;rate=16000",
+                    },
+                  },
+                ],
+                role: "model",
+              },
+              finishReason: GeminiFinishReason.STOP,
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    inlineData: {
+                      data: "",
+                      mimeType: "audio/L16;codec=pcm;rate=24000",
+                    },
+                  },
+                ],
+                role: "model",
+              },
+              finishReason: GeminiFinishReason.STOP,
+            },
+          ],
+        }),
+      );
+    const sdk = fakeGemini({ generateContent });
+    const provider = new GeminiProvider({}, sdk.client);
+
+    // SAFETY: The non-streaming request makes this completion result concrete in the test.
+    const withTranscript = (await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "gemini-test",
+    })) as ChatCompletion;
+    expect(withTranscript.choices[0]?.message.audio).toEqual({
+      data: "V0FWRQ==",
+      expiresAt: 0,
+      id: "google_genai_audio",
+      transcript: "Here is the audio.",
+    });
+
+    // SAFETY: The non-streaming request makes this completion result concrete in the test.
+    const pcm = (await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "gemini-test",
+    })) as ChatCompletion;
+    const wav = Buffer.from(pcm.choices[0]?.message.audio?.data ?? "", "base64");
+    expect(wav.subarray(0, 4).toString("ascii")).toBe("RIFF");
+    expect(wav.readUInt32LE(24)).toBe(16_000);
+    expect(wav.readUInt32LE(40)).toBe(4);
+    expect(wav.subarray(44)).toEqual(Buffer.from([1, 2, 3, 4]));
+    expect(pcm.choices[0]?.message.content).toBeNull();
+
+    // SAFETY: The non-streaming request makes this completion result concrete in the test.
+    const empty = (await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "gemini-test",
+    })) as ChatCompletion;
+    expect(empty.choices[0]?.message.audio).toBeUndefined();
+  });
+
+  it("streams inline images and raw audio chunks", async () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64");
+    const stream = responses(
+      response({
+        candidates: [
+          {
+            content: {
+              parts: [{ inlineData: { data: png, mimeType: "image/png" } }],
+              role: "model",
+            },
+            finishReason: GeminiFinishReason.STOP,
+            index: 0,
+          },
+        ],
+      }),
+      response({
+        candidates: [
+          {
+            content: {
+              parts: [
+                { text: "Here is the audio." },
+                {
+                  inlineData: {
+                    data: "V0FWRQ==",
+                    mimeType: "audio/wav",
+                  },
+                },
+              ],
+              role: "model",
+            },
+            index: 0,
+          },
+        ],
+      }),
+      response({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  inlineData: {
+                    data: Buffer.from([1, 2]).toString("base64"),
+                    mimeType: "audio/L16;codec=pcm;rate=24000",
+                  },
+                },
+                {
+                  inlineData: {
+                    data: Buffer.from([3, 4]).toString("base64"),
+                    mimeType: "audio/L16;codec=pcm;rate=24000",
+                  },
+                },
+              ],
+              role: "model",
+            },
+            finishReason: GeminiFinishReason.STOP,
+            index: 0,
+          },
+        ],
+      }),
+    );
+    const sdk = fakeGemini({
+      generateContentStream: vi.fn().mockResolvedValue(stream),
+    });
+    const provider = new GeminiProvider({}, sdk.client);
+    const result = await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "gemini-test",
+      stream: true,
+    });
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    const chunks = await collect(result as AsyncIterable<ChatCompletionChunk>);
+    expect(chunks[0]?.choices[0]?.delta.images).toEqual([
+      { image_url: { url: "data:image/png;base64,iVBORw==" }, type: "image_url" },
+    ]);
+    expect(chunks[1]?.choices[0]?.delta.audio).toEqual({
+      data: "V0FWRQ==",
+      transcript: "Here is the audio.",
+    });
+    expect(Buffer.from(chunks[2]?.choices[0]?.delta.audio?.data ?? "", "base64")).toEqual(
+      Buffer.from([1, 2, 3, 4]),
+    );
+  });
+
   it("surfaces blocked prompts and structured-output terminal failures", async () => {
     const generateContent = vi
       .fn()
