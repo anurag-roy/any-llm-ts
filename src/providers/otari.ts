@@ -6,7 +6,8 @@ import { isFunction, isJsonValue, isNumber, isObject, isString } from "../utils.
 import { readFile } from "node:fs/promises";
 
 import { BatchNotCompleteError, UnsupportedParameterError } from "../errors.js";
-import { normalizeOutputConfig } from "../structured-output.js";import type {
+import { normalizeOutputConfig } from "../structured-output.js";
+import type {
   Batch,
   BatchResult,
   BatchStatus,
