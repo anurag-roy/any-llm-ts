@@ -9,7 +9,12 @@ import { readFile } from "node:fs/promises";
 import OpenAI, { AzureOpenAI, toFile } from "openai";
 import type { ClientOptions } from "openai";
 
-import { BatchNotCompleteError, MissingApiKeyError, UnsupportedParameterError } from "../errors.js";
+import {
+  BatchNotCompleteError,
+  InvalidRequestError,
+  MissingApiKeyError,
+  UnsupportedParameterError,
+} from "../errors.js";
 import type {
   Batch,
   BatchResult,
@@ -20,6 +25,7 @@ import type {
   CompletionOperationOptions,
   CompletionParams,
   CompletionUsage,
+  ReasoningEffort,
   CreateBatchParams,
   EmbeddingParams,
   EmbeddingResponse,
@@ -161,7 +167,7 @@ function resolveApiKey(config: OpenAIProviderConfig, value: string | undefined):
   throw new MissingApiKeyError(config.name, config.envApiKey ?? "provider-specific API key");
 }
 
-function toOpenAIMessage(message: ChatMessage, provider: string) {
+function toOpenAIMessage(message: ChatMessage, provider: string, replayDeepSeekReasoning = false) {
   const converted: OpenAIMessageRequest = {
     content: message.content,
     role: message.role,
@@ -181,8 +187,10 @@ function toOpenAIMessage(message: ChatMessage, provider: string) {
   if (isString(message.reasoning) && message.reasoning.length > 0) {
     converted.reasoning_content = message.reasoning;
   }
-  if (message.extraContent !== undefined) converted.extra_content = message.extraContent;
-  if (provider === "deepseek" && message.role === "assistant") {
+  if (message.extraContent !== undefined && provider !== "deepseek") {
+    converted.extra_content = message.extraContent;
+  }
+  if (provider === "deepseek" && replayDeepSeekReasoning && message.role === "assistant") {
     const deepseek = message.extraContent?.deepseek;
     if (isObject(deepseek)) {
       const reasoningContent = parseJsonObject(deepseek).reasoning_content;
@@ -192,6 +200,84 @@ function toOpenAIMessage(message: ChatMessage, provider: string) {
     }
   }
   return compactObject(converted);
+}
+
+interface DeepSeekReasoningControls {
+  reasoningEffort?: "high" | "low" | "max";
+  thinkingType?: "disabled" | "enabled";
+}
+
+interface DeepSeekChatRequest {
+  frequency_penalty?: number;
+  logit_bias?: JsonValue;
+  n?: number;
+  parallel_tool_calls?: boolean;
+  presence_penalty?: number;
+  reasoning_effort?: string;
+  seed?: number;
+  service_tier?: string;
+  thinking?: JsonValue;
+  user?: string;
+  user_id?: JsonValue;
+}
+
+function deepSeekReasoningControls(
+  effort: ReasoningEffort | undefined,
+): DeepSeekReasoningControls | undefined {
+  switch (effort) {
+    case undefined:
+    case "auto":
+      return {};
+    case "none":
+      return { thinkingType: "disabled" };
+    case "low":
+      return { reasoningEffort: "low", thinkingType: "enabled" };
+    case "medium":
+    case "high":
+    case "xhigh":
+      return { reasoningEffort: "high", thinkingType: "enabled" };
+    case "max":
+      return { reasoningEffort: "max", thinkingType: "enabled" };
+    default:
+      return undefined;
+  }
+}
+
+function applyDeepSeekV4ChatRequest(request: DeepSeekChatRequest, params: CompletionParams): void {
+  delete request.frequency_penalty;
+  delete request.logit_bias;
+  delete request.n;
+  delete request.parallel_tool_calls;
+  delete request.presence_penalty;
+  delete request.seed;
+  delete request.service_tier;
+  delete request.user;
+  delete request.reasoning_effort;
+
+  const controls = deepSeekReasoningControls(params.reasoningEffort);
+  if (controls === undefined) {
+    throw new InvalidRequestError(
+      `reasoning_effort ${JSON.stringify(params.reasoningEffort)} is not supported by DeepSeek Chat`,
+      { provider: "deepseek" },
+    );
+  }
+  if (controls.reasoningEffort !== undefined) {
+    request.reasoning_effort = controls.reasoningEffort;
+  }
+
+  const userId = params.user;
+  if (userId !== undefined && request.user_id === undefined) {
+    if (/^[a-zA-Z0-9_-]{1,512}$/u.exec(userId) === null) {
+      throw new InvalidRequestError(
+        "DeepSeek user_id must contain only ASCII letters, digits, underscores, or hyphens and be between 1 and 512 characters",
+        { provider: "deepseek" },
+      );
+    }
+    request.user_id = userId;
+  }
+  if (controls.thinkingType !== undefined && request.thinking === undefined) {
+    request.thinking = { type: controls.thinkingType };
+  }
 }
 
 function normalizeToolCalls(value: JsonValue | undefined): ToolCall[] | undefined {
@@ -1076,7 +1162,13 @@ export class OpenAIProvider extends BaseProvider {
         logit_bias: params.logitBias,
         logprobs: params.logprobs,
         max_completion_tokens: maxCompletionTokens,
-        messages: params.messages.map((message) => toOpenAIMessage(message, this.metadata.name)),
+        messages: params.messages.map((message) =>
+          toOpenAIMessage(
+            message,
+            this.metadata.name,
+            this.config.quirks?.reasoningDirective === "deepseek" && params.tools !== undefined,
+          ),
+        ),
         model: params.model,
         n: params.n,
         parallel_tool_calls: params.parallelToolCalls,
@@ -1131,19 +1223,7 @@ export class OpenAIProvider extends BaseProvider {
       }
     }
     if (quirks?.reasoningDirective === "deepseek") {
-      const legacy = params.model === "deepseek-chat" || params.model === "deepseek-reasoner";
-      if (!legacy && params.providerOptions?.thinking === undefined) {
-        Object.assign(request, {
-          thinking: {
-            type:
-              params.reasoningEffort === undefined ||
-              params.reasoningEffort === "auto" ||
-              params.reasoningEffort === "none"
-                ? "disabled"
-                : "enabled",
-          },
-        });
-      }
+      applyDeepSeekV4ChatRequest(request, params);
       if (request.response_format !== undefined) {
         const responseFormat = parseJsonObject(request.response_format);
         const jsonSchema = responseFormat.json_schema;

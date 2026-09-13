@@ -61,10 +61,33 @@ export interface ToolCall {
   extraContent?: JsonObject;
 }
 
+export interface ImageContent {
+  type: "image_url";
+  image_url: { url: string };
+}
+
+export interface ChatCompletionAudio {
+  data: string;
+  expiresAt: number;
+  id: string;
+  transcript: string;
+}
+
+export interface ChatCompletionDeltaAudio {
+  data?: string;
+  expiresAt?: number;
+  id?: string;
+  transcript?: string;
+}
+
 export interface ChatMessage {
   content: MessageContentPart[] | string | null;
   role: MessageRole;
+  /** OpenAI-compatible audio object for inline media responses. */
+  audio?: ChatCompletionAudio | null;
   extraContent?: JsonObject;
+  /** OpenAI-compatible inline images, typically Gemini data URLs. */
+  images?: ImageContent[] | null;
   isError?: boolean;
   name?: string;
   reasoning?: string | null;
@@ -230,11 +253,13 @@ export interface ToolCallDelta {
 
 export interface ChatCompletionDelta {
   content?: string | null;
+  audio?: ChatCompletionDeltaAudio | null;
+  extraContent?: JsonObject;
+  images?: ImageContent[] | null;
   reasoning?: string | null;
   refusal?: string | null;
   role?: "assistant";
   toolCalls?: ToolCallDelta[];
-  extraContent?: JsonObject;
 }
 
 export interface ChatCompletionChunkChoice {
@@ -607,6 +632,7 @@ export interface MessagesParams {
   container?: string;
   contextManagement?: JsonObject;
   metadata?: JsonObject;
+  /** Raw Anthropic `output_config`, or a bare `{ type: "json_schema", schema }` format object. */
   outputFormat?: JsonObject;
   promptCacheKey?: string;
   providerOptions?: JsonObject;

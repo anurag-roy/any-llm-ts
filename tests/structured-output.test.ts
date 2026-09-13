@@ -1,4 +1,4 @@
-import { isNumber } from "../src/utils.js";
+import { isAsyncIterable, isNumber } from "../src/utils.js";
 import { parseCompletion, parseMessage, parseResponse } from "../src/structured-output.js";
 import { describe, expect, it } from "vitest";
 
@@ -181,6 +181,18 @@ class StreamingStructuredProvider extends StructuredProvider {
 
   override responses(_params: ResponsesParams): Promise<AsyncIterable<ResponseStreamEvent>> {
     return Promise.resolve(responseStream());
+  }
+}
+
+class StreamingMessagesStructuredProvider extends StreamingStructuredProvider {
+  override readonly supportsMessagesStructuredOutputStreaming = true;
+  readonly messageRequests: MessagesParams[] = [];
+
+  override messages(
+    params: MessagesParams,
+  ): Promise<AsyncIterable<MessageStreamEvent> | MessageResponse> {
+    this.messageRequests.push(params);
+    return super.messages(params);
   }
 }
 
@@ -402,6 +414,28 @@ describe("typed structured outputs", () => {
         stream: true,
       } as never),
     ).rejects.toThrow(/stream is not supported/u);
+    const streamingMessages = new StreamingMessagesStructuredProvider();
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    const streamed = await AnyLLM.fromProvider(streamingMessages).messages({
+      maxTokens: 10,
+      messages: [],
+      model: "model-a",
+      outputFormat: format,
+      stream: true,
+    } as never);
+    if (!isAsyncIterable<MessageStreamEvent, typeof streamed>(streamed)) {
+      throw new TypeError("expected a Messages stream");
+    }
+    const events: MessageStreamEvent[] = [];
+    for await (const event of streamed) events.push(event);
+    expect(events).toEqual([{ type: "message_stop" }]);
+    expect(streamingMessages.messageRequests[0]?.outputFormat).toEqual({
+      format: {
+        name: "answer",
+        schema: format.jsonSchema,
+        type: "json_schema",
+      },
+    });
     // SAFETY: This test verifies runtime rejection of a statically unsupported option.
     await expect(
       llm.responses({

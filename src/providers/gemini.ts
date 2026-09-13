@@ -35,7 +35,9 @@ import type {
   BatchResult,
   BatchStatus,
   ChatCompletion,
+  ChatCompletionAudio,
   ChatCompletionChunk,
+  ChatCompletionDeltaAudio,
   ChatMessage,
   CompletionParams,
   CompletionUsage,
@@ -44,6 +46,7 @@ import type {
   EmbeddingResponse,
   FinishReason,
   FunctionTool,
+  ImageContent,
   ListBatchesParams,
   Model,
   ProviderCapabilities,
@@ -67,14 +70,46 @@ import { completeProviderMetadata } from "../provider-metadata.js";
 const INLINE_DATA_LIMIT_BYTES = 20 * 1024 * 1024;
 const SKIP_THOUGHT_SIGNATURE_VALIDATOR = "skip_thought_signature_validator";
 
+type GeminiThinkingLevel = "HIGH" | "LOW" | "MEDIUM" | "MINIMAL";
+
 const reasoningBudgets = {
   high: 24_576,
   low: 1_024,
   max: 32_768,
   medium: 8_192,
-  minimal: 256,
+  minimal: 1_024,
   xhigh: 32_768,
 } as const;
+
+const reasoningEffortToThinkingLevels = {
+  high: "HIGH",
+  low: "LOW",
+  max: "HIGH",
+  medium: "MEDIUM",
+  minimal: "MINIMAL",
+  xhigh: "HIGH",
+} as const satisfies Record<string, GeminiThinkingLevel>;
+
+const allThinkingLevels = new Set<GeminiThinkingLevel>(["HIGH", "LOW", "MEDIUM", "MINIMAL"]);
+
+const thinkingLevelsByModel: [string, ReadonlySet<GeminiThinkingLevel>][] = [
+  ["gemini-3.8-flash", new Set(["HIGH", "LOW", "MEDIUM"])],
+  ["gemini-3.7-flash", new Set(["HIGH", "LOW", "MEDIUM"])],
+  ["gemini-3.6-flash", allThinkingLevels],
+  ["gemini-3.5-flash", allThinkingLevels],
+  ["gemini-3.5-flash-lite", allThinkingLevels],
+  ["gemini-3.1-flash-lite", allThinkingLevels],
+  ["gemini-3.1-pro-preview", new Set(["HIGH", "LOW", "MEDIUM"])],
+  ["gemini-3.1-flash-image", new Set(["HIGH", "MINIMAL"])],
+  ["gemini-3.1-flash-lite-image", new Set(["HIGH", "MINIMAL"])],
+  ["gemini-3-flash-preview", allThinkingLevels],
+];
+
+const maxThinkingBudgetByModel: [string, number][] = [
+  ["gemini-2.5-pro", 32_768],
+  ["gemini-2.5-flash", 24_576],
+  ["gemini-2.5-flash-lite", 24_576],
+];
 
 const geminiCapabilities: ProviderCapabilities = {
   audioSpeech: false,
@@ -560,7 +595,14 @@ function convertToolChoice(
 function structuredOutput(
   responseFormat: CompletionParams["responseFormat"],
 ): Partial<GenerateContentConfig> {
-  if (responseFormat === undefined || responseFormat.type === "text") return {};
+  if (
+    responseFormat === undefined ||
+    responseFormat.type === undefined ||
+    responseFormat.type === null ||
+    responseFormat.type === "text"
+  ) {
+    return {};
+  }
   if (responseFormat.type === "json_object") return { responseMimeType: "application/json" };
   if (responseFormat.type !== "json_schema") {
     const type = isString(responseFormat.type) ? responseFormat.type : "unknown";
@@ -578,33 +620,82 @@ const GEMINI_CONTENT_FILTER_REFUSAL = "Response blocked by Gemini content filter
 
 function usesThinkingLevel(model: string): boolean {
   const match = /(?:^|\/)gemini-(\d+)(?:\.(\d+))?/iu.exec(model);
-  if (match?.[1] === undefined) return false;
-  const version = [Number(match[1]), Number(match[2] ?? 0)] as const;
-  return version[0] > 3 || (version[0] === 3 && version[1] >= 5);
+  return match?.[1] !== undefined && Number(match[1]) >= 3;
+}
+
+function matchesKnownModel(modelName: string, knownModel: string): boolean {
+  if (modelName === knownModel) return true;
+  if (!modelName.startsWith(knownModel)) return false;
+  return /^(?:-\d+)+$/u.test(modelName.slice(knownModel.length));
+}
+
+function knownThinkingLevels(modelName: string): ReadonlySet<GeminiThinkingLevel> | undefined {
+  for (const [knownModel, supportedLevels] of thinkingLevelsByModel) {
+    if (matchesKnownModel(modelName, knownModel)) return supportedLevels;
+  }
+  return undefined;
+}
+
+function knownMaxThinkingBudget(modelName: string): number | undefined {
+  for (const [knownModel, maxBudget] of maxThinkingBudgetByModel) {
+    if (matchesKnownModel(modelName, knownModel)) return maxBudget;
+  }
+  return undefined;
+}
+
+function lookupNamedValue<Value>(table: Record<string, Value>, key: string): Value | undefined {
+  for (const [name, value] of Object.entries(table)) {
+    if (name === key) return value;
+  }
+  return undefined;
+}
+
+function thinkingLevelForEffort(
+  effort: string,
+  modelName: string,
+): GeminiThinkingLevel | undefined {
+  if (matchesKnownModel(modelName, "gemini-3.1-pro-preview") && effort === "minimal") return "LOW";
+  return lookupNamedValue(reasoningEffortToThinkingLevels, effort);
 }
 
 function thinkingConfiguration(
   value: CompletionParams["reasoningEffort"],
   model: string,
+  provider: string,
 ): GenerateContentConfig["thinkingConfig"] {
   if (value === undefined || value === "auto") return undefined;
-  if (value === "none") return { includeThoughts: false };
-  if (usesThinkingLevel(model)) {
-    const levels = {
-      high: "HIGH",
-      low: "LOW",
-      max: "HIGH",
-      medium: "MEDIUM",
-      minimal: "MINIMAL",
-      xhigh: "HIGH",
-    } as const;
+  const modelName = model.split("/").at(-1)?.toLowerCase() ?? model.toLowerCase();
+  const additionalMessage = `'${value}' is not available for model '${model}'.`;
+  if (value === "none") {
+    if (usesThinkingLevel(model) || matchesKnownModel(modelName, "gemini-2.5-pro")) {
+      throw new UnsupportedParameterError("reasoningEffort", provider, additionalMessage);
+    }
+    return { thinkingBudget: 0 };
+  }
+  const supportedLevels = knownThinkingLevels(modelName);
+  if (supportedLevels !== undefined || usesThinkingLevel(model)) {
+    const thinkingLevel = thinkingLevelForEffort(value, modelName);
+    if (
+      thinkingLevel === undefined ||
+      (supportedLevels !== undefined && !supportedLevels.has(thinkingLevel))
+    ) {
+      throw new UnsupportedParameterError("reasoningEffort", provider, additionalMessage);
+    }
     // SAFETY: The provider contract establishes the asserted representation at this boundary.
     return {
       includeThoughts: true,
-      thinkingLevel: levels[value],
+      thinkingLevel,
     } as GenerateContentConfig["thinkingConfig"];
   }
-  return { includeThoughts: true, thinkingBudget: reasoningBudgets[value] };
+  const mappedBudget = lookupNamedValue(reasoningBudgets, value);
+  if (mappedBudget === undefined) {
+    throw new UnsupportedParameterError("reasoningEffort", provider, additionalMessage);
+  }
+  const maxBudget = knownMaxThinkingBudget(modelName);
+  return {
+    includeThoughts: true,
+    thinkingBudget: maxBudget === undefined ? mappedBudget : Math.min(mappedBudget, maxBudget),
+  };
 }
 
 function promptWasBlocked(response: GenerateContentResponse): boolean {
@@ -641,7 +732,9 @@ function normalizeUsage(
   value: GenerateContentResponse["usageMetadata"],
 ): CompletionUsage | undefined {
   if (value === undefined) return undefined;
-  const promptTokens = value.promptTokenCount ?? 0;
+  // Gemini excludes tool-use prompt tokens from promptTokenCount but includes
+  // them in totalTokenCount. OpenAI-shaped usage folds that category into promptTokens.
+  const promptTokens = (value.promptTokenCount ?? 0) + (value.toolUsePromptTokenCount ?? 0);
   const completionTokens = (value.candidatesTokenCount ?? 0) + (value.thoughtsTokenCount ?? 0);
   const totalTokens = value.totalTokenCount ?? promptTokens + completionTokens;
   const promptTokensDetails =
@@ -667,10 +760,101 @@ function createdAt(value: string | undefined): number {
   return Number.isNaN(parsed) ? unixTimestamp() : Math.floor(parsed / 1_000);
 }
 
+type GeminiInlinePayload = string | Uint8Array | undefined;
+
+function inlineDataBytes(data: GeminiInlinePayload): Buffer | undefined {
+  if (data instanceof Uint8Array) {
+    return data.byteLength === 0 ? undefined : Buffer.from(data);
+  }
+  if (!isString(data) || data.length === 0) return undefined;
+  const decoded = Buffer.from(data, "base64");
+  const normalizedInput = data.replace(/=+$/u, "");
+  const normalizedOutput = decoded.toString("base64").replace(/=+$/u, "");
+  if (normalizedInput !== normalizedOutput || decoded.byteLength === 0) return undefined;
+  return decoded;
+}
+
+function wavFromPcm(pcm: Buffer, mimeType: string): Buffer {
+  let rate = 24_000;
+  for (const parameter of mimeType.split(";")) {
+    const trimmed = parameter.trim();
+    if (trimmed.startsWith("rate=")) {
+      const parsed = Number.parseInt(trimmed.slice("rate=".length), 10);
+      if (Number.isFinite(parsed) && parsed > 0) rate = parsed;
+      break;
+    }
+  }
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(rate, 24);
+  header.writeUInt32LE(rate * 2, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([header, pcm]);
+}
+
+function inlineDataImage(part: Part): ImageContent | undefined {
+  const blob = part.inlineData;
+  if (blob === undefined || !isString(blob.mimeType) || !blob.mimeType.startsWith("image/")) {
+    return undefined;
+  }
+  const bytes = inlineDataBytes(blob.data);
+  if (bytes === undefined) return undefined;
+  return {
+    type: "image_url",
+    image_url: { url: `data:${blob.mimeType};base64,${bytes.toString("base64")}` },
+  };
+}
+
+function inlineAudioBlob(part: Part): { data: Buffer; mimeType: string } | undefined {
+  const blob = part.inlineData;
+  if (blob === undefined || !isString(blob.mimeType) || !blob.mimeType.startsWith("audio/")) {
+    return undefined;
+  }
+  const bytes = inlineDataBytes(blob.data);
+  if (bytes === undefined) return undefined;
+  return { data: bytes, mimeType: blob.mimeType };
+}
+
+function inlineDataAudio(
+  blobs: { data: Buffer; mimeType: string }[],
+  transcript: string,
+  playable: boolean,
+): ChatCompletionAudio | undefined {
+  if (blobs.length === 0) return undefined;
+  const combined = Buffer.concat(blobs.map((blob) => blob.data));
+  const mimeType = blobs[0]?.mimeType ?? "";
+  const data =
+    playable && mimeType.startsWith("audio/L16") ? wavFromPcm(combined, mimeType) : combined;
+  return {
+    data: data.toString("base64"),
+    expiresAt: 0,
+    id: "google_genai_audio",
+    transcript,
+  };
+}
+
+function streamAudioDelta(audio: ChatCompletionAudio): ChatCompletionDeltaAudio {
+  return {
+    data: audio.data,
+    ...includeWhen(audio.transcript.length > 0, { transcript: audio.transcript }),
+  };
+}
+
 function completionParts(parts: Part[] | undefined, candidateIndex: number) {
   let content = "";
   let reasoning = "";
   let messageSignature: string | undefined;
+  const audioBlobs: { data: Buffer; mimeType: string }[] = [];
+  const images: ImageContent[] = [];
   const toolCalls: ToolCall[] = [];
 
   for (const part of parts ?? []) {
@@ -695,12 +879,18 @@ function completionParts(parts: Part[] | undefined, candidateIndex: number) {
       });
       continue;
     }
+    const image = inlineDataImage(part);
+    if (image !== undefined) images.push(image);
+    const audioBlob = inlineAudioBlob(part);
+    if (audioBlob !== undefined) audioBlobs.push(audioBlob);
     if (isString(part.text)) content += part.text;
     messageSignature = part.thoughtSignature ?? messageSignature;
   }
 
   return {
+    audio: inlineDataAudio(audioBlobs, content, true),
     content: content.length === 0 ? null : content,
+    ...includeWhen(images.length > 0, { images }),
     ...includeWhen(!(messageSignature === undefined), {
       messageExtraContent: {
         google: { thoughtSignature: messageSignature },
@@ -1038,7 +1228,11 @@ export class GeminiProvider extends BaseProvider {
     const converted = convertMessages(params.messages, this.providerName);
     const tools = convertFunctionTools(params.tools, this.providerName);
     const toolConfig = convertToolChoice(params.toolChoice, this.providerName);
-    const thinkingConfig = thinkingConfiguration(params.reasoningEffort, params.model);
+    const thinkingConfig = thinkingConfiguration(
+      params.reasoningEffort,
+      params.model,
+      this.providerName,
+    );
     const output = structuredOutput(params.responseFormat);
     // SAFETY: The provider contract establishes the asserted representation at this boundary.
     const config = compactObject({
@@ -1088,11 +1282,17 @@ export class GeminiProvider extends BaseProvider {
           message: {
             content: normalized.content,
             role: "assistant" as const,
+            ...includeWhen(!(normalized.audio === undefined), {
+              audio: normalized.audio,
+            }),
             ...includeWhen(finishReason === "content_filter", {
               refusal: GEMINI_CONTENT_FILTER_REFUSAL,
             }),
             ...includeWhen(!(normalized.messageExtraContent === undefined), {
               extraContent: normalized.messageExtraContent,
+            }),
+            ...includeWhen(!(normalized.images === undefined), {
+              images: normalized.images,
             }),
             ...includeWhen(!(normalized.reasoning === undefined), {
               reasoning: normalized.reasoning,
@@ -1173,6 +1373,8 @@ export class GeminiProvider extends BaseProvider {
           let content = "";
           let reasoning = "";
           let messageSignature: string | undefined;
+          const audioBlobs: { data: Buffer; mimeType: string }[] = [];
+          const images: ImageContent[] = [];
           const toolCalls: ToolCallDelta[] = [];
 
           for (const part of candidate.content?.parts ?? []) {
@@ -1198,6 +1400,10 @@ export class GeminiProvider extends BaseProvider {
               });
               continue;
             }
+            const image = inlineDataImage(part);
+            if (image !== undefined) images.push(image);
+            const audioBlob = inlineAudioBlob(part);
+            if (audioBlob !== undefined) audioBlobs.push(audioBlob);
             if (isString(part.text)) content += part.text;
             messageSignature = part.thoughtSignature ?? messageSignature;
           }
@@ -1209,6 +1415,9 @@ export class GeminiProvider extends BaseProvider {
               google: { thoughtSignature: messageSignature },
             };
           }
+          if (images.length > 0) delta.images = images;
+          const audio = inlineDataAudio(audioBlobs, content, false);
+          if (audio !== undefined) delta.audio = streamAudioDelta(audio);
           if (toolCalls.length > 0) delta.toolCalls = toolCalls;
           const mappedFinishReason = promptBlocked
             ? "content_filter"

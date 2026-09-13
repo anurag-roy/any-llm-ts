@@ -6,6 +6,7 @@ import { isFunction, isJsonValue, isNumber, isObject, isString } from "../utils.
 import { readFile } from "node:fs/promises";
 
 import { BatchNotCompleteError, UnsupportedParameterError } from "../errors.js";
+import { normalizeOutputConfig } from "../structured-output.js";
 import type {
   Batch,
   BatchResult,
@@ -444,6 +445,7 @@ function parseBatchInput(content: string) {
 }
 
 export class OtariProvider extends OpenAIProvider {
+  override readonly supportsMessagesStructuredOutputStreaming = true;
   private readonly otari: OtariClientLike;
 
   constructor(options: ProviderOptions = {}, client?: OtariClientLike) {
@@ -580,6 +582,9 @@ export class OtariProvider extends OpenAIProvider {
     }
     return this.execute(async () => {
       const { providerOptions, ...request } = params;
+      if (request.outputFormat !== undefined) {
+        request.outputFormat = normalizeOutputConfig(request.outputFormat);
+      }
       const messageRequest: JsonObject = parseJsonObject(
         snakeize(request),
         "Otari message request",

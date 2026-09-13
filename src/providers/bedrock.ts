@@ -458,13 +458,20 @@ function normalizedUsage(value: JsonValue | undefined): CompletionUsage | undefi
   };
 }
 
-function bedrockFinishReason(value: JsonValue | undefined, hasTools = false): FinishReason {
-  if (value === "max_tokens") return "length";
-  if (value === "tool_use" || hasTools) return "tool_calls";
-  if (value === "content_filtered" || value === "guardrail_intervened") {
-    return "content_filter";
+function bedrockFinishReason(value: JsonValue | undefined): Exclude<FinishReason, null> {
+  if (!isString(value)) return "stop";
+  switch (value) {
+    case "content_filtered":
+    case "guardrail_intervened":
+      return "content_filter";
+    case "max_tokens":
+    case "model_context_window_exceeded":
+      return "length";
+    case "tool_use":
+      return "tool_calls";
+    default:
+      return "stop";
   }
-  return value === undefined || value === null ? null : "stop";
 }
 
 function normalizeCompletion<Value>(value: Value, model: string): ChatCompletion {
@@ -506,9 +513,7 @@ function normalizeCompletion<Value>(value: Value, model: string): ChatCompletion
     choices: [
       {
         finishReason:
-          structuredOutput === undefined
-            ? bedrockFinishReason(response.stopReason, toolCalls.length > 0)
-            : "stop",
+          structuredOutput === undefined ? bedrockFinishReason(response.stopReason) : "stop",
         index: 0,
         message: {
           content: structuredOutput?.function.arguments ?? (content.length === 0 ? null : content),
