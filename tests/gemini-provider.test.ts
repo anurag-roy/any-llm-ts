@@ -16,6 +16,7 @@ import {
   ContentFilterError,
   ContextLengthExceededError,
   GeminiProvider,
+  InvalidRequestError,
   MissingApiKeyError,
   RateLimitError,
   UnsupportedParameterError,
@@ -429,7 +430,7 @@ describe("Gemini provider", () => {
           role: "assistant",
           toolCalls: [
             {
-              function: { arguments: "not-json", name: "first" },
+              function: { arguments: '{"ok":true}', name: "first" },
               id: "call-1",
               type: "function",
             },
@@ -468,7 +469,7 @@ describe("Gemini provider", () => {
     expect(contents[0].parts).toEqual([
       {
         functionCall: {
-          args: { arguments: "not-json" },
+          args: { ok: true },
           id: "call-1",
           name: "first",
         },
@@ -599,6 +600,86 @@ describe("Gemini provider", () => {
       },
     ]);
     expect(contents[0].parts[0].functionCall.args).toEqual(expectedArgs);
+  });
+
+  it.each(["{not-json", Buffer.from([0xff]), Uint8Array.of(0xff)])(
+    "rejects malformed serialized tool-call arguments %#",
+    async (argumentsValue) => {
+      const provider = new GeminiProvider({}, okSdk().client);
+      try {
+        await provider.completion({
+          messages: [
+            {
+              content: null,
+              role: "assistant",
+              toolCalls: [
+                {
+                  // SAFETY: Gemini accepts encoded JSON arguments at runtime; the public
+                  // FunctionCall type is the string form used by OpenAI-shaped callers.
+                  function: { arguments: argumentsValue, name: "get_weather" } as FunctionCall,
+                  id: "call_1",
+                  type: "function",
+                },
+              ],
+            },
+          ],
+          model: "gemini-test",
+        });
+        expect.fail("Expected InvalidRequestError for malformed tool-call arguments.");
+      } catch (error) {
+        expect(error).toBeInstanceOf(InvalidRequestError);
+        expect(error).toMatchObject({
+          cause: expect.any(Error),
+          message: "Tool call arguments for 'get_weather' must be valid JSON",
+          provider: "gemini",
+        });
+      }
+    },
+  );
+
+  it("forwards tool schemas with JSON Schema type unions as-is", async () => {
+    const rawParams = {
+      properties: {
+        candidates: {
+          items: {
+            properties: {
+              category: { enum: ["preference", "fact"], type: "string" },
+              content: { type: "string" },
+              valid_from_date: { type: ["string", "null"] },
+            },
+            required: ["content", "category"],
+            type: "object",
+          },
+          type: "array",
+        },
+      },
+      required: ["candidates"],
+      type: "object",
+    };
+    const sdk = okSdk();
+    const provider = new GeminiProvider({}, sdk.client);
+    await provider.completion({
+      messages: [{ content: "hi", role: "user" }],
+      model: "gemini-test",
+      tools: [
+        {
+          function: {
+            description: "Submit candidates.",
+            name: "submit_candidates",
+            parameters: rawParams,
+          },
+          type: "function",
+        },
+      ],
+    });
+    expect(
+      parseJsonObject(sdk.models.generateContent.mock.calls[0]?.[0].config).tools[0]
+        .functionDeclarations[0],
+    ).toEqual({
+      description: "Submit candidates.",
+      name: "submit_candidates",
+      parametersJsonSchema: rawParams,
+    });
   });
 
   it.each([

@@ -263,6 +263,28 @@ describe("Anthropic provider", () => {
     });
   });
 
+  it("forwards container continuity on the native Messages request", async () => {
+    const create = vi.fn().mockResolvedValue({
+      content: [{ text: "ok", type: "text" }],
+      id: "msg-container",
+      model: "claude-test",
+      role: "assistant",
+      stop_reason: "end_turn",
+      type: "message",
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+    const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
+    await provider.messages({
+      container: "container_123",
+      maxTokens: 100,
+      messages: [{ content: "continue", role: "user" }],
+      model: "claude-test",
+    });
+    expect(create.mock.calls[0]?.[0]).toMatchObject({
+      container: "container_123",
+    });
+  });
+
   it("propagates abort, disables SDK retries, and exposes dispatch for responses and streams", async () => {
     const create = vi
       .fn()

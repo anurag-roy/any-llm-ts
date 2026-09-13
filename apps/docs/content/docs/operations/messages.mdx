@@ -25,7 +25,9 @@ for (const block of response.content) {
 
 Messages calls also accept a per-request `timeout` in seconds and a provider `serviceTier`. Native
 Anthropic-family adapters forward both directly; compatibility adapters map them through chat
-completions. When returned by the provider, `requestId` is normalized on `MessageResponse`.
+completions. Native Anthropic-family adapters also accept `container` so a later turn can continue
+a previous top-level code-execution container. Compatibility adapters, Meta, and Otari reject
+`container`. When returned by the provider, `requestId` is normalized on `MessageResponse`.
 
 ## Tools
 

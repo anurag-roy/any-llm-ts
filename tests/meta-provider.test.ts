@@ -121,6 +121,9 @@ describe("Meta provider", () => {
       messages: [{ content: "hello", role: "user" }],
       model: "model",
     };
+    await expect(
+      provider.messages({ ...common, container: "container_123" }),
+    ).rejects.toBeInstanceOf(UnsupportedParameterError);
     await expect(provider.messages({ ...common, stopSequences: ["stop"] })).rejects.toBeInstanceOf(
       UnsupportedParameterError,
     );

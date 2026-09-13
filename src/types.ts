@@ -603,6 +603,8 @@ export interface MessagesParams {
   model: string;
   betas?: string[];
   cacheControl?: JsonObject;
+  /** Container identifier for continuing a previous top-level Anthropic container. */
+  container?: string;
   contextManagement?: JsonObject;
   metadata?: JsonObject;
   outputFormat?: JsonObject;

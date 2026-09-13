@@ -4,7 +4,12 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { BatchNotCompleteError, OtariProvider, RateLimitError } from "../src/index.js";
+import {
+  BatchNotCompleteError,
+  OtariProvider,
+  RateLimitError,
+  UnsupportedParameterError,
+} from "../src/index.js";
 import type { ChatCompletionChunk, OtariClientLike } from "../src/index.js";
 
 function fakeClient(methods: Partial<OtariClientLike>): OtariClientLike {
@@ -420,6 +425,15 @@ describe("Otari provider", () => {
         tools: [{ input_schema: { type: "object" }, name: "weather" }],
       }),
     );
+
+    await expect(
+      provider.messages({
+        container: "container_123",
+        maxTokens: 10,
+        messages: [{ content: "hello", role: "user" }],
+        model: "anthropic:claude",
+      }),
+    ).rejects.toBeInstanceOf(UnsupportedParameterError);
   });
 
   it("normalizes embeddings, models, images, audio, moderation, and reranking", async () => {

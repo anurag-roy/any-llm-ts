@@ -304,6 +304,7 @@ export function nativeMessagesRequest(params: MessagesParams) {
   return {
     betas: params.betas,
     cache_control: params.cacheControl,
+    container: params.container,
     context_management: params.contextManagement,
     max_tokens: params.maxTokens,
     messages: params.messages.map((message) => ({

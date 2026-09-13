@@ -323,6 +323,17 @@ describe("Messages compatibility API", () => {
         model: "model-a",
       }),
     ).rejects.toBeInstanceOf(UnsupportedOperationError);
+    await expect(
+      llm.messages({
+        container: "container_123",
+        maxTokens: 10,
+        messages: [],
+        model: "model-a",
+      }),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("container"),
+      name: "UnsupportedOperationError",
+    });
   });
 
   it("maps optional request controls and uncommon content blocks", () => {

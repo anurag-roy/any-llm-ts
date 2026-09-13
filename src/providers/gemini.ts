@@ -308,14 +308,21 @@ function parseJsonValue(value: string | Uint8Array): JsonValue {
   return validateJsonValue(JSON.parse(decodeEncodedJson(value)), "Gemini JSON value");
 }
 
-function parseFunctionArguments<Value>(value: Value): JsonObject {
+function parseFunctionArguments<Value>(
+  value: Value,
+  functionName: string,
+  provider: string,
+): JsonObject {
   if (isEncodedJson(value)) {
     if (encodedJsonLength(value) === 0) return {};
     try {
       const parsed = parseJsonValue(value);
       return isPlainObject(parsed) ? parsed : { value: parsed };
-    } catch {
-      return isString(value) ? { arguments: value } : {};
+    } catch (error) {
+      throw new InvalidRequestError(
+        `Tool call arguments for '${functionName}' must be valid JSON`,
+        { cause: error, provider },
+      );
     }
   }
   return isPlainObject(value) ? value : {};
@@ -348,7 +355,11 @@ function functionResponse(value: ChatMessage, namesById: Map<string, string>): P
   };
 }
 
-function assistantParts(message: ChatMessage, namesById: Map<string, string>): Part[] {
+function assistantParts(
+  message: ChatMessage,
+  namesById: Map<string, string>,
+  provider: string,
+): Part[] {
   const parts: Part[] = [];
   const messageSignature = thoughtSignature(message.extraContent);
   if (isString(message.reasoning) && message.reasoning.length > 0) {
@@ -371,7 +382,7 @@ function assistantParts(message: ChatMessage, namesById: Map<string, string>): P
     const signature = thoughtSignature(toolCall.extraContent);
     parts.push({
       functionCall: {
-        args: parseFunctionArguments(toolCall.function.arguments),
+        args: parseFunctionArguments(toolCall.function.arguments, toolCall.function.name, provider),
         id: toolCall.id,
         name: toolCall.function.name,
       },
@@ -383,7 +394,7 @@ function assistantParts(message: ChatMessage, namesById: Map<string, string>): P
   return parts;
 }
 
-function convertMessages(messages: ChatMessage[]): ConvertedMessages {
+function convertMessages(messages: ChatMessage[], provider: string): ConvertedMessages {
   const systemInstruction = messages
     .filter((message) => message.role === "developer" || message.role === "system")
     .map(textContent)
@@ -396,7 +407,7 @@ function convertMessages(messages: ChatMessage[]): ConvertedMessages {
     if (message.role === "developer" || message.role === "system") continue;
     if (message.role === "assistant") {
       contents.push({
-        parts: assistantParts(message, namesById),
+        parts: assistantParts(message, namesById, provider),
         role: "model",
       });
       continue;
@@ -772,14 +783,14 @@ function normalizeGeminiBatch(job: BatchJob, provider: string): Batch {
   return normalized;
 }
 
-function inlinedBatchRequest(entry: JsonObject): InlinedRequest {
+function inlinedBatchRequest(entry: JsonObject, provider: string): InlinedRequest {
   const body = parseJsonObject(entry.body ?? {});
   // SAFETY: The provider contract establishes the asserted representation at this boundary.
   const messages = Array.isArray(body.messages)
     ? // SAFETY: Batch JSONL messages are validated by convertMessages before SDK submission.
       (body.messages as (ChatMessage & JsonObject)[])
     : [];
-  const converted = convertMessages(messages);
+  const converted = convertMessages(messages, provider);
   const stop = body.stop;
   // SAFETY: The provider contract establishes the asserted representation at this boundary.
   const config = compactObject({
@@ -924,7 +935,7 @@ export class GeminiProvider extends BaseProvider {
       const requests: InlinedRequest[] = [];
       for (const line of (await readFile(params.inputFilePath, "utf8")).split("\n")) {
         if (line.trim().length === 0) continue;
-        const request = inlinedBatchRequest(parseJsonObject(JSON.parse(line)));
+        const request = inlinedBatchRequest(parseJsonObject(JSON.parse(line)), this.providerName);
         requests.push(modelOverride === undefined ? request : { ...request, model: modelOverride });
       }
       const model = modelOverride ?? requests.find((request) => request.model !== undefined)?.model;
@@ -1024,7 +1035,7 @@ export class GeminiProvider extends BaseProvider {
   }
 
   private completionRequest(params: CompletionParams): GenerateContentParameters {
-    const converted = convertMessages(params.messages);
+    const converted = convertMessages(params.messages, this.providerName);
     const tools = convertFunctionTools(params.tools, this.providerName);
     const toolConfig = convertToolChoice(params.toolChoice, this.providerName);
     const thinkingConfig = thinkingConfiguration(params.reasoningEffort, params.model);
