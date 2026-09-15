@@ -1,5 +1,16 @@
 # any-llm-ts
 
+## 0.5.1
+
+### Patch Changes
+
+- 56891cd: Sync with Python any-llm through `3727a2b`: emit Anthropic usage on a trailing empty-choices stream chunk, accept Gemini `input_audio` formats beyond MP3/WAV, and read HTTP status off attached SDK response objects.
+- fe699f8: Sync with Python any-llm through `909d26e`: map Gemini `allowed_tools` toolChoice, report unsupported Gemini toolChoice as `UnsupportedParameterError`, and accept Azure OpenAI Entra tokens.
+- cc5b149: Sync with Python any-llm through `9b3448f`: keep Gemini inline images and audio as OpenAI-compatible media, and map the full Bedrock Converse `stopReason` set.
+- 65ba5a9: Sync with Python any-llm through `2388f59`: reject invalid Gemini tool-call JSON, and add Messages `container` continuity for native Anthropic.
+- cc5b149: Sync with Python any-llm through `c2420fa`: include Gemini tool-use prompt tokens in `promptTokens` so usage categories sum to `totalTokens`.
+- cc5b149: Sync with Python any-llm through `dccdb7a`: map DeepSeek V4 Chat reasoning controls, send Gemini thinking levels and model-specific budgets, keep Otari structured Messages on the native endpoint, and allow Anthropic/Otari to stream schema-constrained Messages events.
+
 ## 0.5.0
 
 ### Minor Changes
