@@ -144,6 +144,7 @@ interface ErrorRecord {
   headers?: Headers | ErrorRecord;
   message?: string;
   param?: string;
+  response?: ErrorRecord;
   status?: number;
   statusCode?: number;
   type?: string;
@@ -177,8 +178,13 @@ export function normalizeProviderError(cause: unknown, provider: string): AnyLLM
 
   const record = asRecord(cause);
   const nested = asRecord(record?.error);
+  const response = asRecord(record?.response);
   const statusCode =
-    numberValue(record?.status) ?? numberValue(record?.statusCode) ?? numberValue(nested?.status);
+    numberValue(record?.status) ??
+    numberValue(record?.statusCode) ??
+    numberValue(nested?.status) ??
+    numberValue(response?.statusCode) ??
+    numberValue(response?.status);
   const code = stringValue(nested?.code) ?? stringValue(record?.code);
   const param = stringValue(nested?.param) ?? stringValue(record?.param);
   const errorType = stringValue(nested?.type) ?? stringValue(record?.type);

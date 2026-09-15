@@ -231,35 +231,55 @@ function inferMimeType(value: string | undefined, fallback: string): string {
   return mappings.find(([extension]) => path.endsWith(extension))?.[1] ?? fallback;
 }
 
+function decodedBase64Size(encoded: string): number {
+  const padding = encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0;
+  return Math.trunc((encoded.length * 3) / 4) - padding;
+}
+
+function decodeBase64(encoded: string, field: string): void {
+  if (encoded.length === 0) {
+    throw new TypeError(`${field} must contain base64 data.`);
+  }
+  if (decodedBase64Size(encoded) > INLINE_DATA_LIMIT_BYTES) {
+    throw new TypeError(`${field} exceeds Gemini's 20 MB inline-data limit.`);
+  }
+  if (!/^[A-Za-z\d+/]*={0,2}$/u.test(encoded)) {
+    throw new TypeError(`${field} contains invalid base64 data.`);
+  }
+  const decoded = Buffer.from(encoded, "base64");
+  const normalizedInput = encoded.replace(/=+$/u, "");
+  const normalizedOutput = decoded.toString("base64").replace(/=+$/u, "");
+  if (normalizedInput !== normalizedOutput) {
+    throw new TypeError(`${field} contains invalid base64 data.`);
+  }
+}
+
 function parseDataUrl(value: string, field: string) {
   const match = /^data:([^;,]+);base64,([A-Za-z\d+/]*={0,2})$/u.exec(value);
   if (match?.[1] === undefined || match[2] === undefined) {
     throw new TypeError(`${field} must be a valid base64 data URL.`);
   }
-
-  const data = match[2];
-  if (data.length === 0) {
-    throw new TypeError(`${field} must contain base64 data.`);
-  }
-  const decoded = Buffer.from(data, "base64");
-  const normalizedInput = data.replace(/=+$/u, "");
-  const normalizedOutput = decoded.toString("base64").replace(/=+$/u, "");
-  if (normalizedInput !== normalizedOutput) {
-    throw new TypeError(`${field} contains invalid base64 data.`);
-  }
-  if (decoded.byteLength > INLINE_DATA_LIMIT_BYTES) {
-    throw new TypeError(`${field} exceeds Gemini's 20 MB inline-data limit.`);
-  }
-
-  return { data, mimeType: match[1] };
+  decodeBase64(match[2], field);
+  return { data: match[2], mimeType: match[1] };
 }
 
-function inlineData(
-  data: string,
-  mimeType: string,
-  field: string,
-): { data: string; mimeType: string } {
-  return parseDataUrl(`data:${mimeType};base64,${data}`, field);
+function inlineData(data: string, mimeType: string, field: string) {
+  decodeBase64(data, field);
+  return { data, mimeType };
+}
+
+function inputAudioPart(audio: JsonValue | undefined, provider: string): Part {
+  const record = isObject(audio) && !Array.isArray(audio) ? audio : {};
+  const data = "data" in record && isString(record.data) ? record.data : undefined;
+  const format = "format" in record && isString(record.format) ? record.format : undefined;
+  if (data === undefined || format === undefined || format.length === 0) {
+    throw new InvalidRequestError(
+      "input_audio.data and input_audio.format are required for audio content",
+      { provider },
+    );
+  }
+  if (data.startsWith("data:")) return { inlineData: parseDataUrl(data, "input_audio.data") };
+  return { inlineData: inlineData(data, `audio/${format.toLowerCase()}`, "input_audio.data") };
 }
 
 function imagePart(value: string): Part {
@@ -283,7 +303,7 @@ function filePart(file: { file_data?: string; file_id?: string; filename?: strin
   };
 }
 
-function contentParts(content: ChatMessage["content"]): Part[] {
+function contentParts(content: ChatMessage["content"], provider: string): Part[] {
   if (isString(content)) return [{ text: content }];
   if (content === null) return [];
 
@@ -309,16 +329,7 @@ function contentParts(content: ChatMessage["content"]): Part[] {
       ];
     }
     if (part.type === "input_audio" && "input_audio" in part) {
-      // SAFETY: The provider contract establishes the asserted representation at this boundary.
-      const audio = part.input_audio as { data: string; format: "mp3" | "wav" };
-      const data = audio.data.startsWith("data:")
-        ? parseDataUrl(audio.data, "input_audio.data")
-        : inlineData(
-            audio.data,
-            audio.format === "mp3" ? "audio/mpeg" : "audio/wav",
-            "input_audio.data",
-          );
-      return [{ inlineData: data }];
+      return [inputAudioPart(part.input_audio, provider)];
     }
     return [];
   });
@@ -405,7 +416,7 @@ function assistantParts(
   }
   const hasToolCalls = (message.toolCalls ?? []).length > 0;
   const skipEmptyText = hasToolCalls && isString(message.content) && message.content.length === 0;
-  const content = skipEmptyText ? [] : contentParts(message.content);
+  const content = skipEmptyText ? [] : contentParts(message.content, provider);
   if (messageSignature !== undefined) {
     const signedPart = [...content].reverse().find((part) => part.text !== undefined);
     if (signedPart !== undefined) signedPart.thoughtSignature = messageSignature;
@@ -454,7 +465,7 @@ function convertMessages(messages: ChatMessage[], provider: string): ConvertedMe
       });
       continue;
     }
-    contents.push({ parts: contentParts(message.content), role: "user" });
+    contents.push({ parts: contentParts(message.content, provider), role: "user" });
   }
 
   return systemInstruction.length === 0 ? { contents } : { contents, systemInstruction };

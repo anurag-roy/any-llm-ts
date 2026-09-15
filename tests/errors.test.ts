@@ -95,6 +95,28 @@ describe("provider error normalization", () => {
     });
   });
 
+  it("reads the HTTP status off an attached response object", () => {
+    const aiohttpStyle = {
+      message: "Invalid request",
+      response: { status: 400 },
+    };
+    expect(normalizeProviderError(aiohttpStyle, "gemini")).toMatchObject({
+      message: "Invalid request",
+      provider: "gemini",
+      statusCode: 400,
+    });
+    expect(normalizeProviderError(aiohttpStyle, "gemini")).toBeInstanceOf(InvalidRequestError);
+
+    const withStatusCode = {
+      message: "Invalid request",
+      response: { status: 500, statusCode: 400 },
+    };
+    expect(normalizeProviderError(withStatusCode, "gemini")).toMatchObject({
+      statusCode: 400,
+    });
+    expect(normalizeProviderError(withStatusCode, "gemini")).toBeInstanceOf(InvalidRequestError);
+  });
+
   it("does not wrap an AnyLLMError twice", () => {
     const original = new AnyLLMError("already normalized");
     expect(normalizeProviderError(original, "test")).toBe(original);

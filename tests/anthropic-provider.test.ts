@@ -505,9 +505,16 @@ describe("Anthropic provider", () => {
     expect(chunks.map((chunk) => chunk.choices[0]?.finishReason).filter(Boolean)).toEqual([
       "content_filter",
     ]);
-    expect(chunks.at(-1)?.choices[0]?.delta).toMatchObject({
+    expect(
+      chunks.find((chunk) => chunk.choices[0]?.finishReason === "content_filter")?.choices[0]
+        ?.delta,
+    ).toMatchObject({
       extraContent: { anthropic: { stop_details: stopDetails } },
       refusal: "Response blocked by Anthropic content filtering.",
+    });
+    expect(chunks.at(-1)).toMatchObject({
+      choices: [],
+      usage: { completionTokens: 5, promptTokens: 0, totalTokens: 5 },
     });
   });
 
@@ -535,6 +542,119 @@ describe("Anthropic provider", () => {
     expect(chunks.map((chunk) => chunk.choices[0]?.finishReason).filter(Boolean)).toEqual([
       "tool_calls",
     ]);
+    expect(chunks.at(-1)).toMatchObject({
+      choices: [],
+      usage: { completionTokens: 1, promptTokens: 0, totalTokens: 1 },
+    });
+  });
+
+  it("leaves choices empty on the trailing usage-only message_stop chunk", async () => {
+    async function* events(): AsyncIterable<JsonObject> {
+      yield { message: { id: "msg-usage", model: "claude-stream" }, type: "message_start" };
+      yield {
+        delta: { text: "hi", type: "text_delta" },
+        index: 0,
+        type: "content_block_delta",
+      };
+      yield {
+        delta: { stop_reason: "end_turn" },
+        type: "message_delta",
+        usage: { output_tokens: 7 },
+      };
+      yield {
+        message: { usage: { input_tokens: 12, output_tokens: 7 } },
+        type: "message_stop",
+      };
+    }
+    const create = vi.fn().mockResolvedValue(events());
+    const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
+    const result = await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "claude-test",
+      stream: true,
+    });
+    const chunks: ChatCompletionChunk[] = [];
+    // SAFETY: The streaming request makes this completion result an async iterable in the test.
+    for await (const chunk of result as AsyncIterable<ChatCompletionChunk>) chunks.push(chunk);
+
+    const finishIndex = chunks.findIndex((chunk) => chunk.choices[0]?.finishReason === "stop");
+    const usageChunks = chunks.filter((chunk) => chunk.usage !== undefined);
+    const [usageChunk] = usageChunks;
+    expect(finishIndex).toBeGreaterThanOrEqual(0);
+    expect(usageChunks).toHaveLength(1);
+    expect(usageChunk === undefined ? -1 : chunks.indexOf(usageChunk)).toBeGreaterThan(finishIndex);
+    expect(usageChunk).toMatchObject({
+      choices: [],
+      usage: { completionTokens: 7, promptTokens: 12, totalTokens: 19 },
+    });
+  });
+
+  it("emits a message_stop chunk with neither choices nor usage when no message accumulated", async () => {
+    async function* events(): AsyncIterable<JsonObject> {
+      yield { type: "message_stop" };
+    }
+    const create = vi.fn().mockResolvedValue(events());
+    const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
+    const result = await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "claude-test",
+      stream: true,
+    });
+    const chunks: ChatCompletionChunk[] = [];
+    // SAFETY: The streaming request makes this completion result an async iterable in the test.
+    for await (const chunk of result as AsyncIterable<ChatCompletionChunk>) chunks.push(chunk);
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]?.choices).toEqual([]);
+    expect(chunks[0]?.usage).toBeUndefined();
+  });
+
+  it("lets an OpenAI-style consumer read text, finishReason, and usage from Anthropic streams", async () => {
+    async function* events(): AsyncIterable<JsonObject> {
+      yield {
+        message: { id: "msg-consumer", model: "claude-stream", usage: { input_tokens: 13 } },
+        type: "message_start",
+      };
+      yield {
+        delta: { text: "Hi", type: "text_delta" },
+        index: 0,
+        type: "content_block_delta",
+      };
+      yield {
+        delta: { text: "!", type: "text_delta" },
+        index: 0,
+        type: "content_block_delta",
+      };
+      yield {
+        delta: { stop_reason: "end_turn" },
+        type: "message_delta",
+        usage: { output_tokens: 5 },
+      };
+      yield { type: "message_stop" };
+    }
+    const create = vi.fn().mockResolvedValue(events());
+    const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
+    const stream = await provider.completion({
+      messages: [{ content: "Say hi.", role: "user" }],
+      model: "claude-test",
+      stream: true,
+    });
+    let text = "";
+    const finishReasons: string[] = [];
+    let usage: ChatCompletionChunk["usage"];
+    // SAFETY: The streaming request makes this completion result an async iterable in the test.
+    for await (const chunk of stream as AsyncIterable<ChatCompletionChunk>) {
+      if (chunk.choices.length > 0) {
+        text += chunk.choices[0]?.delta.content ?? "";
+        if (chunk.choices[0]?.finishReason) {
+          finishReasons.push(chunk.choices[0].finishReason);
+        }
+      } else {
+        usage = chunk.usage;
+      }
+    }
+    expect(text).toBe("Hi!");
+    expect(finishReasons).toEqual(["stop"]);
+    expect(usage).toEqual({ completionTokens: 5, promptTokens: 13, totalTokens: 18 });
   });
 
   it("maps JSON schema output, adaptive effort, and parallel tool choice", async () => {
@@ -705,7 +825,9 @@ describe("Anthropic provider", () => {
     // SAFETY: This test double implements the provider surface exercised by this test.
     for await (const chunk of result as AsyncIterable<ChatCompletionChunk>) chunks.push(chunk);
 
-    expect(chunks.map((chunk) => chunk.choices[0]?.delta)).toEqual([
+    expect(
+      chunks.filter((chunk) => chunk.choices.length > 0).map((chunk) => chunk.choices[0]?.delta),
+    ).toEqual([
       { role: "assistant" },
       { content: "A" },
       { content: "B" },
@@ -725,10 +847,13 @@ describe("Anthropic provider", () => {
       { extraContent: { anthropic: { signature: "stream-signature" } } },
       {},
     ]);
+    const finishIndex = chunks.findIndex((chunk) => chunk.choices[0]?.finishReason === "stop");
+    expect(finishIndex).toBeGreaterThanOrEqual(0);
     expect(chunks.at(-1)).toMatchObject({
-      choices: [{ finishReason: "stop" }],
+      choices: [],
       usage: { completionTokens: 3, promptTokens: 4, totalTokens: 7 },
     });
+    expect(chunks.length - 1).toBeGreaterThan(finishIndex);
   });
 
   it("passes through native Messages API responses and streams", async () => {

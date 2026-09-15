@@ -247,6 +247,92 @@ describe("Bedrock provider", () => {
     });
   });
 
+  it("keeps assistant text when a non-streaming turn also calls a tool", async () => {
+    const send = vi.fn(async () => ({
+      output: {
+        message: {
+          content: [
+            { text: "I will look up the weather in Paris." },
+            {
+              toolUse: {
+                input: { location: "Paris" },
+                name: "get_weather",
+                toolUseId: "tool-123",
+              },
+            },
+          ],
+        },
+      },
+      stopReason: "tool_use",
+    }));
+    const bedrock = provider(send);
+    // SAFETY: The non-streaming request makes this completion result concrete in the test.
+    const result = (await bedrock.completion({
+      messages: [{ content: "Weather?", role: "user" }],
+      model: "anthropic.claude-test",
+    })) as ChatCompletion;
+    expect(result.choices[0]?.message.content).toBe("I will look up the weather in Paris.");
+    expect(result.choices[0]?.message.toolCalls).toMatchObject([
+      { function: { name: "get_weather" }, id: "tool-123" },
+    ]);
+    expect(result.choices[0]?.finishReason).toBe("tool_calls");
+  });
+
+  it("joins every text block before a tool call", async () => {
+    const send = vi.fn(async () => ({
+      output: {
+        message: {
+          content: [
+            { text: "Let me check. " },
+            { text: "Paris first." },
+            {
+              toolUse: {
+                input: { location: "Paris" },
+                name: "get_weather",
+                toolUseId: "tool-456",
+              },
+            },
+          ],
+        },
+      },
+      stopReason: "tool_use",
+    }));
+    const bedrock = provider(send);
+    // SAFETY: The non-streaming request makes this completion result concrete in the test.
+    const result = (await bedrock.completion({
+      messages: [{ content: "Weather?", role: "user" }],
+      model: "anthropic.claude-test",
+    })) as ChatCompletion;
+    expect(result.choices[0]?.message.content).toBe("Let me check. Paris first.");
+  });
+
+  it("reports no content for a tool call that carried no text", async () => {
+    const send = vi.fn(async () => ({
+      output: {
+        message: {
+          content: [
+            {
+              toolUse: {
+                input: { location: "Paris" },
+                name: "get_weather",
+                toolUseId: "tool-789",
+              },
+            },
+          ],
+        },
+      },
+      stopReason: "tool_use",
+    }));
+    const bedrock = provider(send);
+    // SAFETY: The non-streaming request makes this completion result concrete in the test.
+    const result = (await bedrock.completion({
+      messages: [{ content: "Weather?", role: "user" }],
+      model: "anthropic.claude-test",
+    })) as ChatCompletion;
+    expect(result.choices[0]?.message.content).toBeNull();
+    expect(result.choices[0]?.message.toolCalls).not.toBeUndefined();
+  });
+
   it("merges a user turn that follows a tool-result flush", async () => {
     const send = vi.fn(async (command: BedrockTestCommand) => {
       expect(command).toBeInstanceOf(ConverseCommand);
