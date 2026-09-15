@@ -873,6 +873,7 @@ export class AnthropicProvider extends BaseProvider {
     let model = requestedModel;
     let created = unixTimestamp();
     let inputTokens = 0;
+    let pendingUsage: CompletionUsage | undefined;
 
     for await (const event of stream) {
       if (event.type === "message_start") {
@@ -964,7 +965,6 @@ export class AnthropicProvider extends BaseProvider {
       if (event.type === "message_delta") {
         const eventUsage = parseJsonObject(event.usage ?? {});
         const eventDelta = parseJsonObject(event.delta ?? {});
-        const outputTokens = Number(eventUsage.output_tokens ?? 0);
         const reason = finishReason(eventDelta.stop_reason, null);
         const stopDetails = refusalStopDetails(eventDelta);
         const delta: ChatCompletionChunk["choices"][number]["delta"] = {};
@@ -974,13 +974,30 @@ export class AnthropicProvider extends BaseProvider {
         if (stopDetails !== undefined) {
           delta.extraContent = { anthropic: { stop_details: stopDetails } };
         }
+        pendingUsage = anthropicUsage({
+          cache_creation_input_tokens: eventUsage.cache_creation_input_tokens,
+          cache_read_input_tokens: eventUsage.cache_read_input_tokens,
+          input_tokens: isNumber(eventUsage.input_tokens) ? eventUsage.input_tokens : inputTokens,
+          output_tokens: eventUsage.output_tokens,
+        });
+        yield this.chunk(id, model, created, delta, reason, event);
+        continue;
+      }
+      if (event.type === "message_stop") {
+        const message = parseOptionalJsonObject(event.message);
+        const usage =
+          message?.usage === undefined
+            ? pendingUsage
+            : anthropicUsage(parseJsonObject(message.usage));
         yield {
-          ...this.chunk(id, model, created, delta, reason, event),
-          usage: {
-            completionTokens: outputTokens,
-            promptTokens: inputTokens,
-            totalTokens: inputTokens + outputTokens,
-          },
+          choices: [],
+          created,
+          id,
+          model,
+          object: "chat.completion.chunk",
+          provider: this.providerName,
+          raw: event,
+          ...includeWhen(!(usage === undefined), { usage }),
         };
       }
     }

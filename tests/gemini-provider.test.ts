@@ -1493,7 +1493,65 @@ describe("Gemini provider", () => {
         ],
         model: "gemini-test",
       }),
-    ).toThrow(/valid base64 data URL/u);
+    ).toThrow(/invalid base64/u);
+  });
+
+  it("converts OpenAI input_audio parts to Gemini audio MIME types", async () => {
+    const contents = await convertedContents([
+      {
+        content: [
+          { input_audio: { data: "aGVsbG8=", format: "wav" }, type: "input_audio" },
+          { input_audio: { data: "aGVsbG8=", format: "FLAC" }, type: "input_audio" },
+        ],
+        role: "user",
+      },
+    ]);
+    expect(contents[0]).toMatchObject({
+      parts: [
+        { inlineData: { data: "aGVsbG8=", mimeType: "audio/wav" } },
+        { inlineData: { data: "aGVsbG8=", mimeType: "audio/flac" } },
+      ],
+    });
+  });
+
+  it("rejects malformed input_audio payloads", () => {
+    const provider = new GeminiProvider({}, fakeGemini().client);
+    const malformed = [{ data: "AAAA" }, { data: "AAAA", format: 1 }, "AAAA", null];
+    for (const inputAudio of malformed) {
+      expect(
+        () =>
+          provider.completion({
+            messages: [
+              {
+                content: [
+                  {
+                    input_audio: inputAudio,
+                    type: "input_audio",
+                  },
+                ],
+                role: "user",
+              },
+            ],
+            model: "gemini-test",
+          }),
+        JSON.stringify(inputAudio),
+      ).toThrow(/input_audio\.data and input_audio\.format are required/u);
+    }
+  });
+
+  it("rejects non-ASCII input_audio base64 as an invalid request", () => {
+    const provider = new GeminiProvider({}, fakeGemini().client);
+    expect(() =>
+      provider.completion({
+        messages: [
+          {
+            content: [{ input_audio: { data: "é", format: "wav" }, type: "input_audio" }],
+            role: "user",
+          },
+        ],
+        model: "gemini-test",
+      }),
+    ).toThrow(/invalid base64/u);
   });
 
   it("rejects unsupported toolChoice forms instead of dropping them", () => {

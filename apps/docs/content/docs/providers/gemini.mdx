@@ -140,7 +140,8 @@ await gemini.completion({
 });
 ```
 
-Images and files can use a URI or a base64 data URL. `input_audio` supports base64 MP3 and WAV.
+Images and files can use a URI or a base64 data URL. `input_audio` maps OpenAI
+`{ data, format }` parts to Gemini `audio/<format>` MIME types such as wav, mp3, flac, and ogg.
 Inline payloads are validated before the request and must not exceed Gemini's 20 MB inline-data
 limit. For larger content, upload it with Google's Files API and pass its URI as `file.file_id`.
 

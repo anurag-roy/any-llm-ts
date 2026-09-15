@@ -38,7 +38,7 @@ export interface InputAudioContentPart {
   type: "input_audio";
   input_audio: {
     data: string;
-    format: "mp3" | "wav";
+    format: string;
   };
 }
 
