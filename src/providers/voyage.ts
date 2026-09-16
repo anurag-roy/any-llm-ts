@@ -30,6 +30,7 @@ const voyageCapabilities: ProviderCapabilities = {
   batch: false,
   completion: false,
   embedding: true,
+  files: false,
   imageGeneration: false,
   listModels: false,
   messages: false,

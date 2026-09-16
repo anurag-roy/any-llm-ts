@@ -44,6 +44,7 @@ try {
 | `InvalidRequestError`        | The provider rejected a request with another 4xx status.          |
 | `RateLimitError`             | HTTP 429; `retryAfter` is retained when present.                  |
 | `ModelNotFoundError`         | HTTP 404.                                                         |
+| `ProviderFileNotFoundError`  | HTTP 404 for retrieve, download, or delete of a hosted file.      |
 | `ContextLengthExceededError` | The provider reported a context or token limit.                   |
 | `ContentFilterError`         | The provider reported filtered content.                           |
 | `UpstreamProviderError`      | HTTP 502.                                                         |

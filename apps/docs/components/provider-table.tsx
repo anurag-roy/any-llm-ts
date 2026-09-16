@@ -7,6 +7,7 @@ const capabilityColumns = [
   ["embedding", "Embed"],
   ["responses", "Responses"],
   ["batch", "Batch"],
+  ["files", "Files"],
   ["rerank", "Rerank"],
   ["vision", "Vision"],
   ["pdfInput", "PDF"],

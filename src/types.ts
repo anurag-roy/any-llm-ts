@@ -174,6 +174,20 @@ export interface DirectCompletionParams extends CompletionParams {
   provider?: string;
 }
 
+export interface CacheCreationTokenDetails {
+  ephemeral1hInputTokens?: number;
+  ephemeral5mInputTokens?: number;
+  [key: string]: JsonValue | undefined;
+}
+
+export interface PromptTokensDetails {
+  audioTokens?: number;
+  cacheCreationTokenDetails?: CacheCreationTokenDetails;
+  cacheWriteTokens?: number;
+  cachedTokens?: number;
+  [key: string]: JsonValue | undefined;
+}
+
 export interface CompletionUsage {
   completionTokens: number;
   promptTokens: number;
@@ -184,7 +198,7 @@ export interface CompletionUsage {
   loadDuration?: number;
   promptEvalDuration?: number;
   promptTime?: number;
-  promptTokensDetails?: JsonObject;
+  promptTokensDetails?: PromptTokensDetails;
   queueTime?: number;
   totalDuration?: number;
   totalTime?: number;
@@ -516,6 +530,67 @@ export interface BatchResult {
   results: BatchResultItem[];
 }
 
+export type FileOperation = "delete" | "download" | "list" | "retrieve" | "upload";
+
+export type FileInput = ArrayBuffer | Blob | NodeJS.ReadableStream | Uint8Array | string;
+
+export interface FileMetadata {
+  id: string;
+  createdAt?: string;
+  downloadable?: boolean;
+  expiresAt?: string;
+  filename?: string;
+  mimeType?: string;
+  purpose?: string;
+  sizeBytes?: number;
+  status?: string;
+  [key: string]: JsonValue | undefined;
+}
+
+export interface FilePage {
+  data: FileMetadata[];
+  nextCursor?: string;
+  [key: string]: FileMetadata[] | JsonValue | undefined;
+}
+
+export interface FileDeleted {
+  id: string;
+  deleted?: boolean;
+  [key: string]: JsonValue | undefined;
+}
+
+export interface FileDownload extends AsyncIterable<Uint8Array> {
+  readonly headers: Record<string, string>;
+  readonly statusCode: number;
+  close(): Promise<void>;
+  [Symbol.asyncDispose](): Promise<void>;
+}
+
+export interface UploadFileParams {
+  file: FileInput;
+  expiresIn?: number;
+  filename?: string;
+  mimeType?: string;
+  providerOptions?: JsonObject;
+  purpose?: string;
+}
+
+export interface ListFilesParams {
+  cursor?: string;
+  limit?: number;
+  providerOptions?: JsonObject;
+  purpose?: string;
+}
+
+export interface FileResourceParams {
+  fileId: string;
+  providerOptions?: JsonObject;
+}
+
+export interface DownloadFileParams extends FileResourceParams {
+  chunkSize?: number;
+}
+
 export interface RerankParams {
   documents: string[];
   model: string;
@@ -669,6 +744,7 @@ export type MessageContentBlock =
 export interface MessageUsage {
   inputTokens: number;
   outputTokens: number;
+  cacheCreation?: CacheCreationTokenDetails;
   cacheCreationInputTokens?: number;
   cacheReadInputTokens?: number;
 }
@@ -758,6 +834,7 @@ export interface ProviderCapabilities {
   batch: boolean;
   completion: boolean;
   embedding: boolean;
+  files: boolean;
   imageGeneration: boolean;
   listModels: boolean;
   messages: boolean;
@@ -865,6 +942,7 @@ export interface ProviderMetadata {
   documentationUrl: string;
   envApiBase?: string;
   envApiKey?: string;
+  fileOperations: FileOperation[];
   gateway: ProviderGatewayContract;
   id: string;
   name: string;

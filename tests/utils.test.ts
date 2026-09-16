@@ -111,6 +111,25 @@ describe("runtime utilities", () => {
     });
   });
 
+  it("closes the source iterable when a mapped stream is abandoned", async () => {
+    let closed = 0;
+    const source = {
+      async *[Symbol.asyncIterator]() {
+        try {
+          yield 1;
+          yield 2;
+        } finally {
+          closed += 1;
+        }
+      },
+    };
+    const mapped = mapAsyncIterable(source, (value) => value);
+    const iterator = mapped[Symbol.asyncIterator]();
+    await iterator.next();
+    await iterator.return?.();
+    expect(closed).toBe(1);
+  });
+
   it("flattens response tools and validates timeout options", () => {
     expect(flattenResponsesTools(undefined)).toBeUndefined();
     expect(

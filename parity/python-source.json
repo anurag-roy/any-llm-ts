@@ -1,7 +1,7 @@
 {
   "source": {
     "repository": "mozilla-ai/any-llm",
-    "commit": "3727a2bf3c36dec36677a42d7bd7a4b3141af48a"
+    "commit": "bcfdbe02d7ce55143fe883e83a7ee4fd33047aff"
   },
   "providers": [
     "anthropic",
@@ -91,6 +91,11 @@
     "responses",
     "messages",
     "embedding",
+    "uploadFile",
+    "listFiles",
+    "retrieveFile",
+    "deleteFile",
+    "downloadFile",
     "imageGeneration",
     "transcription",
     "speech",
@@ -203,6 +208,7 @@
       "vllm",
       "voyage"
     ],
+    "files": ["anthropic"],
     "imageGeneration": ["azureopenai", "neosantara", "openai", "otari"],
     "listModels": [
       "anthropic",

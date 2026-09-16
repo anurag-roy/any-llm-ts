@@ -1,7 +1,9 @@
 import packageMetadata from "../package.json" with { type: "json" };
 
 import type {
+  FileOperation,
   PromptCacheKeySupport,
+  ProviderCapabilities,
   ProviderConfiguration,
   ProviderConfigurationField,
   ProviderGatewayContract,
@@ -65,6 +67,7 @@ const capabilityKeys = [
   "batch",
   "completion",
   "embedding",
+  "files",
   "imageGeneration",
   "listModels",
   "messages",
@@ -188,24 +191,51 @@ export function providerPromptCacheKeySupport(name: string): PromptCacheKeySuppo
 type GeneratedProviderMetadataKeys =
   | "configuration"
   | "displayName"
+  | "fileOperations"
   | "gateway"
   | "id"
   | "promptCacheKeySupport"
   | "provenance"
   | "tier";
 
-type IncompleteProviderMetadata = Omit<ProviderMetadata, GeneratedProviderMetadataKeys> &
-  Partial<Pick<ProviderMetadata, GeneratedProviderMetadataKeys>>;
+type IncompleteProviderMetadata = Omit<
+  ProviderMetadata,
+  GeneratedProviderMetadataKeys | "capabilities"
+> &
+  Partial<Pick<ProviderMetadata, GeneratedProviderMetadataKeys>> & {
+    capabilities: Omit<ProviderCapabilities, "files"> &
+      Partial<Pick<ProviderCapabilities, "files">>;
+  };
+
+const fileOperationsCatalog = ["delete", "download", "list", "retrieve", "upload"] as const;
+
+function normalizeFileOperations(value: FileOperation[] | undefined): FileOperation[] {
+  if (value === undefined) return [];
+  const unique = new Set<FileOperation>();
+  for (const operation of value) {
+    if (!fileOperationsCatalog.includes(operation)) {
+      throw new TypeError(`Unsupported file operation "${operation}".`);
+    }
+    unique.add(operation);
+  }
+  return [...unique].sort();
+}
 
 export function completeProviderMetadata(
   metadata: IncompleteProviderMetadata,
   family: ProviderAdapterFamily = "other",
 ): ProviderMetadata {
   const name = metadata.name.trim().toLowerCase();
+  const fileOperations = normalizeFileOperations(metadata.fileOperations);
   const completed: ProviderMetadata = {
     ...metadata,
+    capabilities: {
+      ...metadata.capabilities,
+      files: fileOperations.length > 0,
+    },
     configuration: metadata.configuration ?? providerConfiguration(name, metadata.apiBase),
     displayName: metadata.displayName ?? providerDisplayName(name),
+    fileOperations,
     gateway: metadata.gateway ?? gatewayContract(family),
     id: metadata.id ?? name,
     name,
@@ -373,6 +403,17 @@ export function validateProviderMetadata(metadata: ProviderMetadata, expectedId?
     if (!isBoolean(metadata.capabilities[capability])) {
       throw new TypeError(`Provider "${metadata.id}" capability "${capability}" must be boolean.`);
     }
+  }
+  if (metadata.capabilities.files !== metadata.fileOperations.length > 0) {
+    throw new TypeError(`Provider "${metadata.id}" file capability must match fileOperations.`);
+  }
+  if (
+    !metadata.fileOperations.every(
+      (operation, index, operations) =>
+        fileOperationsCatalog.includes(operation) && operations.indexOf(operation) === index,
+    )
+  ) {
+    throw new TypeError(`Provider "${metadata.id}" has invalid file operations.`);
   }
 
   if (!isBoolean(metadata.requiresApiKey)) {

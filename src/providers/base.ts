@@ -12,11 +12,18 @@ import type {
   CompletionOperationOptions,
   CompletionParams,
   CreateBatchParams,
+  DownloadFileParams,
   EmbeddingParams,
   EmbeddingResponse,
+  FileDeleted,
+  FileDownload,
+  FileMetadata,
+  FilePage,
+  FileResourceParams,
   ImageGenerationParams,
   ImageGenerationResponse,
   ListBatchesParams,
+  ListFilesParams,
   Model,
   MessageResponse,
   MessageStreamEvent,
@@ -32,6 +39,7 @@ import type {
   SpeechParams,
   Transcription,
   TranscriptionParams,
+  UploadFileParams,
 } from "../types.js";
 import {
   completionStreamToMessageEvents,
@@ -102,6 +110,26 @@ export abstract class BaseProvider {
     return Promise.reject(new UnsupportedOperationError("reranking", this.metadata.name));
   }
 
+  uploadFile(_params: UploadFileParams): Promise<FileMetadata> {
+    return Promise.reject(new UnsupportedOperationError("file uploads", this.metadata.name));
+  }
+
+  listFiles(_params: ListFilesParams = {}): Promise<FilePage> {
+    return Promise.reject(new UnsupportedOperationError("file listing", this.metadata.name));
+  }
+
+  retrieveFile(_params: FileResourceParams): Promise<FileMetadata> {
+    return Promise.reject(new UnsupportedOperationError("file retrieval", this.metadata.name));
+  }
+
+  deleteFile(_params: FileResourceParams): Promise<FileDeleted> {
+    return Promise.reject(new UnsupportedOperationError("file deletion", this.metadata.name));
+  }
+
+  downloadFile(_params: DownloadFileParams): Promise<FileDownload> {
+    return Promise.reject(new UnsupportedOperationError("file downloads", this.metadata.name));
+  }
+
   async messages(
     params: MessagesParams,
     options?: CompletionOperationOptions,
@@ -135,15 +163,21 @@ export abstract class BaseProvider {
     }
   }
 
-  protected async execute<T>(operation: () => Promise<T>): Promise<T> {
+  protected async execute<T>(
+    operation: () => Promise<T>,
+    conversion: { fileOperation?: boolean } = {},
+  ): Promise<T> {
     try {
       return await operation();
     } catch (error) {
-      throw normalizeProviderError(error, this.metadata.name);
+      throw normalizeProviderError(error, this.metadata.name, conversion);
     }
   }
 
-  protected protectStream<T>(stream: AsyncIterable<T>): AsyncIterable<T> {
-    return mapAsyncIterableErrors(stream, this.metadata.name);
+  protected protectStream<T>(
+    stream: AsyncIterable<T>,
+    conversion: { fileOperation?: boolean } = {},
+  ): AsyncIterable<T> {
+    return mapAsyncIterableErrors(stream, this.metadata.name, conversion);
   }
 }

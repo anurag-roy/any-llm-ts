@@ -39,6 +39,11 @@ function retrieveBatch(params: DirectBatchParams): Promise<Batch>;
 function cancelBatch(params: DirectBatchParams): Promise<Batch>;
 function listBatches(params: DirectListBatchesParams): Promise<Batch[]>;
 function retrieveBatchResults(params: DirectBatchParams): Promise<BatchResult>;
+function uploadFile(params: DirectUploadFileParams): Promise<FileMetadata>;
+function listFiles(params: DirectListFilesParams): Promise<FilePage>;
+function retrieveFile(params: DirectFileResourceParams): Promise<FileMetadata>;
+function deleteFile(params: DirectFileResourceParams): Promise<FileDeleted>;
+function downloadFile(params: DirectDownloadFileParams): Promise<FileDownload>;
 ```
 
 ## Direct provider options

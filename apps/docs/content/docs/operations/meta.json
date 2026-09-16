@@ -6,6 +6,7 @@
     "embeddings-and-models",
     "responses",
     "batches-and-reranking",
+    "files",
     "images-audio-and-moderation"
   ]
 }

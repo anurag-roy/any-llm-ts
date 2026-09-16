@@ -62,6 +62,7 @@ import {
   timeoutMilliseconds,
   unixTimestamp,
   isJsonValue,
+  iterateClosing,
   parseJsonValue as validateJsonValue,
 } from "../utils.js";
 import { BaseProvider } from "./base.js";
@@ -117,6 +118,7 @@ const geminiCapabilities: ProviderCapabilities = {
   batch: true,
   completion: true,
   embedding: true,
+  files: false,
   imageGeneration: false,
   listModels: true,
   messages: true,
@@ -1355,7 +1357,7 @@ export class GeminiProvider extends BaseProvider {
       nextToolIndices: new Map(),
     };
 
-    for await (const response of stream) {
+    for await (const response of iterateClosing(stream)) {
       state.id = response.responseId ?? state.id;
       state.model = response.modelVersion ?? state.model;
       state.created =

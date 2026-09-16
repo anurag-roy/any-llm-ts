@@ -6,10 +6,12 @@ import { isNumber, isObject, isString } from "./utils.js";
 import { InvalidRequestError } from "./errors.js";
 import { normalizeOutputConfig } from "./structured-output.js";
 import type {
+  CacheCreationTokenDetails,
   ChatCompletion,
   ChatCompletionChunk,
   ChatMessage,
   CompletionParams,
+  CompletionUsage,
   ContentBlockStartEvent,
   ContentBlockStopEvent,
   FileContentPart,
@@ -23,9 +25,11 @@ import type {
   MessagesInputContentBlock,
   MessagesParams,
   MessageUsage,
+  PromptTokensDetails,
   TextContentPart,
   ToolCallDelta,
 } from "./types.js";
+import { closeAsyncIterableQuietly } from "./utils.js";
 
 function systemText(system: MessagesParams["system"]): string | undefined {
   if (system === undefined || isString(system)) return system;
@@ -310,19 +314,63 @@ function stopReason(reason: ChatCompletion["choices"][number]["finishReason"]): 
   return "end_turn";
 }
 
-function cachedTokens(details: JsonObject | undefined): number {
+function cachedTokensFromDetails(details: PromptTokensDetails | undefined): number | undefined {
   const value = details?.cachedTokens ?? details?.cached_tokens;
-  return isNumber(value) ? value : 0;
+  return isNumber(value) ? value : undefined;
+}
+
+function cacheWriteTokensFromDetails(details: PromptTokensDetails | undefined): number | undefined {
+  const value = details?.cacheWriteTokens ?? details?.cache_write_tokens;
+  return isNumber(value) ? value : undefined;
+}
+
+function cacheCreationFromDetails(
+  details: PromptTokensDetails | undefined,
+): CacheCreationTokenDetails | undefined {
+  const ttlValue = details?.cacheCreationTokenDetails ?? details?.cache_creation_token_details;
+  if (!isObject(ttlValue) || Array.isArray(ttlValue)) return undefined;
+  const ttl = parseJsonObject(ttlValue);
+  const ephemeral5m = ttl.ephemeral5mInputTokens ?? ttl.ephemeral_5m_input_tokens;
+  const ephemeral1h = ttl.ephemeral1hInputTokens ?? ttl.ephemeral_1h_input_tokens;
+  if (!isNumber(ephemeral5m) || !isNumber(ephemeral1h)) return undefined;
+  return { ephemeral1hInputTokens: ephemeral1h, ephemeral5mInputTokens: ephemeral5m };
+}
+
+export function splitCachedInputTokens(
+  promptTokens: number,
+  cachedTokens: number | undefined,
+  cacheWriteTokens?: number,
+): [number, number | undefined] {
+  const remaining = promptTokens - Math.min(Math.max(cacheWriteTokens ?? 0, 0), promptTokens);
+  const cached = Math.min(Math.max(cachedTokens ?? 0, 0), remaining);
+  const cacheRead =
+    cachedTokens !== undefined && (cachedTokens === 0 || cached > 0) ? cached : undefined;
+  return [remaining - cached, cacheRead];
 }
 
 function usageFromCompletion(completion: ChatCompletion): MessageUsage {
   const usage = completion.usage;
   if (usage === undefined) return { inputTokens: 0, outputTokens: 0 };
-  const cached = Math.min(Math.max(cachedTokens(usage.promptTokensDetails), 0), usage.promptTokens);
+  return messageUsageFromCompletionUsage(usage);
+}
+
+function messageUsageFromCompletionUsage(
+  usage: CompletionUsage,
+  outputTokens?: number,
+): MessageUsage {
+  const [inputTokens, cacheRead] = splitCachedInputTokens(
+    usage.promptTokens,
+    cachedTokensFromDetails(usage.promptTokensDetails),
+    cacheWriteTokensFromDetails(usage.promptTokensDetails),
+  );
+  const cacheWrite = cacheWriteTokensFromDetails(usage.promptTokensDetails);
+  const cacheCreation = cacheCreationFromDetails(usage.promptTokensDetails);
   return {
-    inputTokens: usage.promptTokens - cached,
-    outputTokens: usage.completionTokens,
-    ...includeWhen(!(cached === 0), { cacheReadInputTokens: cached }),
+    inputTokens,
+    outputTokens: outputTokens ?? usage.completionTokens,
+    ...includeWhen(!(cacheWrite === undefined), { cacheCreationInputTokens: cacheWrite }),
+    ...includeWhen(!(cacheRead === undefined), { cacheReadInputTokens: cacheRead }),
+    ...includeWhen(!(cacheCreation === undefined), { cacheCreation }),
   };
 }
 
@@ -379,7 +427,9 @@ export function completionToMessageResponse(completion: ChatCompletion): Message
 interface StreamState {
   blockIndex: number;
   blockType?: "text" | "thinking" | "tool_use";
-  cacheReadInputTokens: number;
+  cacheCreation?: CacheCreationTokenDetails;
+  cacheCreationInputTokens?: number;
+  cacheReadInputTokens?: number;
   inputTokens: number;
   outputTokens: number;
   started: boolean;
@@ -446,9 +496,14 @@ function toolDeltaEvents(state: StreamState, call: ToolCallDelta): MessageStream
 function chunkEvents(chunk: ChatCompletionChunk, state: StreamState): MessageStreamEvent[] {
   const events: MessageStreamEvent[] = [];
   if (chunk.usage !== undefined) {
-    state.inputTokens = chunk.usage.promptTokens;
-    state.outputTokens = chunk.usage.completionTokens;
-    state.cacheReadInputTokens = cachedTokens(chunk.usage.promptTokensDetails);
+    if (chunk.usage.promptTokens) state.inputTokens = chunk.usage.promptTokens;
+    if (chunk.usage.completionTokens) state.outputTokens = chunk.usage.completionTokens;
+    const cached = cachedTokensFromDetails(chunk.usage.promptTokensDetails);
+    if (cached !== undefined) state.cacheReadInputTokens = cached;
+    const cacheWrite = cacheWriteTokensFromDetails(chunk.usage.promptTokensDetails);
+    if (cacheWrite !== undefined) state.cacheCreationInputTokens = cacheWrite;
+    const cacheCreation = cacheCreationFromDetails(chunk.usage.promptTokensDetails);
+    if (cacheCreation !== undefined) state.cacheCreation = cacheCreation;
   }
   if (!state.started) {
     state.started = true;
@@ -460,7 +515,25 @@ function chunkEvents(chunk: ChatCompletionChunk, state: StreamState): MessageStr
         role: "assistant",
         stopReason: null,
         type: "message",
-        usage: { inputTokens: state.inputTokens, outputTokens: 0 },
+        usage: messageUsageFromCompletionUsage(
+          {
+            completionTokens: 0,
+            promptTokens: state.inputTokens,
+            promptTokensDetails: {
+              ...includeWhen(!(state.cacheReadInputTokens === undefined), {
+                cachedTokens: state.cacheReadInputTokens,
+              }),
+              ...includeWhen(!(state.cacheCreationInputTokens === undefined), {
+                cacheWriteTokens: state.cacheCreationInputTokens,
+              }),
+              ...includeWhen(!(state.cacheCreation === undefined), {
+                cacheCreationTokenDetails: state.cacheCreation,
+              }),
+            },
+            totalTokens: state.inputTokens,
+          },
+          0,
+        ),
       },
       type: "message_start",
     });
@@ -494,12 +567,25 @@ function chunkEvents(chunk: ChatCompletionChunk, state: StreamState): MessageStr
 }
 
 function finalUsage(state: StreamState): MessageUsage {
-  const cached = Math.min(Math.max(state.cacheReadInputTokens, 0), state.inputTokens);
-  return {
-    inputTokens: state.inputTokens - cached,
-    outputTokens: state.outputTokens,
-    ...includeWhen(!(cached === 0), { cacheReadInputTokens: cached }),
-  };
+  return messageUsageFromCompletionUsage(
+    {
+      completionTokens: state.outputTokens,
+      promptTokens: state.inputTokens,
+      promptTokensDetails: {
+        ...includeWhen(!(state.cacheReadInputTokens === undefined), {
+          cachedTokens: state.cacheReadInputTokens,
+        }),
+        ...includeWhen(!(state.cacheCreationInputTokens === undefined), {
+          cacheWriteTokens: state.cacheCreationInputTokens,
+        }),
+        ...includeWhen(!(state.cacheCreation === undefined), {
+          cacheCreationTokenDetails: state.cacheCreation,
+        }),
+      },
+      totalTokens: state.inputTokens + state.outputTokens,
+    },
+    state.outputTokens,
+  );
 }
 
 export async function* completionStreamToMessageEvents(
@@ -507,7 +593,6 @@ export async function* completionStreamToMessageEvents(
 ): AsyncIterable<MessageStreamEvent> {
   const state: StreamState = {
     blockIndex: -1,
-    cacheReadInputTokens: 0,
     inputTokens: 0,
     outputTokens: 0,
     started: false,
@@ -515,27 +600,31 @@ export async function* completionStreamToMessageEvents(
     toolBlockIndexes: new Map(),
   };
   try {
-    for await (const chunk of stream) {
-      for (const event of chunkEvents(chunk, state)) yield event;
+    try {
+      for await (const chunk of stream) {
+        for (const event of chunkEvents(chunk, state)) yield event;
+      }
+    } catch (error) {
+      if (state.started) {
+        yield {
+          delta: { stopReason: null },
+          type: "message_delta",
+          usage: finalUsage(state),
+        };
+      }
+      throw error;
     }
-  } catch (error) {
     if (state.started) {
-      yield {
-        delta: { stopReason: null },
+      for (const event of closeBlock(state)) yield event;
+      const delta: MessageDeltaEvent = {
+        delta: { stopReason: state.stopReason ?? "end_turn" },
         type: "message_delta",
         usage: finalUsage(state),
       };
+      yield delta;
+      yield { type: "message_stop" };
     }
-    throw error;
-  }
-  if (state.started) {
-    for (const event of closeBlock(state)) yield event;
-    const delta: MessageDeltaEvent = {
-      delta: { stopReason: state.stopReason ?? "end_turn" },
-      type: "message_delta",
-      usage: finalUsage(state),
-    };
-    yield delta;
-    yield { type: "message_stop" };
+  } finally {
+    await closeAsyncIterableQuietly(stream);
   }
 }

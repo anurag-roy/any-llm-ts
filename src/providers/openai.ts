@@ -54,6 +54,7 @@ import {
   completionRequestOptions,
   flattenResponsesTools,
   getEnvironmentVariable,
+  iterateClosing,
   isAsyncIterable,
   mapAsyncIterable,
   notifyCompletionDispatch,
@@ -67,6 +68,7 @@ export const openAICapabilities: ProviderCapabilities = {
   batch: true,
   completion: true,
   embedding: true,
+  files: false,
   imageGeneration: true,
   listModels: true,
   messages: true,
@@ -349,7 +351,7 @@ function normalizeUsage(value: JsonValue | undefined): CompletionUsage | undefin
     normalized.promptTokensDetails = parseJsonObject(promptTokensDetails);
   }
   const cachedTokens = usage.prompt_cache_hit_tokens;
-  if (isNumber(cachedTokens) && cachedTokens > 0 && normalized.promptTokensDetails === undefined) {
+  if (isNumber(cachedTokens) && normalized.promptTokensDetails === undefined) {
     normalized.promptTokensDetails = { cachedTokens };
   }
   return normalized;
@@ -488,7 +490,7 @@ async function* normalizeXmlReasoningStream(
       emitted: boolean;
     }
   >();
-  for await (const chunk of stream) {
+  for await (const chunk of iterateClosing(stream)) {
     const choices = chunk.choices.flatMap((choice) => {
       const value = choice.delta.content;
       const state = states.get(choice.index) ?? { buffer: "", mode: "content" };
@@ -556,7 +558,7 @@ async function* normalizeXmlReasoningStream(
 async function* filterEmptyStreamingChunks(
   stream: AsyncIterable<ChatCompletionChunk>,
 ): AsyncIterable<ChatCompletionChunk> {
-  for await (const chunk of stream) {
+  for await (const chunk of iterateClosing(stream)) {
     if (chunk.choices.length > 0 || chunk.usage !== undefined) yield chunk;
   }
 }

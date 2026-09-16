@@ -27,6 +27,7 @@ import {
   compactObject,
   getEnvironmentVariable,
   isAsyncIterable,
+  iterateClosing,
   mapAsyncIterable,
   unixTimestamp,
 } from "../utils.js";
@@ -49,6 +50,7 @@ const azureCapabilities: ProviderCapabilities = {
   batch: false,
   completion: true,
   embedding: true,
+  files: false,
   imageGeneration: false,
   listModels: true,
   messages: true,
@@ -77,7 +79,7 @@ function errorFromResponse<Value>(value: Value, status: string): Error {
 async function* sseEvents(body: AsyncIterable<string | Uint8Array>): AsyncIterable<JsonValue> {
   const decoder = new TextDecoder();
   let buffer = "";
-  for await (const chunk of body) {
+  for await (const chunk of iterateClosing(body)) {
     buffer += isString(chunk) ? chunk : decoder.decode(chunk, { stream: true });
     const events = buffer.split(/\r?\n\r?\n/u);
     buffer = events.pop() ?? "";

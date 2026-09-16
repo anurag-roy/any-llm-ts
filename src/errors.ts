@@ -35,6 +35,7 @@ export class GatewayTimeoutError extends AnyLLMError {}
 export class InsufficientFundsError extends AnyLLMError {}
 export class InvalidRequestError extends AnyLLMError {}
 export class ModelNotFoundError extends AnyLLMError {}
+export class ProviderFileNotFoundError extends AnyLLMError {}
 export class ProviderError extends AnyLLMError {}
 export class UpstreamProviderError extends AnyLLMError {}
 
@@ -171,7 +172,11 @@ function retryAfterHeader(headers: ErrorRecord["headers"]): string | undefined {
   return stringValue(record?.["retry-after"]);
 }
 
-export function normalizeProviderError(cause: unknown, provider: string): AnyLLMError {
+export function normalizeProviderError(
+  cause: unknown,
+  provider: string,
+  conversion: { fileOperation?: boolean } = {},
+): AnyLLMError {
   if (cause instanceof AnyLLMError) {
     return cause;
   }
@@ -205,7 +210,9 @@ export function normalizeProviderError(cause: unknown, provider: string): AnyLLM
     return new InsufficientFundsError(message, options);
   }
   if (statusCode === 404) {
-    return new ModelNotFoundError(message, options);
+    return conversion.fileOperation === true
+      ? new ProviderFileNotFoundError(message, options)
+      : new ModelNotFoundError(message, options);
   }
   if (statusCode === 429) {
     const retryAfter = retryAfterHeader(record?.headers);

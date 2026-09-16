@@ -25,7 +25,7 @@ import type {
   ProviderOptions,
   ToolCall,
 } from "../types.js";
-import { compactObject, getEnvironmentVariable, unixTimestamp } from "../utils.js";
+import { compactObject, getEnvironmentVariable, iterateClosing, unixTimestamp } from "../utils.js";
 import { BaseProvider } from "./base.js";
 import { completeProviderMetadata } from "../provider-metadata.js";
 
@@ -43,6 +43,7 @@ const sagemakerCapabilities: ProviderCapabilities = {
   batch: false,
   completion: true,
   embedding: true,
+  files: false,
   imageGeneration: false,
   listModels: false,
   messages: true,
@@ -246,7 +247,7 @@ async function* normalizeStream(
   body: AsyncIterable<SageMakerPayloadPart>,
   model: string,
 ): AsyncIterable<ChatCompletionChunk> {
-  for await (const event of body) {
+  for await (const event of iterateClosing(body)) {
     const chunk = normalizeChunk(event, model);
     if (chunk !== undefined) yield chunk;
   }

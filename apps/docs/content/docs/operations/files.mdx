@@ -1,0 +1,109 @@
+---
+title: Files
+description: Upload, list, retrieve, download, and delete provider-hosted files.
+---
+
+The Files API is available on an `AnyLLM` instance. Anthropic is the first supported provider.
+OpenAI-compatible endpoints do not inherit Files support automatically.
+
+```ts
+import { AnyLLM } from "any-llm-ts";
+
+const llm = AnyLLM.create("anthropic");
+console.log(llm.metadata.capabilities.files);
+console.log(llm.metadata.fileOperations);
+```
+
+## Upload and use a file
+
+```ts
+const uploaded = await llm.uploadFile({
+  file: "./report.pdf",
+  mimeType: "application/pdf",
+  expiresIn: 3600,
+});
+
+try {
+  const response = await llm.messages({
+    model: "claude-sonnet-4-6",
+    maxTokens: 1024,
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "document", source: { type: "file", file_id: uploaded.id } },
+          { type: "text", text: "Summarize this report." },
+        ],
+      },
+    ],
+  });
+  console.log(response.content);
+} finally {
+  await llm.deleteFile({ fileId: uploaded.id });
+}
+```
+
+`file` accepts a filesystem path, `Uint8Array`, `ArrayBuffer`, `Blob`, or a Node.js readable
+stream. `filename` and `mimeType` override the multipart part metadata. Path uploads use the
+basename by default; byte inputs default to `upload` and `application/octet-stream`.
+
+## Methods
+
+| Method | Result |
+| --- | --- |
+| `uploadFile({ file, filename?, mimeType?, purpose?, expiresIn?, providerOptions? })` | `FileMetadata` |
+| `listFiles({ limit?, cursor?, purpose?, providerOptions? })` | `FilePage` |
+| `retrieveFile({ fileId, providerOptions? })` | `FileMetadata` |
+| `downloadFile({ fileId, chunkSize?, providerOptions? })` | `FileDownload` |
+| `deleteFile({ fileId, providerOptions? })` | `FileDeleted` |
+
+These are instance methods. Reuse the client configured for the originating provider account; file
+IDs are not portable. Stateless helpers with the same names are also exported and require `provider`.
+
+`FileMetadata`, `FilePage`, and `FileDeleted` keep omitted fields unset. Provider-specific fields
+are preserved on the object. Timestamps stay as RFC 3339 strings.
+
+## Pagination
+
+Listing fetches exactly one page. Continue with the opaque `nextCursor`; omit it on the final page.
+
+```ts
+const page = await llm.listFiles({ limit: 20 });
+if (page.nextCursor !== undefined) {
+  const nextPage = await llm.listFiles({ cursor: page.nextCursor, limit: 20 });
+}
+```
+
+Anthropic maps `cursor` / `nextCursor` to `page` / `next_page`. Listing rejects the legacy
+`files-api-2025-04-14` beta because it changes the page shape.
+
+## Download generated outputs
+
+Anthropic marks user uploads as non-downloadable. Download files returned by native code execution
+or supported skills. `FileDownload` exposes `statusCode` and `headers` before body reads begin.
+
+```ts
+const download = await llm.downloadFile({ fileId, chunkSize: 65_536 });
+try {
+  for await (const chunk of download) {
+    // Write chunk to a destination.
+  }
+} finally {
+  await download.close();
+}
+```
+
+Always close the download after full consumption, early exit, or cancellation. `await using` also
+works where `Symbol.asyncDispose` is available.
+
+## Provider options and errors
+
+Anthropic Files methods accept `timeout` (seconds), `maxRetries`, `betas`, and `extraHeaders` through
+`providerOptions`. Upload also accepts `expiresIn`, a positive integer duration in seconds. Anthropic
+rejects a non-omitted shared `purpose` parameter. Uploads default to zero automatic retries.
+
+Unsupported options raise `UnsupportedParameterError`. Invalid IDs, limits, expiry, chunk sizes, and
+unreadable upload paths raise `InvalidRequestError`. A retrieve, download, or delete HTTP 404 becomes
+`ProviderFileNotFoundError`. Upload and list 404s keep the general mapping.
+
+Check `metadata.capabilities.files` before using the operation.

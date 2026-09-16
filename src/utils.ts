@@ -114,11 +114,52 @@ export function flattenResponsesTools(tools: JsonObject[] | undefined): JsonObje
   });
 }
 
+interface ClosableStream {
+  aclose?(): PromiseLike<void> | void;
+  cancel?(): PromiseLike<void> | void;
+  close?(): PromiseLike<void> | void;
+  return?(value?: undefined): PromiseLike<IteratorResult<unknown>> | IteratorResult<unknown>;
+}
+
+export async function closeAsyncIterableQuietly(
+  iterable: AsyncIterable<unknown> | AsyncIterator<unknown>,
+): Promise<void> {
+  // SAFETY: Provider streams and async iterators expose at most return/aclose/close/cancel.
+  const closable = iterable as ClosableStream;
+  try {
+    if (closable.return !== undefined) {
+      await closable.return();
+      return;
+    }
+    if (closable.aclose !== undefined) {
+      await closable.aclose();
+      return;
+    }
+    if (closable.close !== undefined) {
+      await closable.close();
+      return;
+    }
+    if (closable.cancel !== undefined) {
+      await closable.cancel();
+    }
+  } catch {
+    // A failing close must not replace the stream's own outcome.
+  }
+}
+
+export async function* iterateClosing<T>(iterable: AsyncIterable<T>): AsyncIterable<T> {
+  try {
+    for await (const value of iterable) yield value;
+  } finally {
+    await closeAsyncIterableQuietly(iterable);
+  }
+}
+
 export async function* mapAsyncIterable<TInput, TOutput>(
   iterable: AsyncIterable<TInput>,
   mapper: (value: TInput) => TOutput,
 ): AsyncIterable<TOutput> {
-  for await (const value of iterable) {
+  for await (const value of iterateClosing(iterable)) {
     yield mapper(value);
   }
 }
@@ -126,11 +167,14 @@ export async function* mapAsyncIterable<TInput, TOutput>(
 export async function* mapAsyncIterableErrors<T>(
   iterable: AsyncIterable<T>,
   provider: string,
+  options: { fileOperation?: boolean } = {},
 ): AsyncIterable<T> {
   try {
-    yield* iterable;
+    for await (const value of iterable) yield value;
   } catch (error) {
-    throw normalizeProviderError(error, provider);
+    throw normalizeProviderError(error, provider, options);
+  } finally {
+    await closeAsyncIterableQuietly(iterable);
   }
 }
 

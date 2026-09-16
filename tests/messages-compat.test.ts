@@ -23,6 +23,7 @@ import type {
   CompletionParams,
   MessageStreamEvent,
   MessagesParams,
+  PromptTokensDetails,
   ProviderMetadata,
 } from "../src/index.js";
 
@@ -265,6 +266,57 @@ describe("Messages compatibility API", () => {
       id: "message-1",
       stopReason: "tool_use",
       usage: { cacheReadInputTokens: 2, inputTokens: 10, outputTokens: 4 },
+    });
+  });
+
+  it("preserves cache write meters and explicit zero cache reads", () => {
+    const completion = (details?: PromptTokensDetails): ChatCompletion => {
+      const usage: ChatCompletion["usage"] = {
+        completionTokens: 1,
+        promptTokens: 100,
+        totalTokens: 101,
+      };
+      if (details !== undefined) usage.promptTokensDetails = details;
+      return {
+        choices: [
+          { finishReason: "stop", index: 0, message: { content: "ok", role: "assistant" } },
+        ],
+        created: 1,
+        id: "completion",
+        model: "model-a",
+        object: "chat.completion",
+        provider: "messages-fake",
+        usage,
+      };
+    };
+
+    expect(
+      completionToMessageResponse(completion({ cachedTokens: 20, cacheWriteTokens: 12 })).usage,
+    ).toEqual({
+      cacheCreationInputTokens: 12,
+      cacheReadInputTokens: 20,
+      inputTokens: 68,
+      outputTokens: 1,
+    });
+    expect(completionToMessageResponse(completion({ cachedTokens: 0 })).usage).toEqual({
+      cacheReadInputTokens: 0,
+      inputTokens: 100,
+      outputTokens: 1,
+    });
+    expect(
+      completionToMessageResponse(
+        completion({
+          cacheCreationTokenDetails: {
+            ephemeral1hInputTokens: 4,
+            ephemeral5mInputTokens: 8,
+          },
+          cacheWriteTokens: 12,
+        }),
+      ).usage,
+    ).toMatchObject({
+      cacheCreation: { ephemeral1hInputTokens: 4, ephemeral5mInputTokens: 8 },
+      cacheCreationInputTokens: 12,
+      inputTokens: 88,
     });
   });
 

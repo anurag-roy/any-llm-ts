@@ -23,7 +23,7 @@ import type {
   ToolCall,
   ToolCallDelta,
 } from "../types.js";
-import { compactObject, getEnvironmentVariable } from "../utils.js";
+import { compactObject, getEnvironmentVariable, iterateClosing } from "../utils.js";
 import { BaseProvider } from "./base.js";
 import { completeProviderMetadata } from "../provider-metadata.js";
 
@@ -49,6 +49,7 @@ const watsonxCapabilities: ProviderCapabilities = {
   batch: false,
   completion: true,
   embedding: false,
+  files: false,
   imageGeneration: false,
   listModels: true,
   messages: true,
@@ -338,7 +339,7 @@ function completionRequest(params: CompletionParams, configuration: WatsonxConfi
 async function* normalizeStream<Value>(
   values: AsyncIterable<Value>,
 ): AsyncIterable<ChatCompletionChunk> {
-  for await (const value of values) yield normalizeChunk(value);
+  for await (const value of iterateClosing(values)) yield normalizeChunk(value);
 }
 
 /** IBM watsonx.ai chat adapter using IBM's official Node SDK. */
