@@ -552,6 +552,123 @@ describe("Messages compatibility API", () => {
       ],
       stopReason: "end_turn",
     });
+    expect(completionToMessageResponse(completion("content_filter", "partial"))).toMatchObject({
+      content: [{ text: "partial", type: "text" }],
+      stopReason: "refusal",
+    });
+  });
+
+  it("maps typed refusals to stop_reason=refusal and preserves the refusal text", () => {
+    const completion = (message: ChatCompletion["choices"][number]["message"]): ChatCompletion => ({
+      choices: [{ finishReason: "stop", index: 0, message }],
+      created: 1,
+      id: "completion",
+      model: "model-a",
+      object: "chat.completion",
+      provider: "messages-fake",
+    });
+
+    expect(
+      completionToMessageResponse(
+        completion({
+          content: null,
+          refusal: "I cannot help with that request.",
+          role: "assistant",
+        }),
+      ),
+    ).toMatchObject({
+      content: [{ text: "I cannot help with that request.", type: "text" }],
+      stopReason: "refusal",
+    });
+
+    expect(
+      completionToMessageResponse(
+        completion({
+          content: "partial",
+          refusal: "Response blocked by Gemini content filtering.",
+          role: "assistant",
+        }),
+      ),
+    ).toMatchObject({
+      content: [
+        { text: "partial", type: "text" },
+        { text: "Response blocked by Gemini content filtering.", type: "text" },
+      ],
+      stopReason: "refusal",
+    });
+  });
+
+  it("maps streaming refusals and content_filter finish reasons", async () => {
+    const eventsFrom = async (chunks: ChatCompletionChunk[]): Promise<MessageStreamEvent[]> => {
+      const events: MessageStreamEvent[] = [];
+      for await (const event of completionStreamToMessageEvents(
+        (async function* () {
+          yield* chunks;
+        })(),
+      )) {
+        events.push(event);
+      }
+      return events;
+    };
+
+    const refusalEvents = await eventsFrom([
+      chunk({ role: "assistant", refusal: "I cannot " }),
+      chunk({ refusal: "assist with that." }),
+      chunk({}, "stop"),
+    ]);
+    expect(refusalEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          contentBlock: { text: "", type: "text" },
+          type: "content_block_start",
+        }),
+        expect.objectContaining({
+          delta: { text: "I cannot ", type: "text_delta" },
+          type: "content_block_delta",
+        }),
+        expect.objectContaining({
+          delta: { text: "assist with that.", type: "text_delta" },
+          type: "content_block_delta",
+        }),
+        expect.objectContaining({ delta: { stopReason: "refusal" }, type: "message_delta" }),
+      ]),
+    );
+
+    const filterEvents = await eventsFrom([
+      chunk({ role: "assistant", content: "partial" }),
+      chunk({}, "content_filter"),
+    ]);
+    expect(filterEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          delta: { text: "partial", type: "text_delta" },
+          type: "content_block_delta",
+        }),
+        expect.objectContaining({ delta: { stopReason: "refusal" }, type: "message_delta" }),
+      ]),
+    );
+
+    const mixed = await eventsFrom([
+      chunk(
+        {
+          content: "partial",
+          refusal: "Response blocked by Gemini content filtering.",
+        },
+        "content_filter",
+      ),
+    ]);
+    const textDeltas = mixed.filter(
+      (event) =>
+        event.type === "content_block_delta" &&
+        "delta" in event &&
+        event.delta.type === "text_delta",
+    );
+    expect(textDeltas).toHaveLength(2);
+    expect(mixed).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ delta: { stopReason: "refusal" }, type: "message_delta" }),
+      ]),
+    );
   });
 
   it("handles empty and failed completion streams", async () => {

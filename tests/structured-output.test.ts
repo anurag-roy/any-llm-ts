@@ -347,6 +347,22 @@ describe("typed structured outputs", () => {
       },
     ]);
 
+    const refused = parseMessage(
+      {
+        content: [{ text: "I cannot help with that.", type: "text" }],
+        id: "message-refused",
+        model: "model-a",
+        role: "assistant",
+        stopReason: "refusal",
+        type: "message",
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      format,
+    );
+    expect(refused.content).toEqual([
+      { parsedOutput: null, text: "I cannot help with that.", type: "text" },
+    ]);
+
     const response = parseResponse(
       {
         created_at: 1,

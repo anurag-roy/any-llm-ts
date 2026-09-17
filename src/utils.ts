@@ -118,64 +118,155 @@ interface ClosableStream {
   aclose?(): PromiseLike<void> | void;
   cancel?(): PromiseLike<void> | void;
   close?(): PromiseLike<void> | void;
+  controller?: { abort(): void };
+  destroy?(): void;
   return?(value?: undefined): PromiseLike<IteratorResult<unknown>> | IteratorResult<unknown>;
 }
+
+const asyncIteratorDone: IteratorResult<never> = { done: true, value: undefined };
 
 export async function closeAsyncIterableQuietly(
   iterable: AsyncIterable<unknown> | AsyncIterator<unknown>,
 ): Promise<void> {
-  // SAFETY: Provider streams and async iterators expose at most return/aclose/close/cancel.
+  // SAFETY: Provider streams expose return/aclose/close/cancel, and OpenAI's Stream holds controller.abort.
   const closable = iterable as ClosableStream;
   try {
     if (closable.return !== undefined) {
       await closable.return();
-      return;
-    }
-    if (closable.aclose !== undefined) {
+    } else if (closable.aclose !== undefined) {
       await closable.aclose();
-      return;
-    }
-    if (closable.close !== undefined) {
+    } else if (closable.close !== undefined) {
       await closable.close();
-      return;
-    }
-    if (closable.cancel !== undefined) {
+    } else if (closable.cancel !== undefined) {
       await closable.cancel();
     }
+    closable.controller?.abort();
+    closable.destroy?.();
   } catch {
     // A failing close must not replace the stream's own outcome.
   }
 }
 
-export async function* iterateClosing<T>(iterable: AsyncIterable<T>): AsyncIterable<T> {
-  try {
-    for await (const value of iterable) yield value;
-  } finally {
-    await closeAsyncIterableQuietly(iterable);
+class ClosingMappedAsyncIterator<TInput, TOutput>
+  implements AsyncIterable<TOutput>, AsyncIterator<TOutput>
+{
+  private closed = false;
+  private iterator: AsyncIterator<TInput> | undefined;
+
+  constructor(
+    private readonly source: AsyncIterable<TInput>,
+    private readonly mapper: (value: TInput) => TOutput,
+    private readonly provider?: string,
+    private readonly fileOperation = false,
+  ) {}
+
+  [Symbol.asyncIterator](): AsyncIterator<TOutput> {
+    return this;
+  }
+
+  async next(): Promise<IteratorResult<TOutput>> {
+    if (this.closed) return asyncIteratorDone;
+    try {
+      this.iterator ??= this.source[Symbol.asyncIterator]();
+      const result = await this.iterator.next();
+      if (result.done === true) {
+        await this.close();
+        return asyncIteratorDone;
+      }
+      return { done: false, value: this.mapper(result.value) };
+    } catch (error) {
+      await this.close();
+      if (this.provider === undefined) throw error;
+      throw normalizeProviderError(error, this.provider, { fileOperation: this.fileOperation });
+    }
+  }
+
+  async return(): Promise<IteratorResult<TOutput>> {
+    await this.close();
+    return asyncIteratorDone;
+  }
+
+  private async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
+    if (this.iterator !== undefined) await closeAsyncIterableQuietly(this.iterator);
+    await closeAsyncIterableQuietly(this.source);
   }
 }
 
-export async function* mapAsyncIterable<TInput, TOutput>(
+class ProducingClosingAsyncIterator<TInput, TOutput>
+  implements AsyncIterable<TOutput>, AsyncIterator<TOutput>
+{
+  private closed = false;
+  private iterator: AsyncIterator<TOutput> | undefined;
+
+  constructor(
+    private readonly source: AsyncIterable<TInput>,
+    private readonly produce: (source: AsyncIterable<TInput>) => AsyncIterable<TOutput>,
+  ) {}
+
+  [Symbol.asyncIterator](): AsyncIterator<TOutput> {
+    return this;
+  }
+
+  async next(): Promise<IteratorResult<TOutput>> {
+    if (this.closed) return asyncIteratorDone;
+    try {
+      this.iterator ??= this.produce(this.source)[Symbol.asyncIterator]();
+      const result = await this.iterator.next();
+      if (result.done === true) {
+        await this.close();
+        return asyncIteratorDone;
+      }
+      return result;
+    } catch (error) {
+      await this.close();
+      throw error;
+    }
+  }
+
+  async return(): Promise<IteratorResult<TOutput>> {
+    await this.close();
+    return asyncIteratorDone;
+  }
+
+  private async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
+    if (this.iterator !== undefined) await closeAsyncIterableQuietly(this.iterator);
+    await closeAsyncIterableQuietly(this.source);
+  }
+}
+
+export function iterateClosing<T>(iterable: AsyncIterable<T>): AsyncIterable<T> {
+  return new ClosingMappedAsyncIterator(iterable, (value) => value);
+}
+
+export function mapAsyncIterable<TInput, TOutput>(
   iterable: AsyncIterable<TInput>,
   mapper: (value: TInput) => TOutput,
 ): AsyncIterable<TOutput> {
-  for await (const value of iterateClosing(iterable)) {
-    yield mapper(value);
-  }
+  return new ClosingMappedAsyncIterator(iterable, mapper);
 }
 
-export async function* mapAsyncIterableErrors<T>(
+export function mapAsyncIterableErrors<T>(
   iterable: AsyncIterable<T>,
   provider: string,
   options: { fileOperation?: boolean } = {},
 ): AsyncIterable<T> {
-  try {
-    for await (const value of iterable) yield value;
-  } catch (error) {
-    throw normalizeProviderError(error, provider, options);
-  } finally {
-    await closeAsyncIterableQuietly(iterable);
-  }
+  return new ClosingMappedAsyncIterator(
+    iterable,
+    (value) => value,
+    provider,
+    options.fileOperation === true,
+  );
+}
+
+export function produceClosingAsyncIterable<TInput, TOutput>(
+  source: AsyncIterable<TInput>,
+  produce: (source: AsyncIterable<TInput>) => AsyncIterable<TOutput>,
+): AsyncIterable<TOutput> {
+  return new ProducingClosingAsyncIterator(source, produce);
 }
 
 export function timeoutMilliseconds(timeout: number | undefined): number | undefined {

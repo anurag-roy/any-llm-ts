@@ -850,7 +850,7 @@ addBuiltIn("azureopenai", {
       responses: true,
       vision: true,
     }),
-    documentationUrl: "https://learn.microsoft.com/azure/ai-foundry/openai/",
+    documentationUrl: "https://learn.microsoft.com/azure/foundry/openai/api-version-lifecycle",
     envApiBase: "AZURE_OPENAI_ENDPOINT",
     envApiKey: "AZURE_OPENAI_API_KEY",
     name: "azureopenai",

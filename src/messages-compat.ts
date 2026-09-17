@@ -29,7 +29,7 @@ import type {
   TextContentPart,
   ToolCallDelta,
 } from "./types.js";
-import { closeAsyncIterableQuietly } from "./utils.js";
+import { produceClosingAsyncIterable } from "./utils.js";
 
 function systemText(system: MessagesParams["system"]): string | undefined {
   if (system === undefined || isString(system)) return system;
@@ -311,7 +311,12 @@ export function messagesToCompletionParams(params: MessagesParams): CompletionPa
 function stopReason(reason: ChatCompletion["choices"][number]["finishReason"]): MessageStopReason {
   if (reason === "length") return "max_tokens";
   if (reason === "tool_calls" || reason === "function_call") return "tool_use";
+  if (reason === "content_filter") return "refusal";
   return "end_turn";
+}
+
+function refusalText(value: string | null | undefined): string | undefined {
+  return isString(value) && value.length > 0 ? value : undefined;
 }
 
 function cachedTokensFromDetails(details: PromptTokensDetails | undefined): number | undefined {
@@ -403,6 +408,8 @@ export function completionToMessageResponse(completion: ChatCompletion): Message
   }
   const text = choice === undefined ? "" : textFromChatContent(choice.message.content);
   if (text.length > 0) content.push({ text, type: "text" });
+  const refusal = refusalText(choice?.message.refusal);
+  if (refusal !== undefined) content.push({ text: refusal, type: "text" });
   for (const call of choice?.message.toolCalls ?? []) {
     content.push({
       id: call.id,
@@ -417,7 +424,7 @@ export function completionToMessageResponse(completion: ChatCompletion): Message
     id: completion.id,
     model: completion.model,
     role: "assistant",
-    stopReason: stopReason(choice?.finishReason ?? null),
+    stopReason: refusal === undefined ? stopReason(choice?.finishReason ?? null) : "refusal",
     type: "message",
     usage: usageFromCompletion(completion),
     raw: completion,
@@ -426,7 +433,7 @@ export function completionToMessageResponse(completion: ChatCompletion): Message
 
 interface StreamState {
   blockIndex: number;
-  blockType?: "text" | "thinking" | "tool_use";
+  blockType?: "refusal" | "text" | "thinking" | "tool_use";
   cacheCreation?: CacheCreationTokenDetails;
   cacheCreationInputTokens?: number;
   cacheReadInputTokens?: number;
@@ -558,10 +565,20 @@ function chunkEvents(chunk: ChatCompletionChunk, state: StreamState): MessageStr
       });
     }
   }
+  const refusal = refusalText(choice.delta.refusal);
+  if (refusal !== undefined) {
+    state.stopReason = "refusal";
+    events.push(...openBlock(state, "refusal", { text: "", type: "text" }));
+    events.push({
+      delta: { text: refusal, type: "text_delta" },
+      index: state.blockIndex,
+      type: "content_block_delta",
+    });
+  }
   for (const call of choice.delta.toolCalls ?? []) events.push(...toolDeltaEvents(state, call));
   if (choice.finishReason !== null) {
     events.push(...closeBlock(state));
-    state.stopReason = stopReason(choice.finishReason);
+    if (state.stopReason !== "refusal") state.stopReason = stopReason(choice.finishReason);
   }
   return events;
 }
@@ -588,7 +605,7 @@ function finalUsage(state: StreamState): MessageUsage {
   );
 }
 
-export async function* completionStreamToMessageEvents(
+async function* messageEventsFromCompletionStream(
   stream: AsyncIterable<ChatCompletionChunk>,
 ): AsyncIterable<MessageStreamEvent> {
   const state: StreamState = {
@@ -600,31 +617,33 @@ export async function* completionStreamToMessageEvents(
     toolBlockIndexes: new Map(),
   };
   try {
-    try {
-      for await (const chunk of stream) {
-        for (const event of chunkEvents(chunk, state)) yield event;
-      }
-    } catch (error) {
-      if (state.started) {
-        yield {
-          delta: { stopReason: null },
-          type: "message_delta",
-          usage: finalUsage(state),
-        };
-      }
-      throw error;
+    for await (const chunk of stream) {
+      for (const event of chunkEvents(chunk, state)) yield event;
     }
+  } catch (error) {
     if (state.started) {
-      for (const event of closeBlock(state)) yield event;
-      const delta: MessageDeltaEvent = {
-        delta: { stopReason: state.stopReason ?? "end_turn" },
+      yield {
+        delta: { stopReason: null },
         type: "message_delta",
         usage: finalUsage(state),
       };
-      yield delta;
-      yield { type: "message_stop" };
     }
-  } finally {
-    await closeAsyncIterableQuietly(stream);
+    throw error;
   }
+  if (state.started) {
+    for (const event of closeBlock(state)) yield event;
+    const delta: MessageDeltaEvent = {
+      delta: { stopReason: state.stopReason ?? "end_turn" },
+      type: "message_delta",
+      usage: finalUsage(state),
+    };
+    yield delta;
+    yield { type: "message_stop" };
+  }
+}
+
+export function completionStreamToMessageEvents(
+  stream: AsyncIterable<ChatCompletionChunk>,
+): AsyncIterable<MessageStreamEvent> {
+  return produceClosingAsyncIterable(stream, messageEventsFromCompletionStream);
 }

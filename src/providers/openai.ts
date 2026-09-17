@@ -6,7 +6,7 @@ import { isBoolean, isNumber, isObject, isString } from "../utils.js";
 import { basename } from "node:path";
 import { readFile } from "node:fs/promises";
 
-import OpenAI, { AzureOpenAI, toFile } from "openai";
+import OpenAI, { toFile } from "openai";
 import type { ClientOptions } from "openai";
 
 import {
@@ -56,8 +56,10 @@ import {
   getEnvironmentVariable,
   iterateClosing,
   isAsyncIterable,
+  isFunction,
   mapAsyncIterable,
   notifyCompletionDispatch,
+  produceClosingAsyncIterable,
   timeoutRequestOptions,
 } from "../utils.js";
 import { BaseProvider } from "./base.js";
@@ -125,6 +127,8 @@ interface AzureProviderOptions extends ProviderOptions {
 interface AzureOpenAIClientOptions {
   azureADToken?: string;
   azureADTokenProvider?: () => Promise<string>;
+  azureDeployment?: string;
+  azureEndpoint?: string;
 }
 
 interface OpenAIMessageRequest {
@@ -160,6 +164,52 @@ function splitResponseTagFromReasoning<Content, Reasoning>(
     content: match[1],
     reasoning: reasoning.slice(0, match.index) || undefined,
   };
+}
+
+function withoutExtraQuery(providerOptions: JsonObject | undefined): JsonObject {
+  if (providerOptions === undefined) return {};
+  return Object.fromEntries(
+    Object.entries(providerOptions).filter(
+      ([key]) => key !== "extra_query" && key !== "extraQuery",
+    ),
+  );
+}
+
+function extraQuery(providerOptions: JsonObject | undefined) {
+  if (providerOptions === undefined) return {};
+  const raw = providerOptions.extra_query ?? providerOptions.extraQuery;
+  if (!isObject(raw) || Array.isArray(raw)) return {};
+  return Object.fromEntries(
+    Object.entries(parseJsonObject(raw)).flatMap(([key, value]) =>
+      isString(value) ? [[key, value] as const] : [],
+    ),
+  );
+}
+
+function azureOpenAIBaseUrl(endpoint: string): string {
+  const trimmed = endpoint.replace(/\/+$/u, "");
+  return trimmed.endsWith("/openai/v1") ? `${trimmed}/` : `${trimmed}/openai/v1/`;
+}
+
+function azureOpenAICredential(
+  apiKey: string | undefined,
+  azureADToken: string | undefined,
+  azureADTokenProvider: (() => PromiseLike<string> | string) | undefined,
+): string | (() => Promise<string>) {
+  if (azureADTokenProvider !== undefined) {
+    return async () => {
+      const token = await azureADTokenProvider();
+      if (!isString(token) || token.length === 0) {
+        throw new TypeError("Expected azureADTokenProvider to return a non-empty string.");
+      }
+      return token;
+    };
+  }
+  const credential = apiKey ?? azureADToken;
+  if (credential === undefined) {
+    throw new MissingApiKeyError("azureopenai", "AZURE_OPENAI_API_KEY or AZURE_OPENAI_AD_TOKEN");
+  }
+  return credential;
 }
 
 function resolveApiKey(config: OpenAIProviderConfig, value: string | undefined): string {
@@ -478,7 +528,7 @@ function withoutChunkUsage(chunk: ChatCompletionChunk): ChatCompletionChunk {
   return clone;
 }
 
-async function* normalizeXmlReasoningStream(
+async function* xmlReasoningChunks(
   stream: AsyncIterable<ChatCompletionChunk>,
 ): AsyncIterable<ChatCompletionChunk> {
   const states = new Map<number, XmlStreamState>();
@@ -555,12 +605,24 @@ async function* normalizeXmlReasoningStream(
   }
 }
 
-async function* filterEmptyStreamingChunks(
+function normalizeXmlReasoningStream(
+  stream: AsyncIterable<ChatCompletionChunk>,
+): AsyncIterable<ChatCompletionChunk> {
+  return produceClosingAsyncIterable(stream, xmlReasoningChunks);
+}
+
+async function* filterEmptyChunks(
   stream: AsyncIterable<ChatCompletionChunk>,
 ): AsyncIterable<ChatCompletionChunk> {
   for await (const chunk of iterateClosing(stream)) {
     if (chunk.choices.length > 0 || chunk.usage !== undefined) yield chunk;
   }
+}
+
+function filterEmptyStreamingChunks(
+  stream: AsyncIterable<ChatCompletionChunk>,
+): AsyncIterable<ChatCompletionChunk> {
+  return produceClosingAsyncIterable(stream, filterEmptyChunks);
 }
 
 function normalizeReasoningDirective(value: JsonValue | undefined): JsonObject {
@@ -790,6 +852,12 @@ export class OpenAIProvider extends BaseProvider {
     );
   }
 
+  protected mediaRequestOptions(
+    _providerOptions: JsonObject | undefined,
+  ): { query: JsonObject } | undefined {
+    return undefined;
+  }
+
   override completion(
     params: CompletionParams,
     operation: CompletionOperationOptions = {},
@@ -972,8 +1040,9 @@ export class OpenAIProvider extends BaseProvider {
 
   override imageGeneration(params: ImageGenerationParams): Promise<ImageGenerationResponse> {
     return this.execute(async () => {
+      const requestOptions = this.mediaRequestOptions(params.providerOptions);
       // SAFETY: The provider contract establishes the asserted representation at this boundary.
-      const response = await this.client.images.generate({
+      const body = {
         background: params.background,
         model: params.model,
         n: params.n,
@@ -984,8 +1053,12 @@ export class OpenAIProvider extends BaseProvider {
         size: params.size,
         style: params.style,
         user: params.user,
-        ...params.providerOptions,
-      } as never);
+        ...withoutExtraQuery(params.providerOptions),
+      } as never;
+      const response =
+        requestOptions === undefined
+          ? await this.client.images.generate(body)
+          : await this.client.images.generate(body, requestOptions);
       return {
         created: response.created,
         data: (response.data ?? []).map((image) => ({
@@ -1003,8 +1076,9 @@ export class OpenAIProvider extends BaseProvider {
 
   override transcription(params: TranscriptionParams): Promise<Transcription> {
     return this.execute(async () => {
+      const requestOptions = this.mediaRequestOptions(params.providerOptions);
       // SAFETY: The provider contract establishes the asserted representation at this boundary.
-      const response = await this.client.audio.transcriptions.create({
+      const body = {
         file: params.file,
         language: params.language,
         model: params.model,
@@ -1012,8 +1086,12 @@ export class OpenAIProvider extends BaseProvider {
         response_format: params.responseFormat,
         temperature: params.temperature,
         timestamp_granularities: params.timestampGranularities,
-        ...params.providerOptions,
-      } as never);
+        ...withoutExtraQuery(params.providerOptions),
+      } as never;
+      const response =
+        requestOptions === undefined
+          ? await this.client.audio.transcriptions.create(body)
+          : await this.client.audio.transcriptions.create(body, requestOptions);
       const text = isString(response) ? response : response.text;
       return { provider: this.metadata.name, raw: response, text };
     });
@@ -1021,16 +1099,21 @@ export class OpenAIProvider extends BaseProvider {
 
   override speech(params: SpeechParams): Promise<Uint8Array> {
     return this.execute(async () => {
+      const requestOptions = this.mediaRequestOptions(params.providerOptions);
       // SAFETY: The provider contract establishes the asserted representation at this boundary.
-      const response = await this.client.audio.speech.create({
+      const body = {
         input: params.input,
         instructions: params.instructions,
         model: params.model,
         response_format: params.responseFormat,
         speed: params.speed,
         voice: params.voice,
-        ...params.providerOptions,
-      } as never);
+        ...withoutExtraQuery(params.providerOptions),
+      } as never;
+      const response =
+        requestOptions === undefined
+          ? await this.client.audio.speech.create(body)
+          : await this.client.audio.speech.create(body, requestOptions);
       return new Uint8Array(await response.arrayBuffer());
     });
   }
@@ -1432,43 +1515,73 @@ export class OpenAIProvider extends BaseProvider {
 
 export class AzureOpenAIProvider extends OpenAIProvider {
   constructor(options: AzureProviderOptions = {}) {
-    const endpoint = options.apiBase ?? getEnvironmentVariable("AZURE_OPENAI_ENDPOINT");
-    const apiKey = options.apiKey ?? getEnvironmentVariable("AZURE_OPENAI_API_KEY");
-    // SAFETY: The provider contract establishes the asserted representation at this boundary.
+    // SAFETY: Azure-specific constructor fields live on clientOptions alongside OpenAI ClientOptions.
     const clientOptions = {
       ...options.clientOptions,
     } as AzureOpenAIClientOptions;
     const {
       azureADToken: clientAzureADToken,
       azureADTokenProvider: clientAzureADTokenProvider,
+      azureDeployment,
+      azureEndpoint,
       ...sdkClientOptions
     } = clientOptions;
-    const azureADToken =
-      (isString(clientAzureADToken) && clientAzureADToken.length > 0
-        ? clientAzureADToken
-        : undefined) ?? getEnvironmentVariable("AZURE_OPENAI_AD_TOKEN");
-    const tokenProvider =
-      clientAzureADTokenProvider ??
-      (azureADToken === undefined ? undefined : () => Promise.resolve(azureADToken));
-    if (apiKey === undefined && tokenProvider === undefined) {
-      throw new MissingApiKeyError("azureopenai", "AZURE_OPENAI_API_KEY");
-    }
-    if (endpoint === undefined) {
-      throw new TypeError(
-        "Azure OpenAI requires apiBase or the AZURE_OPENAI_ENDPOINT environment variable.",
+    if (options.apiVersion !== undefined && options.apiVersion !== "v1") {
+      throw new UnsupportedParameterError(
+        "apiVersion",
+        "azureopenai",
+        'Azure OpenAI now uses /openai/v1/. Remove the dated version or set apiVersion="v1".',
       );
     }
-    const apiVersion =
-      options.apiVersion ?? getEnvironmentVariable("OPENAI_API_VERSION") ?? "2024-10-21";
-    // SAFETY: The provider contract establishes the asserted representation at this boundary.
-    const azureOptions = {
-      ...sdkClientOptions,
-      ...includeWhen(!(apiKey === undefined), { apiKey }),
-      ...includeWhen(!(tokenProvider === undefined), { azureADTokenProvider: tokenProvider }),
-      apiVersion,
-      endpoint,
-    } as ConstructorParameters<typeof AzureOpenAI>[0];
-    const client = new AzureOpenAI(azureOptions);
+    if (azureDeployment !== undefined) {
+      throw new UnsupportedParameterError(
+        "azureDeployment",
+        "azureopenai",
+        "Pass your Azure deployment name as `model` on each request instead of `azureDeployment`.",
+      );
+    }
+    const environmentVersion = getEnvironmentVariable("OPENAI_API_VERSION");
+    if (environmentVersion !== undefined && environmentVersion !== "v1") {
+      console.warn(
+        `Ignoring OPENAI_API_VERSION=${environmentVersion}: the azureopenai provider always uses /openai/v1/.`,
+      );
+    }
+    const explicitApiKey = options.apiKey;
+    const explicitToken = clientAzureADToken;
+    const explicitProvider = isFunction(clientAzureADTokenProvider)
+      ? clientAzureADTokenProvider
+      : undefined;
+    const explicitCredentials = [explicitApiKey, explicitToken, explicitProvider].filter(
+      (value) => value !== undefined,
+    ).length;
+    if (explicitCredentials > 1) {
+      throw new TypeError(
+        "The apiKey, azureADToken and azureADTokenProvider arguments are mutually exclusive; only one can be passed at a time.",
+      );
+    }
+    let apiKey = isString(explicitApiKey) && explicitApiKey.length > 0 ? explicitApiKey : undefined;
+    let azureADToken =
+      isString(explicitToken) && explicitToken.length > 0 ? explicitToken : undefined;
+    if (explicitCredentials === 0) {
+      azureADToken = getEnvironmentVariable("AZURE_OPENAI_AD_TOKEN");
+      if (azureADToken === undefined) apiKey = getEnvironmentVariable("AZURE_OPENAI_API_KEY");
+    }
+    const credential = azureOpenAICredential(apiKey, azureADToken, explicitProvider);
+    const endpoint =
+      options.apiBase ??
+      (isString(azureEndpoint) && azureEndpoint.length > 0 ? azureEndpoint : undefined) ??
+      getEnvironmentVariable("AZURE_OPENAI_ENDPOINT");
+    if (endpoint === undefined) {
+      throw new TypeError(
+        "Azure OpenAI requires apiBase or azureEndpoint, or the AZURE_OPENAI_ENDPOINT environment variable.",
+      );
+    }
+    // SAFETY: Remaining clientOptions are OpenAI SDK constructor fields after Azure-only keys are stripped.
+    const client = new OpenAI({
+      ...(sdkClientOptions as Omit<ClientOptions, "apiKey" | "baseURL">),
+      apiKey: credential,
+      baseURL: azureOpenAIBaseUrl(endpoint),
+    });
     super(
       {
         apiBase: endpoint,
@@ -1479,7 +1592,7 @@ export class AzureOpenAIProvider extends OpenAIProvider {
           pdfInput: false,
           reasoning: false,
         },
-        documentationUrl: "https://learn.microsoft.com/azure/ai-foundry/openai/",
+        documentationUrl: "https://learn.microsoft.com/azure/foundry/openai/api-version-lifecycle",
         envApiBase: "AZURE_OPENAI_ENDPOINT",
         envApiKey: "AZURE_OPENAI_API_KEY",
         name: "azureopenai",
@@ -1487,6 +1600,10 @@ export class AzureOpenAIProvider extends OpenAIProvider {
       options,
       client,
     );
+  }
+
+  protected override mediaRequestOptions(providerOptions: JsonObject | undefined) {
+    return { query: { "api-version": "preview", ...extraQuery(providerOptions) } };
   }
 }
 
