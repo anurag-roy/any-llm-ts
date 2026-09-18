@@ -27,12 +27,20 @@ import type {
   CompletionUsage,
   ReasoningEffort,
   CreateBatchParams,
+  DownloadFileParams,
   EmbeddingParams,
   EmbeddingResponse,
+  FileDeleted,
+  FileDownload,
+  FileMetadata,
+  FileOperation,
+  FilePage,
+  FileResourceParams,
   FinishReason,
   ImageGenerationParams,
   ImageGenerationResponse,
   ListBatchesParams,
+  ListFilesParams,
   Model,
   ModerationParams,
   ModerationResponse,
@@ -47,6 +55,7 @@ import type {
   ToolCall,
   Transcription,
   TranscriptionParams,
+  UploadFileParams,
 } from "../types.js";
 import { completeProviderMetadata } from "../provider-metadata.js";
 import {
@@ -63,6 +72,13 @@ import {
   timeoutRequestOptions,
 } from "../utils.js";
 import { BaseProvider } from "./base.js";
+import {
+  deleteOpenAIFile,
+  downloadOpenAIFile,
+  listOpenAIFiles,
+  retrieveOpenAIFile,
+  uploadOpenAIFile,
+} from "./openai-files.js";
 
 export const openAICapabilities: ProviderCapabilities = {
   audioSpeech: true,
@@ -100,6 +116,7 @@ interface OpenAIProviderConfig {
   envApiKey?: string;
   gatewayControls?: boolean;
   name: string;
+  fileOperations?: FileOperation[];
   promptCacheKeySupport?: ProviderMetadata["promptCacheKeySupport"];
   quirks?: OpenAIProviderQuirks;
   requiresApiKey?: boolean;
@@ -113,6 +130,7 @@ interface OpenAIProviderQuirks {
   patchLlamaToolSchemas?: boolean;
   rejectResponsesMaxToolCalls?: boolean;
   reasoningDirective?: "deepseek" | "openrouter" | "requesty";
+  reasoningField?: "reasoning" | "reasoning_content";
   responseFormatMode?: "cerebras" | "together";
   rejectResponseFormat?: boolean;
   rejectStreamingResponseFormat?: boolean;
@@ -134,17 +152,33 @@ interface AzureOpenAIClientOptions {
 interface OpenAIMessageRequest {
   content: ChatMessage["content"];
   extra_content?: JsonObject;
-  is_error?: boolean;
   name?: string;
+  reasoning?: string;
   reasoning_content?: string;
   refusal?: string | null;
   role: ChatMessage["role"];
   tool_call_id?: string;
   tool_calls?: {
+    extra_content?: JsonObject;
     function: ToolCall["function"];
     id: string;
     type: "function";
   }[];
+}
+
+const openAIFileOperations: FileOperation[] = ["delete", "download", "list", "retrieve", "upload"];
+
+function keptExtraContent(
+  extraContent: JsonObject | undefined,
+  keepNamespaces: readonly string[],
+): JsonObject | undefined {
+  if (extraContent === undefined || keepNamespaces.length === 0) return undefined;
+  const kept: JsonObject = {};
+  for (const namespace of keepNamespaces) {
+    const value = extraContent[namespace];
+    if (value !== undefined) kept[namespace] = value;
+  }
+  return Object.keys(kept).length === 0 ? undefined : kept;
 }
 
 interface ResponseTagResult<Content, Reasoning> {
@@ -219,7 +253,17 @@ function resolveApiKey(config: OpenAIProviderConfig, value: string | undefined):
   throw new MissingApiKeyError(config.name, config.envApiKey ?? "provider-specific API key");
 }
 
-function toOpenAIMessage(message: ChatMessage, provider: string, replayDeepSeekReasoning = false) {
+function toOpenAIMessage(
+  message: ChatMessage,
+  provider: string,
+  options: {
+    keepExtraContentNamespaces?: readonly string[];
+    reasoningField?: "reasoning" | "reasoning_content";
+    replayDeepSeekReasoning?: boolean;
+  } = {},
+) {
+  const keepNamespaces = options.keepExtraContentNamespaces ?? ["google"];
+  const reasoningField = options.reasoningField ?? "reasoning_content";
   const converted: OpenAIMessageRequest = {
     content: message.content,
     role: message.role,
@@ -228,28 +272,32 @@ function toOpenAIMessage(message: ChatMessage, provider: string, replayDeepSeekR
   if (message.refusal !== undefined) converted.refusal = message.refusal;
   if (message.toolCallId !== undefined) converted.tool_call_id = message.toolCallId;
   if (message.toolCalls !== undefined) {
-    converted.tool_calls = message.toolCalls.map((toolCall) => ({
-      function: toolCall.function,
-      id: toolCall.id,
-      type: toolCall.type,
-      ...(toolCall.extraContent ?? {}),
-    }));
+    converted.tool_calls = message.toolCalls.map((toolCall) =>
+      compactObject({
+        extra_content: keptExtraContent(toolCall.extraContent, keepNamespaces),
+        function: toolCall.function,
+        id: toolCall.id,
+        type: toolCall.type,
+      }),
+    );
   }
-  if (message.isError === true) converted.is_error = true;
   if (isString(message.reasoning) && message.reasoning.length > 0) {
-    converted.reasoning_content = message.reasoning;
+    if (reasoningField === "reasoning") converted.reasoning = message.reasoning;
+    else converted.reasoning_content = message.reasoning;
   }
-  if (message.extraContent !== undefined && provider !== "deepseek") {
-    converted.extra_content = message.extraContent;
-  }
-  if (provider === "deepseek" && replayDeepSeekReasoning && message.role === "assistant") {
-    const deepseek = message.extraContent?.deepseek;
-    if (isObject(deepseek)) {
-      const reasoningContent = parseJsonObject(deepseek).reasoning_content;
-      if (isString(reasoningContent)) {
-        converted.reasoning_content = reasoningContent;
+  if (provider === "deepseek") {
+    if (options.replayDeepSeekReasoning === true && message.role === "assistant") {
+      const deepseek = message.extraContent?.deepseek;
+      if (isObject(deepseek)) {
+        const reasoningContent = parseJsonObject(deepseek).reasoning_content;
+        if (isString(reasoningContent)) {
+          converted.reasoning_content = reasoningContent;
+        }
       }
     }
+  } else {
+    const extraContent = keptExtraContent(message.extraContent, keepNamespaces);
+    if (extraContent !== undefined) converted.extra_content = extraContent;
   }
   return compactObject(converted);
 }
@@ -847,6 +895,7 @@ export class OpenAIProvider extends BaseProvider {
         ...includeWhen(!(config.promptCacheKeySupport === undefined), {
           promptCacheKeySupport: config.promptCacheKeySupport,
         }),
+        fileOperations: config.fileOperations ?? [],
       },
       config.gatewayControls === false ? "other" : "openai",
     );
@@ -1237,6 +1286,37 @@ export class OpenAIProvider extends BaseProvider {
     });
   }
 
+  override uploadFile(params: UploadFileParams): Promise<FileMetadata> {
+    if (!this.metadata.fileOperations.includes("upload")) return super.uploadFile(params);
+    return this.execute(() => uploadOpenAIFile(this.client, params, this.metadata.name));
+  }
+
+  override listFiles(params: ListFilesParams = {}): Promise<FilePage> {
+    if (!this.metadata.fileOperations.includes("list")) return super.listFiles(params);
+    return this.execute(() => listOpenAIFiles(this.client, params, this.metadata.name));
+  }
+
+  override retrieveFile(params: FileResourceParams): Promise<FileMetadata> {
+    if (!this.metadata.fileOperations.includes("retrieve")) return super.retrieveFile(params);
+    return this.execute(() => retrieveOpenAIFile(this.client, params, this.metadata.name), {
+      fileOperation: true,
+    });
+  }
+
+  override deleteFile(params: FileResourceParams): Promise<FileDeleted> {
+    if (!this.metadata.fileOperations.includes("delete")) return super.deleteFile(params);
+    return this.execute(() => deleteOpenAIFile(this.client, params, this.metadata.name), {
+      fileOperation: true,
+    });
+  }
+
+  override downloadFile(params: DownloadFileParams): Promise<FileDownload> {
+    if (!this.metadata.fileOperations.includes("download")) return super.downloadFile(params);
+    return this.execute(() => downloadOpenAIFile(this.client, params, this.metadata.name), {
+      fileOperation: true,
+    });
+  }
+
   protected completionRequest(params: CompletionParams) {
     const maxCompletionTokens = params.maxCompletionTokens ?? params.maxTokens;
     const reasoningEffort = params.reasoningEffort === "auto" ? undefined : params.reasoningEffort;
@@ -1248,11 +1328,16 @@ export class OpenAIProvider extends BaseProvider {
         logprobs: params.logprobs,
         max_completion_tokens: maxCompletionTokens,
         messages: params.messages.map((message) =>
-          toOpenAIMessage(
-            message,
-            this.metadata.name,
-            this.config.quirks?.reasoningDirective === "deepseek" && params.tools !== undefined,
-          ),
+          toOpenAIMessage(message, this.metadata.name, {
+            keepExtraContentNamespaces:
+              this.config.quirks?.reasoningDirective === "deepseek" ||
+              this.config.quirks?.reasoningField === "reasoning"
+                ? []
+                : ["google"],
+            reasoningField: this.config.quirks?.reasoningField ?? "reasoning_content",
+            replayDeepSeekReasoning:
+              this.config.quirks?.reasoningDirective === "deepseek" && params.tools !== undefined,
+          }),
         ),
         model: params.model,
         n: params.n,
@@ -1595,6 +1680,7 @@ export class AzureOpenAIProvider extends OpenAIProvider {
         documentationUrl: "https://learn.microsoft.com/azure/foundry/openai/api-version-lifecycle",
         envApiBase: "AZURE_OPENAI_ENDPOINT",
         envApiKey: "AZURE_OPENAI_API_KEY",
+        fileOperations: openAIFileOperations,
         name: "azureopenai",
       },
       options,
@@ -1614,6 +1700,7 @@ export function createOpenAIProvider(options: ProviderOptions = {}): OpenAIProvi
       documentationUrl: "https://platform.openai.com/docs/api-reference",
       envApiBase: "OPENAI_BASE_URL",
       envApiKey: "OPENAI_API_KEY",
+      fileOperations: openAIFileOperations,
       name: "openai",
       capabilities: openAICapabilities,
     },

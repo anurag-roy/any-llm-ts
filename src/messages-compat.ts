@@ -109,10 +109,15 @@ function convertToolResultContent(
   }
   const textParts: string[] = [];
   const extraParts: MessageContentPart[] = [];
+  let afterRenderedBlock = false;
   for (const block of content) {
     if (!isObject(block)) continue;
     const record = parseJsonObject(block);
     if (record.type === "text" && isString(record.text)) {
+      if (afterRenderedBlock && record.text.length > 0) {
+        textParts.push("\n");
+        afterRenderedBlock = false;
+      }
       textParts.push(record.text);
       continue;
     }
@@ -120,9 +125,50 @@ function convertToolResultContent(
       extraParts.push(convertImageBlock(record));
       continue;
     }
-    if (record.type === "document") extraParts.push(convertDocumentBlock(record));
+    if (record.type === "document") {
+      extraParts.push(convertDocumentBlock(record));
+      continue;
+    }
+    const rendered = renderToolResultBlockAsText(record);
+    if (rendered === undefined) continue;
+    if (textParts.some((part) => part.length > 0)) textParts.push("\n");
+    textParts.push(rendered);
+    afterRenderedBlock = true;
   }
   return [textParts.join(""), extraParts];
+}
+
+function renderToolResultBlockAsText(block: JsonObject): string | undefined {
+  if (block.type === "search_result") {
+    const content = Array.isArray(block.content) ? block.content : [];
+    const body = content
+      .flatMap((part): string[] => {
+        if (!isObject(part)) return [];
+        const record = parseJsonObject(part);
+        return record.type === "text" && isString(record.text) ? [record.text] : [];
+      })
+      .join("");
+    const title = isString(block.title) ? block.title : "";
+    const source = isString(block.source) ? block.source : "";
+    const rendered = [title, source, body].filter((part) => part.length > 0).join("\n");
+    return rendered.length > 0 ? rendered : undefined;
+  }
+  if (block.type === "tool_reference") {
+    const name = isString(block.tool_name)
+      ? block.tool_name
+      : isString(block.toolName)
+        ? block.toolName
+        : "";
+    return `Tool reference: ${name}`;
+  }
+  if (block.type === "browser_state") {
+    const rendered: JsonObject = {};
+    if ("tabs" in block) rendered.tabs = block.tabs;
+    if ("state_changes" in block) rendered.state_changes = block.state_changes;
+    else if ("stateChanges" in block) rendered.state_changes = block.stateChanges;
+    return JSON.stringify(rendered);
+  }
+  return undefined;
 }
 
 function assistantMessage(content: MessagesInputContentBlock[]): ChatMessage {
@@ -180,14 +226,18 @@ function userMessages(content: MessagesInputContentBlock[]): ChatMessage[] {
   for (const block of content) {
     if (block.type === "tool_result" && "toolUseId" in block && isString(block.toolUseId)) {
       flushUser();
-      const [toolText, extraParts] = convertToolResultContent(
+      const [convertedText, extraParts] = convertToolResultContent(
         "content" in block ? block.content : "",
       );
+      let toolText = convertedText;
+      if (block.isError === true) {
+        if (toolText.length === 0) toolText = "Error";
+        else if (!toolText.startsWith("Error:")) toolText = `Error: ${toolText}`;
+      }
       messages.push({
         content: toolText,
         role: "tool",
         toolCallId: block.toolUseId,
-        ...includeWhen(block.isError === true, { isError: true }),
       });
       heldParts.push(...extraParts);
       continue;

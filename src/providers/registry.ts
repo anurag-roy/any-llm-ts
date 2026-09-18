@@ -96,7 +96,7 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
     envApiBase: "CEREBRAS_API_BASE",
     envApiKey: "CEREBRAS_API_KEY",
     name: "cerebras",
-    quirks: { responseFormatMode: "cerebras" },
+    quirks: { reasoningField: "reasoning", responseFormatMode: "cerebras" },
   },
   {
     apiBase: "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -194,6 +194,7 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
     envApiKey: "GROQ_API_KEY",
     name: "groq",
     quirks: {
+      reasoningField: "reasoning",
       rejectResponsesMaxToolCalls: true,
       rejectStreamingResponseFormat: true,
     },
@@ -534,6 +535,7 @@ addBuiltIn("openai", {
     documentationUrl: "https://platform.openai.com/docs/api-reference",
     envApiBase: "OPENAI_BASE_URL",
     envApiKey: "OPENAI_API_KEY",
+    fileOperations: ["delete", "download", "list", "retrieve", "upload"],
     name: "openai",
     requiresApiKey: true,
   },
@@ -853,6 +855,7 @@ addBuiltIn("azureopenai", {
     documentationUrl: "https://learn.microsoft.com/azure/foundry/openai/api-version-lifecycle",
     envApiBase: "AZURE_OPENAI_ENDPOINT",
     envApiKey: "AZURE_OPENAI_API_KEY",
+    fileOperations: ["delete", "download", "list", "retrieve", "upload"],
     name: "azureopenai",
     requiresApiKey: true,
   },

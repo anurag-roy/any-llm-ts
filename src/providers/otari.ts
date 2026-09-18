@@ -5,7 +5,7 @@ import type { JsonObject } from "../types.js";
 import { isFunction, isJsonValue, isNumber, isObject, isString } from "../utils.js";
 import { readFile } from "node:fs/promises";
 
-import { BatchNotCompleteError, UnsupportedParameterError } from "../errors.js";
+import { BatchNotCompleteError } from "../errors.js";
 import { normalizeOutputConfig } from "../structured-output.js";
 import type {
   Batch,
@@ -82,6 +82,33 @@ interface OtariTransportOptions {
   defaultHeaders?: Record<string, string>;
   fetch?: Fetch;
   platformToken?: string;
+}
+
+function resolveOtariGatewayOrigin(apiBase: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(apiBase);
+  } catch {
+    throw new TypeError("api_base must be the gateway origin, without the /v1 path prefix.");
+  }
+  const path = parsed.pathname.replace(/\/+$/u, "");
+  for (const suffix of ["/api/v1", "/v1"]) {
+    if (path.endsWith(suffix)) {
+      const suggested = new URL(parsed.href);
+      suggested.pathname = path.slice(0, -suffix.length) || "/";
+      suggested.search = "";
+      suggested.hash = "";
+      const origin = suggested.toString().replace(/\/+$/u, "");
+      throw new TypeError(
+        `api_base must be the gateway origin, without the ${suffix} path prefix. Pass '${origin}' instead.`,
+      );
+    }
+  }
+  if (parsed.search.length > 0 || parsed.hash.length > 0) {
+    throw new TypeError("api_base must be the gateway origin, without a query string or fragment.");
+  }
+  parsed.pathname = path.length === 0 ? "/" : path;
+  return parsed.toString().replace(/\/+$/u, "");
 }
 
 async function providerError(response: globalThis.Response): Promise<Error> {
@@ -172,8 +199,8 @@ class FetchOtariClient implements OtariClientLike {
         "Otari requires apiBase/GATEWAY_API_BASE unless a platform token is configured.",
       );
     }
-    const base = rawBase.replace(/\/+$/u, "");
-    this.baseUrl = base.endsWith("/v1") ? base : `${base}/v1`;
+    const origin = resolveOtariGatewayOrigin(rawBase);
+    this.baseUrl = `${origin}/api/v1`;
     this.fetch = options.fetch ?? globalThis.fetch;
     this.headers = {
       ...options.defaultHeaders,
@@ -577,9 +604,6 @@ export class OtariProvider extends OpenAIProvider {
   override messages(
     params: MessagesParams,
   ): Promise<AsyncIterable<MessageStreamEvent> | MessageResponse> {
-    if (params.container !== undefined) {
-      return Promise.reject(new UnsupportedParameterError("container", this.metadata.name));
-    }
     return this.execute(async () => {
       const { providerOptions, ...request } = params;
       if (request.outputFormat !== undefined) {

@@ -793,14 +793,145 @@ describe("Messages compatibility API", () => {
       role: "assistant",
     });
     expect(params.messages[2]).toEqual({
-      content: "partial capture:",
-      isError: true,
+      content: "Error: partial capture:",
       role: "tool",
       toolCallId: "toolu_1",
     });
     expect(params.messages[3]).toEqual({
       content: [{ image_url: { url: `data:image/png;base64,${png}` }, type: "image_url" }],
       role: "user",
+    });
+  });
+
+  it("prefixes tool-result errors and renders search, reference, and browser blocks as text", () => {
+    const tabs = [{ active: true, id: "t1", title: "Example", url: "https://example.com" }];
+    const changes = [{ tab_id: "t1", type: "tab_opened" }];
+    const params = messagesToCompletionParams({
+      maxTokens: 10,
+      messages: [
+        {
+          content: [
+            {
+              content: "timed out",
+              isError: true,
+              toolUseId: "call_1",
+              type: "tool_result",
+            },
+          ],
+          role: "user",
+        },
+        {
+          content: [
+            {
+              content: "",
+              isError: true,
+              toolUseId: "call_2",
+              type: "tool_result",
+            },
+          ],
+          role: "user",
+        },
+        {
+          content: [
+            {
+              content: "Error: already prefixed",
+              isError: true,
+              toolUseId: "call_3",
+              type: "tool_result",
+            },
+          ],
+          role: "user",
+        },
+        {
+          content: [
+            {
+              content: "ok",
+              isError: false,
+              toolUseId: "call_4",
+              type: "tool_result",
+            },
+          ],
+          role: "user",
+        },
+        {
+          content: [
+            {
+              content: [
+                { text: "Found:", type: "text" },
+                {
+                  content: [
+                    { text: "Sunny, ", type: "text" },
+                    { text: "15C", type: "text" },
+                    { type: "image" },
+                  ],
+                  source: "https://example.com/paris",
+                  title: "Paris weather",
+                  type: "search_result",
+                },
+                { text: "Done.", type: "text" },
+              ],
+              toolUseId: "call_5",
+              type: "tool_result",
+            },
+          ],
+          role: "user",
+        },
+        {
+          content: [
+            {
+              content: [
+                { tool_name: "get_weather", type: "tool_reference" },
+                {
+                  cache_control: null,
+                  state_changes: changes,
+                  tabs,
+                  type: "browser_state",
+                },
+                { tabs: [], type: "browser_state" },
+              ],
+              toolUseId: "call_6",
+              type: "tool_result",
+            },
+          ],
+          role: "user",
+        },
+      ],
+      model: "model-a",
+    });
+
+    expect(params.messages[0]).toEqual({
+      content: "Error: timed out",
+      role: "tool",
+      toolCallId: "call_1",
+    });
+    expect(params.messages[1]).toEqual({
+      content: "Error",
+      role: "tool",
+      toolCallId: "call_2",
+    });
+    expect(params.messages[2]).toEqual({
+      content: "Error: already prefixed",
+      role: "tool",
+      toolCallId: "call_3",
+    });
+    expect(params.messages[3]).toEqual({
+      content: "ok",
+      role: "tool",
+      toolCallId: "call_4",
+    });
+    expect(params.messages[4]).toEqual({
+      content: "Found:\nParis weather\nhttps://example.com/paris\nSunny, 15C\nDone.",
+      role: "tool",
+      toolCallId: "call_5",
+    });
+    expect(params.messages[5]).toEqual({
+      content: [
+        "Tool reference: get_weather",
+        JSON.stringify({ tabs, state_changes: changes }),
+        JSON.stringify({ tabs: [] }),
+      ].join("\n"),
+      role: "tool",
+      toolCallId: "call_6",
     });
   });
 

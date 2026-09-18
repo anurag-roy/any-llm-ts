@@ -193,7 +193,7 @@ describe("OpenAI-compatible provider", () => {
     });
   });
 
-  it("forwards reasoning, extraContent, and tool-result errors on the wire", async () => {
+  it("keeps google extraContent, drops other side-channels, and does not send is_error", async () => {
     const create = vi.fn().mockResolvedValue(completionResponse());
     const provider = new OpenAIProvider(
       config,
@@ -204,11 +204,18 @@ describe("OpenAI-compatible provider", () => {
       messages: [
         {
           content: null,
-          extraContent: { anthropic: { signature: "sig-abc" } },
+          extraContent: {
+            anthropic: { signature: "sig-abc" },
+            google: { thoughtSignature: "sig" },
+          },
           reasoning: "call the tool",
           role: "assistant",
           toolCalls: [
             {
+              extraContent: {
+                anthropic: { signature: "drop" },
+                google: { thoughtSignature: "tool-sig" },
+              },
               function: { arguments: "{}", name: "screenshot" },
               id: "toolu_1",
               type: "function",
@@ -226,12 +233,20 @@ describe("OpenAI-compatible provider", () => {
     });
     const request = parseJsonObject(create.mock.calls[0]?.[0]);
     expect(request.messages[0]).toMatchObject({
-      extra_content: { anthropic: { signature: "sig-abc" } },
+      extra_content: { google: { thoughtSignature: "sig" } },
       reasoning_content: "call the tool",
     });
-    expect(request.messages[1]).toMatchObject({
+    expect(request.messages[0]).not.toHaveProperty("is_error");
+    expect(request.messages[0].extra_content).not.toHaveProperty("anthropic");
+    expect(request.messages[0].tool_calls[0]).toEqual({
+      extra_content: { google: { thoughtSignature: "tool-sig" } },
+      function: { arguments: "{}", name: "screenshot" },
+      id: "toolu_1",
+      type: "function",
+    });
+    expect(request.messages[1]).toEqual({
       content: "partial capture:",
-      is_error: true,
+      role: "tool",
       tool_call_id: "toolu_1",
     });
   });

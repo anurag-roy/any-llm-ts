@@ -66,7 +66,14 @@ describe("Anthropic Files API", () => {
       capabilities: { files: true },
       fileOperations: ["delete", "download", "list", "retrieve", "upload"],
     });
-    expect(AnyLLM.getProviderMetadata("openai").capabilities.files).toBe(false);
+    expect(AnyLLM.getProviderMetadata("openai")).toMatchObject({
+      capabilities: { files: true },
+      fileOperations: ["delete", "download", "list", "retrieve", "upload"],
+    });
+    expect(AnyLLM.getProviderMetadata("azureopenai")).toMatchObject({
+      capabilities: { files: true },
+      fileOperations: ["delete", "download", "list", "retrieve", "upload"],
+    });
     expect(AnyLLM.getProviderMetadata("azureanthropic")).toMatchObject({
       capabilities: { files: false },
       fileOperations: [],
@@ -231,7 +238,7 @@ describe("Anthropic Files API", () => {
   it("exposes stateless helpers and rejects unsupported providers without network calls", async () => {
     process.env.ANTHROPIC_API_KEY = "test";
     await expect(
-      AnyLLM.create("openai", { apiKey: "test" }).uploadFile({ file: new Uint8Array([1]) }),
+      AnyLLM.create("groq", { apiKey: "test" }).uploadFile({ file: new Uint8Array([1]) }),
     ).rejects.toBeInstanceOf(UnsupportedOperationError);
     expect(uploadFile).toEqual(expect.any(Function));
     expect(listFiles).toEqual(expect.any(Function));
