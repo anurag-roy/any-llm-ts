@@ -163,11 +163,10 @@ describe("OpenAI Files API", () => {
       .mockResolvedValueOnce({ data: [META] })
       .mockResolvedValueOnce({ data: [], has_more: true });
     const provider = new OpenAIProvider(config, {}, fakeOpenAI({ list }));
-    await expect(provider.listFiles()).resolves.toMatchObject({
-      data: [],
-      has_more: false,
-      nextCursor: undefined,
-    });
+    const page = await provider.listFiles();
+    expect(page.data).toEqual([]);
+    expect(page.has_more).toBe(false);
+    expect(page.nextCursor).toBeUndefined();
     await expect(provider.listFiles()).rejects.toBeInstanceOf(ProviderError);
     await expect(provider.listFiles()).rejects.toBeInstanceOf(ProviderError);
   });
@@ -203,11 +202,12 @@ describe("OpenAI Files API", () => {
       {},
       fakeOpenAI({ content, delete: deleteFile, retrieve }),
     );
-    await expect(provider.retrieveFile({ fileId: "file-test" })).resolves.toMatchObject({
+    const retrieved = await provider.retrieveFile({ fileId: "file-test" });
+    expect(retrieved).toMatchObject({
       id: "file-test",
       object: "file",
-      sizeBytes: undefined,
     });
+    expect(retrieved.sizeBytes).toBeUndefined();
     await expect(provider.deleteFile({ fileId: "file-test" })).resolves.toEqual({
       deleted: true,
       id: "file-test",
