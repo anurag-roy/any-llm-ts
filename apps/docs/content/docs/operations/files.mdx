@@ -7,11 +7,11 @@ The Files API is available on an `AnyLLM` instance. Anthropic, OpenAI, and Azure
 all five operations. Other providers, including custom OpenAI-compatible endpoints, do not inherit
 Files support automatically.
 
-| Provider | Upload | List | Retrieve | Download | Delete |
-| --- | --- | --- | --- | --- | --- |
-| Anthropic | Yes | Yes | Yes | Generated files | Yes |
-| OpenAI | Yes, requires `purpose` | Yes | Yes | Depends on file purpose | Yes |
-| Azure OpenAI | Yes, requires `purpose` | Yes | Yes | Depends on file purpose | Yes |
+| Provider     | Upload                  | List | Retrieve | Download                | Delete |
+| ------------ | ----------------------- | ---- | -------- | ----------------------- | ------ |
+| Anthropic    | Yes                     | Yes  | Yes      | Generated files         | Yes    |
+| OpenAI       | Yes, requires `purpose` | Yes  | Yes      | Depends on file purpose | Yes    |
+| Azure OpenAI | Yes, requires `purpose` | Yes  | Yes      | Depends on file purpose | Yes    |
 
 ```ts
 import { AnyLLM } from "any-llm-ts";
@@ -94,13 +94,13 @@ or vice versa.
 
 ## Methods
 
-| Method | Result |
-| --- | --- |
+| Method                                                                               | Result         |
+| ------------------------------------------------------------------------------------ | -------------- |
 | `uploadFile({ file, filename?, mimeType?, purpose?, expiresIn?, providerOptions? })` | `FileMetadata` |
-| `listFiles({ limit?, cursor?, purpose?, providerOptions? })` | `FilePage` |
-| `retrieveFile({ fileId, providerOptions? })` | `FileMetadata` |
-| `downloadFile({ fileId, chunkSize?, providerOptions? })` | `FileDownload` |
-| `deleteFile({ fileId, providerOptions? })` | `FileDeleted` |
+| `listFiles({ limit?, cursor?, purpose?, providerOptions? })`                         | `FilePage`     |
+| `retrieveFile({ fileId, providerOptions? })`                                         | `FileMetadata` |
+| `downloadFile({ fileId, chunkSize?, providerOptions? })`                             | `FileDownload` |
+| `deleteFile({ fileId, providerOptions? })`                                           | `FileDeleted`  |
 
 These are instance methods. Reuse the client configured for the originating provider account; file
 IDs are not portable. Stateless helpers with the same names are also exported and require `provider`.

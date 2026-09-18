@@ -1,3 +1,7 @@
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Readable } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import OpenAI from "openai";
@@ -11,6 +15,14 @@ import {
   UnsupportedParameterError,
 } from "../src/index.js";
 import { OpenAIProvider } from "../src/providers/openai.js";
+import {
+  convertOpenAIFileDeleted,
+  convertOpenAIFileMetadata,
+  convertOpenAIFilePage,
+  fileRequestOptions,
+  validateOpenAIFileId,
+  validatePositiveInteger,
+} from "../src/providers/openai-files.js";
 import type { FileOperation } from "../src/types.js";
 
 const META = {
@@ -46,6 +58,7 @@ interface FilesClient {
 function fakeOpenAI(files: Partial<FilesClient> = {}) {
   const withOptions = vi.fn();
   const client = Object.assign(new OpenAI({ apiKey: "test" }), {
+    defaultHeaders: {} as Headers | Record<string, string>,
     files: {
       content: vi.fn(),
       create: vi.fn(),
@@ -266,5 +279,195 @@ describe("OpenAI Files API", () => {
         purpose: "batch",
       }),
     ).rejects.toBeInstanceOf(UnsupportedOperationError);
+  });
+
+  it("accepts Blob, ArrayBuffer, stream, and path uploads", async () => {
+    const create = vi.fn().mockResolvedValue(META);
+    const provider = new OpenAIProvider(config, {}, fakeOpenAI({ create }));
+    const directory = await mkdtemp(join(tmpdir(), "any-llm-openai-files-"));
+    const path = join(directory, "input.jsonl");
+    await writeFile(path, "{}\n");
+
+    await provider.uploadFile({
+      file: new File([new Uint8Array([1])], "named.jsonl", { type: "application/jsonl" }),
+      purpose: "batch",
+    });
+    await provider.uploadFile({
+      file: new Blob([new Uint8Array([1, 2])]),
+      filename: "bytes.jsonl",
+      mimeType: "application/jsonl",
+      purpose: "batch",
+    });
+    await provider.uploadFile({
+      file: new Uint8Array([3, 4]).buffer,
+      purpose: "batch",
+    });
+    await provider.uploadFile({
+      file: Readable.from([Buffer.from("stream")]),
+      purpose: "batch",
+    });
+    await provider.uploadFile({ file: path, purpose: "batch" });
+    await expect(
+      provider.uploadFile({ file: join(directory, "missing.jsonl"), purpose: "batch" }),
+    ).rejects.toBeInstanceOf(InvalidRequestError);
+    await expect(
+      provider.uploadFile({ file: {} as never, purpose: "batch" }),
+    ).rejects.toBeInstanceOf(InvalidRequestError);
+    expect(create).toHaveBeenCalledTimes(5);
+  });
+
+  it("forwards headers, timeouts, retries, desc order, and camelCase pagination", async () => {
+    const list = vi.fn().mockResolvedValue({
+      data: [{ ...META, id: "file-last" }],
+      hasMore: true,
+    });
+    const create = vi.fn().mockResolvedValue(META);
+    const client = fakeOpenAI({ create, list });
+    client.defaultHeaders = new Headers({ "x-default": "1" });
+    const provider = new OpenAIProvider(config, {}, client);
+
+    const page = await provider.listFiles({
+      providerOptions: {
+        extra_headers: { "x-custom": "yes", "x-skip": 2 },
+        maxRetries: 3,
+        order: "desc",
+        timeout: 2,
+      },
+    });
+    expect(page.nextCursor).toBe("file-last");
+    expect(client.withOptions).toHaveBeenCalledWith({ maxRetries: 3 });
+    expect(list).toHaveBeenCalledWith(
+      { order: "desc" },
+      expect.objectContaining({
+        headers: expect.objectContaining({ "x-custom": "yes", "x-default": "1" }),
+        timeout: 2_000,
+      }),
+    );
+
+    await provider.uploadFile({
+      file: new Uint8Array([1]),
+      providerOptions: { extraHeaders: new Headers({ "x-trace": "1" }), max_retries: 1 },
+      purpose: "batch",
+    });
+    expect(client.withOptions).toHaveBeenCalledWith({ maxRetries: 1 });
+
+    await expect(provider.listFiles({ purpose: 1 as never })).rejects.toBeInstanceOf(
+      InvalidRequestError,
+    );
+    await expect(provider.listFiles({ cursor: "file%id" })).rejects.toBeInstanceOf(
+      InvalidRequestError,
+    );
+    await expect(
+      provider.listFiles({ providerOptions: { unexpected: true } }),
+    ).rejects.toBeInstanceOf(UnsupportedParameterError);
+  });
+
+  it("downloads split chunks and empty bodies", async () => {
+    const content = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new Uint8Array([1, 2, 3, 4, 5]));
+              controller.close();
+            },
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const provider = new OpenAIProvider(config, {}, fakeOpenAI({ content }));
+    const split = await provider.downloadFile({ chunkSize: 2, fileId: "file-test" });
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of split) chunks.push(chunk);
+    await split.close();
+    expect(chunks.map((chunk) => [...chunk])).toEqual([[1, 2], [3, 4], [5]]);
+
+    const empty = await provider.downloadFile({ fileId: "file-test" });
+    const emptyChunks: Uint8Array[] = [];
+    for await (const chunk of empty) emptyChunks.push(chunk);
+    await empty.close();
+    expect(emptyChunks).toEqual([]);
+  });
+});
+
+describe("OpenAI file converters and request options", () => {
+  it("validates file IDs and maps camelCase metadata", () => {
+    for (const fileId of [
+      "",
+      ".",
+      "..",
+      "file/id",
+      "file\\id",
+      "file?id",
+      "file id",
+      "file#id",
+      "file%id",
+    ]) {
+      expect(() => validateOpenAIFileId(fileId, "openai")).toThrow(InvalidRequestError);
+    }
+    validateOpenAIFileId("file-test", "openai");
+    expect(() => validatePositiveInteger(-1, "limit", "openai")).toThrow(InvalidRequestError);
+
+    expect(
+      convertOpenAIFileMetadata({
+        createdAt: "2026-01-01T00:00:00.000Z",
+        downloadable: true,
+        expiresAt: "2026-01-02T00:00:00.000Z",
+        extra: "kept",
+        filename: "a.jsonl",
+        id: "file-test",
+        mimeType: "application/jsonl",
+        omitted: undefined,
+        purpose: "batch",
+        sizeBytes: 8,
+        status: "processed",
+      }),
+    ).toMatchObject({
+      createdAt: "2026-01-01T00:00:00.000Z",
+      downloadable: true,
+      expiresAt: "2026-01-02T00:00:00.000Z",
+      extra: "kept",
+      filename: "a.jsonl",
+      mimeType: "application/jsonl",
+      sizeBytes: 8,
+    });
+    expect(
+      convertOpenAIFileMetadata({
+        created_at: "not-a-number-but-string",
+        expires_at: 1_700_000_000,
+        mime_type: "text/plain",
+        size_bytes: 4,
+      }),
+    ).toMatchObject({
+      createdAt: "not-a-number-but-string",
+      expiresAt: "2023-11-14T22:13:20.000Z",
+      mimeType: "text/plain",
+      sizeBytes: 4,
+    });
+    expect(() => convertOpenAIFileMetadata(null as never)).toThrow(/JSON object/u);
+    expect(
+      convertOpenAIFileMetadata({ id: "file-test", skip: Symbol("invalid") } as never),
+    ).toMatchObject({ id: "file-test" });
+  });
+
+  it("maps pages, deletions, and empty request options", () => {
+    expect(
+      convertOpenAIFilePage({ data: [{ id: "file-1" }, "skip"], hasMore: true }, "openai"),
+    ).toMatchObject({ nextCursor: "file-1" });
+    expect(convertOpenAIFileDeleted({ deleted: false, extra: true, id: "file-1" })).toEqual({
+      deleted: false,
+      extra: true,
+      id: "file-1",
+    });
+
+    const client = fakeOpenAI();
+    const request = fileRequestOptions(client, { timeout: "fast" }, "openai");
+    expect(request.client).toBe(client);
+    expect(request.requestOptions).toBeUndefined();
+    const uploadRequest = fileRequestOptions(client, {}, "openai", true);
+    expect(client.withOptions).toHaveBeenCalledWith({ maxRetries: 0 });
+    expect(uploadRequest.requestOptions).toBeUndefined();
   });
 });

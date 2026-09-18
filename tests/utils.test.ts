@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  closeAsyncIterableQuietly,
   compactObject,
   flattenResponsesTools,
   getEnvironmentVariable,
@@ -144,6 +145,38 @@ describe("runtime utilities", () => {
     const iterator = mapped[Symbol.asyncIterator]();
     await iterator.return?.();
     expect(closed).toBe(1);
+  });
+
+  it("closes streams through aclose, cancel, abort, and destroy fallbacks", async () => {
+    let closed = 0;
+    await closeAsyncIterableQuietly({
+      async aclose() {
+        closed += 1;
+      },
+    } as AsyncIterable<unknown>);
+    await closeAsyncIterableQuietly({
+      async cancel() {
+        closed += 1;
+      },
+    } as AsyncIterable<unknown>);
+    await closeAsyncIterableQuietly({
+      controller: {
+        abort() {
+          closed += 1;
+        },
+      },
+      destroy() {
+        closed += 1;
+      },
+    } as AsyncIterable<unknown>);
+    await expect(
+      closeAsyncIterableQuietly({
+        async return() {
+          throw new Error("already closed");
+        },
+      } as AsyncIterable<unknown>),
+    ).resolves.toBeUndefined();
+    expect(closed).toBe(4);
   });
 
   it("closes the source iterable when an error-mapping stream is closed before the first read", async () => {

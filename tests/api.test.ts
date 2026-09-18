@@ -6,18 +6,23 @@ import {
   BaseProvider,
   cancelBatch,
   createBatch,
+  deleteFile,
+  downloadFile,
   embedding,
   imageGeneration,
-  listModels,
   listBatches,
+  listFiles,
+  listModels,
   moderation,
   registerProvider,
   rerank,
   responses,
   retrieveBatch,
   retrieveBatchResults,
+  retrieveFile,
   speech,
   transcription,
+  uploadFile,
 } from "../src/index.js";
 import type {
   Batch,
@@ -314,6 +319,24 @@ describe("stateless operation helpers", () => {
         { index: 0, relevanceScore: 1 },
         { index: 1, relevanceScore: 0.9 },
       ],
+    });
+  });
+
+  it("delegates Files helpers to the selected provider", async () => {
+    await expect(
+      uploadFile({ file: new Uint8Array([1]), provider: "api-fake" }),
+    ).rejects.toMatchObject({ name: "UnsupportedOperationError" });
+    await expect(listFiles({ provider: "api-fake" })).rejects.toMatchObject({
+      name: "UnsupportedOperationError",
+    });
+    await expect(retrieveFile({ fileId: "file-1", provider: "api-fake" })).rejects.toMatchObject({
+      name: "UnsupportedOperationError",
+    });
+    await expect(deleteFile({ fileId: "file-1", provider: "api-fake" })).rejects.toMatchObject({
+      name: "UnsupportedOperationError",
+    });
+    await expect(downloadFile({ fileId: "file-1", provider: "api-fake" })).rejects.toMatchObject({
+      name: "UnsupportedOperationError",
     });
   });
 });

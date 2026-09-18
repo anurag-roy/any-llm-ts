@@ -1,3 +1,7 @@
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Readable } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import Anthropic from "@anthropic-ai/sdk";
@@ -14,6 +18,16 @@ import {
   uploadFile,
 } from "../src/index.js";
 import { AnthropicProvider } from "../src/providers/anthropic.js";
+import {
+  convertFileDeleted,
+  convertFileMetadata,
+  convertFilePage,
+  createFileDownload,
+  fileRequestOptions,
+  rejectLegacyPagination,
+  validateFileId,
+  validatePositiveInteger,
+} from "../src/providers/anthropic-files.js";
 
 const META = {
   created_at: "2026-09-14T12:00:00Z",
@@ -34,12 +48,13 @@ interface FilesClient {
   upload: ReturnType<typeof vi.fn>;
 }
 
-function fakeAnthropic(
-  files: Partial<FilesClient> = {},
-): Anthropic & { withOptions: ReturnType<typeof vi.fn> } {
+function fakeAnthropic(files: Partial<FilesClient> = {}): Anthropic & {
+  defaultHeaders: Headers | Record<string, string>;
+  withOptions: ReturnType<typeof vi.fn>;
+} {
   const withOptions = vi.fn();
   const client = Object.assign(new Anthropic({ apiKey: "test" }), {
-    defaultHeaders: {},
+    defaultHeaders: {} as Headers | Record<string, string>,
     files: {
       delete: vi.fn(),
       download: vi.fn(),
@@ -244,5 +259,246 @@ describe("Anthropic Files API", () => {
     expect(listFiles).toEqual(expect.any(Function));
     expect(retrieveFile).toEqual(expect.any(Function));
     expect(deleteFile).toEqual(expect.any(Function));
+  });
+
+  it("accepts Blob, ArrayBuffer, stream, and path uploads and rejects invalid inputs", async () => {
+    const upload = vi.fn().mockResolvedValue(META);
+    const provider = new AnthropicProvider({ apiKey: "test" }, fakeAnthropic({ upload }));
+    const directory = await mkdtemp(join(tmpdir(), "any-llm-files-"));
+    const path = join(directory, "input.csv");
+    await writeFile(path, "a,b\n");
+
+    await provider.uploadFile({
+      file: new File([new Uint8Array([1])], "named.csv", { type: "text/csv" }),
+    });
+    await provider.uploadFile({
+      file: new Blob([new Uint8Array([1, 2])]),
+      filename: "bytes.bin",
+      mimeType: "application/octet-stream",
+    });
+    await provider.uploadFile({ file: new Uint8Array([3, 4]).buffer });
+    await provider.uploadFile({ file: Readable.from([Buffer.from("stream")]) });
+    await provider.uploadFile({ file: path, filename: "renamed.csv" });
+
+    await expect(
+      provider.uploadFile({ file: join(directory, "missing.csv") }),
+    ).rejects.toBeInstanceOf(InvalidRequestError);
+    await expect(provider.uploadFile({ file: {} as never })).rejects.toBeInstanceOf(
+      InvalidRequestError,
+    );
+    await expect(
+      provider.uploadFile({ expiresIn: 1.5, file: new Uint8Array([1]) }),
+    ).rejects.toBeInstanceOf(InvalidRequestError);
+    expect(upload).toHaveBeenCalledTimes(5);
+  });
+
+  it("lists by ids, maps fallback cursors, and forwards timeout headers", async () => {
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: [META, "skip", 1],
+        extra: "kept",
+        next_cursor: "cursor-b",
+        skip: () => undefined,
+      })
+      .mockResolvedValueOnce({ data: [META], nextCursor: "cursor-c" });
+    const retrieveMetadata = vi.fn().mockResolvedValue(META);
+    const client = fakeAnthropic({ list, retrieveMetadata });
+    client.defaultHeaders = new Headers({
+      "anthropic-beta": "beta-default",
+    });
+    const provider = new AnthropicProvider({ apiKey: "test" }, client);
+
+    const page = await provider.listFiles({
+      providerOptions: {
+        extra_headers: { "x-custom": "yes", "x-skip": 2 },
+        ids: ["file_123"],
+        max_retries: 2,
+        timeout: 1.5,
+      },
+    });
+    expect(page.data).toHaveLength(1);
+    expect(page.nextCursor).toBe("cursor-b");
+    expect(page.extra).toBe("kept");
+    expect(client.withOptions).toHaveBeenCalledWith({ maxRetries: 2 });
+    expect(list).toHaveBeenCalledWith(
+      expect.objectContaining({ ids: ["file_123"] }),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "anthropic-beta": "beta-default",
+          "x-custom": "yes",
+        }),
+        timeout: 1_500,
+      }),
+    );
+
+    const nextPage = await provider.listFiles({
+      providerOptions: { extraHeaders: new Headers({ "x-trace": "1" }) },
+    });
+    expect(nextPage.nextCursor).toBe("cursor-c");
+    expect(list.mock.calls[1]?.[1]).toEqual({
+      headers: { "x-trace": "1" },
+    });
+
+    await expect(
+      provider.listFiles({ providerOptions: { ids: ["file_123", 1] } }),
+    ).rejects.toBeInstanceOf(UnsupportedParameterError);
+    await expect(
+      provider.listFiles({ providerOptions: { unexpected: true } }),
+    ).rejects.toBeInstanceOf(UnsupportedParameterError);
+    await expect(
+      provider.retrieveFile({ fileId: "file_123", providerOptions: { timeout: "fast" } }),
+    ).resolves.toMatchObject({ id: "file_123" });
+  });
+
+  it("downloads split chunks, empty bodies, iterator.return, and asyncDispose", async () => {
+    const download = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new Uint8Array([1, 2, 3, 4, 5, 6, 7]));
+              controller.close();
+            },
+          }),
+          { headers: { "content-type": "application/octet-stream" }, status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const provider = new AnthropicProvider({ apiKey: "test" }, fakeAnthropic({ download }));
+
+    const split = await provider.downloadFile({ chunkSize: 3, fileId: "file_123" });
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of split) chunks.push(chunk);
+    await split.close();
+    expect(chunks.map((chunk) => [...chunk])).toEqual([[1, 2, 3], [4, 5, 6], [7]]);
+
+    const empty = await provider.downloadFile({ fileId: "file_123" });
+    const emptyChunks: Uint8Array[] = [];
+    for await (const chunk of empty) emptyChunks.push(chunk);
+    await empty.close();
+    expect(emptyChunks).toEqual([]);
+
+    await expect(
+      provider.downloadFile({ chunkSize: 0, fileId: "file_123" }),
+    ).rejects.toBeInstanceOf(InvalidRequestError);
+  });
+});
+
+describe("Anthropic file converters and request options", () => {
+  it("validates file IDs and positive integers", () => {
+    for (const fileId of ["", ".", "..", "file/id", "file\\id", " file "]) {
+      expect(() => validateFileId(fileId)).toThrow(InvalidRequestError);
+    }
+    validateFileId("file_123");
+    expect(() => validatePositiveInteger(0, "limit")).toThrow(InvalidRequestError);
+    expect(() => validatePositiveInteger(1.5, "limit")).toThrow(InvalidRequestError);
+    validatePositiveInteger(2, "limit");
+  });
+
+  it("maps metadata, pages, and deletions while skipping mismatched types", () => {
+    expect(
+      convertFileMetadata({
+        created_at: 1,
+        downloadable: "yes",
+        expires_at: "2026-01-01T00:00:00Z",
+        extra: { nested: true },
+        filename: "a.txt",
+        id: 123,
+        mime_type: "text/plain",
+        omitted: undefined,
+        purpose: "user",
+        size_bytes: "4",
+        status: "complete",
+      }),
+    ).toMatchObject({
+      expiresAt: "2026-01-01T00:00:00Z",
+      extra: { nested: true },
+      filename: "a.txt",
+      id: "",
+      mimeType: "text/plain",
+      purpose: "user",
+      status: "complete",
+    });
+    expect(convertFilePage({ data: "missing", extra: 1 }).data).toEqual([]);
+    expect(convertFilePage({ data: [{ id: "a" }], next_page: "page" }).nextCursor).toBe("page");
+    expect(convertFileDeleted({ deleted: true, extra: "kept", id: "file_123" })).toEqual({
+      deleted: true,
+      extra: "kept",
+      id: "file_123",
+    });
+    expect(convertFileDeleted({ deleted: "yes" }).deleted).toBeUndefined();
+  });
+
+  it("builds request options, rejects leftover keys, and closes downloads", async () => {
+    const client = fakeAnthropic();
+    client.defaultHeaders = { "anthropic-beta": "beta-default" };
+    const request = fileRequestOptions(
+      client,
+      {
+        betas: ["beta-option", 1],
+        extraHeaders: {
+          "anthropic-beta": "beta-extra",
+          "x-custom": "yes",
+          "x-skip": 2,
+        },
+        ignored: undefined,
+        maxRetries: 4,
+        timeout: 2,
+      },
+      "anthropic",
+    );
+    expect(client.withOptions).toHaveBeenCalledWith({ maxRetries: 4 });
+    expect(request.headers).toEqual({
+      "anthropic-beta": "beta-default,beta-extra,beta-option",
+      "x-custom": "yes",
+    });
+    expect(request.timeoutMs).toBe(2_000);
+
+    const unchanged = fileRequestOptions(
+      client,
+      { betas: "not-array", timeout: "fast" },
+      "anthropic",
+    );
+    expect(unchanged.client).toBe(client);
+    expect(unchanged.timeoutMs).toBeUndefined();
+    expect(() => fileRequestOptions(client, { unexpected: true }, "anthropic")).toThrow(
+      UnsupportedParameterError,
+    );
+    expect(() =>
+      rejectLegacyPagination({ "anthropic-beta": "files-api-2025-04-14" }, "anthropic"),
+    ).toThrow(UnsupportedParameterError);
+    expect(() =>
+      rejectLegacyPagination({ "anthropic-beta": "other-beta" }, "anthropic"),
+    ).not.toThrow();
+
+    let closed = 0;
+    const download = createFileDownload(
+      200,
+      { "content-type": "text/plain" },
+      {
+        async *[Symbol.asyncIterator]() {
+          try {
+            yield new Uint8Array([1, 2, 3]);
+          } finally {
+            closed += 1;
+          }
+        },
+      },
+    );
+    const iterator = download[Symbol.asyncIterator]();
+    await iterator.next();
+    await iterator.return?.();
+    expect(closed).toBe(1);
+
+    const disposable = createFileDownload(
+      204,
+      {},
+      (async function* () {
+        yield new Uint8Array([9]);
+      })(),
+    );
+    await disposable[Symbol.asyncDispose]();
   });
 });
