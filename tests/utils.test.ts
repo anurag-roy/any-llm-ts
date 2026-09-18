@@ -149,17 +149,32 @@ describe("runtime utilities", () => {
 
   it("closes streams through aclose, cancel, abort, and destroy fallbacks", async () => {
     let closed = 0;
+    const unusedIterator = {
+      next: async () => ({ done: true as const, value: undefined }),
+    };
+    // SAFETY: Provider streams expose aclose/cancel/controller outside AsyncIterable.
     await closeAsyncIterableQuietly({
+      [Symbol.asyncIterator]() {
+        return unusedIterator;
+      },
       async aclose() {
         closed += 1;
       },
     } as AsyncIterable<unknown>);
+    // SAFETY: Provider streams expose aclose/cancel/controller outside AsyncIterable.
     await closeAsyncIterableQuietly({
+      [Symbol.asyncIterator]() {
+        return unusedIterator;
+      },
       async cancel() {
         closed += 1;
       },
     } as AsyncIterable<unknown>);
+    // SAFETY: Provider streams expose aclose/cancel/controller outside AsyncIterable.
     await closeAsyncIterableQuietly({
+      [Symbol.asyncIterator]() {
+        return unusedIterator;
+      },
       controller: {
         abort() {
           closed += 1;
@@ -171,10 +186,13 @@ describe("runtime utilities", () => {
     } as AsyncIterable<unknown>);
     await expect(
       closeAsyncIterableQuietly({
+        [Symbol.asyncIterator]() {
+          return unusedIterator;
+        },
         async return() {
           throw new Error("already closed");
         },
-      } as AsyncIterable<unknown>),
+      }),
     ).resolves.toBeUndefined();
     expect(closed).toBe(4);
   });

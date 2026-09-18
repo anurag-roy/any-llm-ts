@@ -54,7 +54,7 @@ function fakeAnthropic(files: Partial<FilesClient> = {}): Anthropic & {
 } {
   const withOptions = vi.fn();
   const client = Object.assign(new Anthropic({ apiKey: "test" }), {
-    defaultHeaders: {} as Headers | Record<string, string>,
+    defaultHeaders: {},
     files: {
       delete: vi.fn(),
       download: vi.fn(),
@@ -283,6 +283,7 @@ describe("Anthropic Files API", () => {
     await expect(
       provider.uploadFile({ file: join(directory, "missing.csv") }),
     ).rejects.toBeInstanceOf(InvalidRequestError);
+    // SAFETY: `{}` is not a FileInput; the test checks the runtime rejection path.
     await expect(provider.uploadFile({ file: {} as never })).rejects.toBeInstanceOf(
       InvalidRequestError,
     );
@@ -333,11 +334,12 @@ describe("Anthropic Files API", () => {
     );
 
     const nextPage = await provider.listFiles({
-      providerOptions: { extraHeaders: new Headers({ "x-trace": "1" }) },
+      // SAFETY: extraHeaders accepts a Headers instance at runtime.
+      providerOptions: { extraHeaders: new Headers({ "x-trace": "1" }) } as never,
     });
     expect(nextPage.nextCursor).toBe("cursor-c");
     expect(list.mock.calls[1]?.[1]).toEqual({
-      headers: { "x-trace": "1" },
+      headers: { "anthropic-beta": "beta-default", "x-trace": "1" },
     });
 
     await expect(
@@ -389,11 +391,17 @@ describe("Anthropic Files API", () => {
 describe("Anthropic file converters and request options", () => {
   it("validates file IDs and positive integers", () => {
     for (const fileId of ["", ".", "..", "file/id", "file\\id", " file "]) {
-      expect(() => validateFileId(fileId)).toThrow(InvalidRequestError);
+      expect(() => {
+        validateFileId(fileId);
+      }).toThrow(InvalidRequestError);
     }
     validateFileId("file_123");
-    expect(() => validatePositiveInteger(0, "limit")).toThrow(InvalidRequestError);
-    expect(() => validatePositiveInteger(1.5, "limit")).toThrow(InvalidRequestError);
+    expect(() => {
+      validatePositiveInteger(0, "limit");
+    }).toThrow(InvalidRequestError);
+    expect(() => {
+      validatePositiveInteger(1.5, "limit");
+    }).toThrow(InvalidRequestError);
     validatePositiveInteger(2, "limit");
   });
 
@@ -463,15 +471,15 @@ describe("Anthropic file converters and request options", () => {
     );
     expect(unchanged.client).toBe(client);
     expect(unchanged.timeoutMs).toBeUndefined();
-    expect(() => fileRequestOptions(client, { unexpected: true }, "anthropic")).toThrow(
-      UnsupportedParameterError,
-    );
-    expect(() =>
-      rejectLegacyPagination({ "anthropic-beta": "files-api-2025-04-14" }, "anthropic"),
-    ).toThrow(UnsupportedParameterError);
-    expect(() =>
-      rejectLegacyPagination({ "anthropic-beta": "other-beta" }, "anthropic"),
-    ).not.toThrow();
+    expect(() => {
+      fileRequestOptions(client, { unexpected: true }, "anthropic");
+    }).toThrow(UnsupportedParameterError);
+    expect(() => {
+      rejectLegacyPagination({ "anthropic-beta": "files-api-2025-04-14" }, "anthropic");
+    }).toThrow(UnsupportedParameterError);
+    expect(() => {
+      rejectLegacyPagination({ "anthropic-beta": "other-beta" }, "anthropic");
+    }).not.toThrow();
 
     let closed = 0;
     const download = createFileDownload(

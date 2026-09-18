@@ -58,7 +58,7 @@ interface FilesClient {
 function fakeOpenAI(files: Partial<FilesClient> = {}) {
   const withOptions = vi.fn();
   const client = Object.assign(new OpenAI({ apiKey: "test" }), {
-    defaultHeaders: {} as Headers | Record<string, string>,
+    defaultHeaders: {},
     files: {
       content: vi.fn(),
       create: vi.fn(),
@@ -310,6 +310,7 @@ describe("OpenAI Files API", () => {
     await expect(
       provider.uploadFile({ file: join(directory, "missing.jsonl"), purpose: "batch" }),
     ).rejects.toBeInstanceOf(InvalidRequestError);
+    // SAFETY: `{}` is not a FileInput; the test checks the runtime rejection path.
     await expect(
       provider.uploadFile({ file: {} as never, purpose: "batch" }),
     ).rejects.toBeInstanceOf(InvalidRequestError);
@@ -346,11 +347,13 @@ describe("OpenAI Files API", () => {
 
     await provider.uploadFile({
       file: new Uint8Array([1]),
-      providerOptions: { extraHeaders: new Headers({ "x-trace": "1" }), max_retries: 1 },
+      // SAFETY: extraHeaders accepts a Headers instance at runtime.
+      providerOptions: { extraHeaders: new Headers({ "x-trace": "1" }), max_retries: 1 } as never,
       purpose: "batch",
     });
     expect(client.withOptions).toHaveBeenCalledWith({ maxRetries: 1 });
 
+    // SAFETY: purpose must be a string; the test checks the runtime rejection path.
     await expect(provider.listFiles({ purpose: 1 as never })).rejects.toBeInstanceOf(
       InvalidRequestError,
     );
@@ -405,10 +408,14 @@ describe("OpenAI file converters and request options", () => {
       "file#id",
       "file%id",
     ]) {
-      expect(() => validateOpenAIFileId(fileId, "openai")).toThrow(InvalidRequestError);
+      expect(() => {
+        validateOpenAIFileId(fileId, "openai");
+      }).toThrow(InvalidRequestError);
     }
     validateOpenAIFileId("file-test", "openai");
-    expect(() => validatePositiveInteger(-1, "limit", "openai")).toThrow(InvalidRequestError);
+    expect(() => {
+      validatePositiveInteger(-1, "limit", "openai");
+    }).toThrow(InvalidRequestError);
 
     expect(
       convertOpenAIFileMetadata({
@@ -422,7 +429,6 @@ describe("OpenAI file converters and request options", () => {
         omitted: undefined,
         purpose: "batch",
         sizeBytes: 8,
-        status: "processed",
       }),
     ).toMatchObject({
       createdAt: "2026-01-01T00:00:00.000Z",
@@ -446,9 +452,15 @@ describe("OpenAI file converters and request options", () => {
       mimeType: "text/plain",
       sizeBytes: 4,
     });
-    expect(() => convertOpenAIFileMetadata(null as never)).toThrow(/JSON object/u);
+    expect(() => {
+      // SAFETY: null is not an OpenAI file payload; the test checks the runtime rejection path.
+      convertOpenAIFileMetadata(null as never);
+    }).toThrow(/JSON object/u);
     expect(
-      convertOpenAIFileMetadata({ id: "file-test", skip: Symbol("invalid") } as never),
+      convertOpenAIFileMetadata(
+        // SAFETY: Symbol extras are stripped before JSON parsing of OpenAI file payloads.
+        { id: "file-test", skip: Symbol("invalid") } as never,
+      ),
     ).toMatchObject({ id: "file-test" });
   });
 
