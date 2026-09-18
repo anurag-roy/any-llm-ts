@@ -261,7 +261,7 @@
       "batch": false,
       "completion": true,
       "embedding": true,
-      "files": false,
+      "files": true,
       "imageGeneration": true,
       "listModels": true,
       "messages": true,
@@ -276,6 +276,7 @@
     "documentationUrl": "https://learn.microsoft.com/azure/foundry/openai/api-version-lifecycle",
     "envApiBase": "AZURE_OPENAI_ENDPOINT",
     "envApiKey": "AZURE_OPENAI_API_KEY",
+    "fileOperations": ["delete", "download", "list", "retrieve", "upload"],
     "name": "azureopenai",
     "requiresApiKey": true,
     "configuration": {
@@ -283,7 +284,6 @@
       "status": "unavailable"
     },
     "displayName": "Azure OpenAI",
-    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -1964,7 +1964,7 @@
       "batch": true,
       "completion": true,
       "embedding": true,
-      "files": false,
+      "files": true,
       "imageGeneration": true,
       "listModels": true,
       "messages": true,
@@ -1979,6 +1979,7 @@
     "documentationUrl": "https://platform.openai.com/docs/api-reference",
     "envApiBase": "OPENAI_BASE_URL",
     "envApiKey": "OPENAI_API_KEY",
+    "fileOperations": ["delete", "download", "list", "retrieve", "upload"],
     "name": "openai",
     "requiresApiKey": true,
     "configuration": {
@@ -2017,7 +2018,6 @@
       "version": 1
     },
     "displayName": "OpenAI",
-    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
