@@ -1,4 +1,4 @@
-import { parseJsonObject } from "../src/utils.js";
+import { isString, parseJsonObject } from "../src/utils.js";
 import OpenAI from "openai";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +8,7 @@ import {
   MissingApiKeyError,
   ProviderError,
   UnsupportedOperationError,
+  UnsupportedParameterError,
 } from "../src/index.js";
 import { AzureOpenAIProvider, OpenAIProvider } from "../src/providers/openai.js";
 import type { ChatCompletionChunk } from "../src/types.js";
@@ -103,6 +104,7 @@ afterEach(() => {
   delete process.env.AZURE_OPENAI_AD_TOKEN;
   delete process.env.AZURE_OPENAI_API_KEY;
   delete process.env.AZURE_OPENAI_ENDPOINT;
+  delete process.env.OPENAI_API_VERSION;
 });
 
 describe("OpenAI-compatible provider", () => {
@@ -191,7 +193,7 @@ describe("OpenAI-compatible provider", () => {
     });
   });
 
-  it("forwards reasoning, extraContent, and tool-result errors on the wire", async () => {
+  it("keeps google extraContent, drops other side-channels, and does not send is_error", async () => {
     const create = vi.fn().mockResolvedValue(completionResponse());
     const provider = new OpenAIProvider(
       config,
@@ -202,11 +204,18 @@ describe("OpenAI-compatible provider", () => {
       messages: [
         {
           content: null,
-          extraContent: { anthropic: { signature: "sig-abc" } },
+          extraContent: {
+            anthropic: { signature: "sig-abc" },
+            google: { thoughtSignature: "sig" },
+          },
           reasoning: "call the tool",
           role: "assistant",
           toolCalls: [
             {
+              extraContent: {
+                anthropic: { signature: "drop" },
+                google: { thoughtSignature: "tool-sig" },
+              },
               function: { arguments: "{}", name: "screenshot" },
               id: "toolu_1",
               type: "function",
@@ -224,12 +233,20 @@ describe("OpenAI-compatible provider", () => {
     });
     const request = parseJsonObject(create.mock.calls[0]?.[0]);
     expect(request.messages[0]).toMatchObject({
-      extra_content: { anthropic: { signature: "sig-abc" } },
+      extra_content: { google: { thoughtSignature: "sig" } },
       reasoning_content: "call the tool",
     });
-    expect(request.messages[1]).toMatchObject({
+    expect(request.messages[0]).not.toHaveProperty("is_error");
+    expect(request.messages[0].extra_content).not.toHaveProperty("anthropic");
+    expect(request.messages[0].tool_calls[0]).toEqual({
+      extra_content: { google: { thoughtSignature: "tool-sig" } },
+      function: { arguments: "{}", name: "screenshot" },
+      id: "toolu_1",
+      type: "function",
+    });
+    expect(request.messages[1]).toEqual({
       content: "partial capture:",
-      is_error: true,
+      role: "tool",
       tool_call_id: "toolu_1",
     });
   });
@@ -359,6 +376,61 @@ describe("OpenAI-compatible provider", () => {
       provider: "test-openai",
     });
     await expect(iterator.next()).rejects.toBeInstanceOf(ProviderError);
+  });
+
+  it("closes the SDK stream when a completion stream is closed before the first read", async () => {
+    const abort = vi.fn();
+    const sdkStream = {
+      controller: { abort },
+      async *[Symbol.asyncIterator]() {
+        yield {
+          choices: [{ delta: { content: "Hi" }, finish_reason: null, index: 0 }],
+          created: 1,
+          id: "chunk-1",
+          model: "model-a",
+        };
+      },
+    };
+    const create = vi.fn().mockResolvedValue(sdkStream);
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+    const result = await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "model-a",
+      stream: true,
+    });
+    // SAFETY: completion() is overloaded; stream: true yields an async iterable of chunks.
+    const iterator = (result as AsyncIterable<ChatCompletionChunk>)[Symbol.asyncIterator]();
+    await iterator.return?.();
+    expect(abort).toHaveBeenCalled();
+  });
+
+  it("closes the SDK stream when a Responses stream is closed before the first read", async () => {
+    const abort = vi.fn();
+    const sdkStream = {
+      controller: { abort },
+      async *[Symbol.asyncIterator]() {
+        yield { type: "response.created" };
+      },
+    };
+    const create = vi.fn().mockResolvedValue(sdkStream);
+    const provider = new OpenAIProvider(
+      { ...config, capabilities: { responses: true } },
+      {},
+      fakeClient({ responses: { create } }),
+    );
+    const result = await provider.responses({
+      input: "Hi",
+      model: "model-a",
+      stream: true,
+    });
+    // SAFETY: responses() is overloaded; stream: true yields an async iterable of events.
+    const iterator = (result as AsyncIterable<{ type: string }>)[Symbol.asyncIterator]();
+    await iterator.return?.();
+    expect(abort).toHaveBeenCalled();
   });
 
   it("preserves OpenAI-typed safety refusals", async () => {
@@ -802,22 +874,145 @@ describe("OpenAI-compatible provider", () => {
 });
 
 describe("Azure OpenAI provider", () => {
+  function captureFetch() {
+    const requests: URL[] = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const href = isString(input) ? input : input instanceof URL ? input.href : input.url;
+      requests.push(new URL(href));
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              finish_reason: "stop",
+              index: 0,
+              message: { content: "Hello from Azure", role: "assistant" },
+            },
+          ],
+          created: 1,
+          id: "chat-1",
+          model: "deployment",
+          object: "chat.completion",
+        }),
+        { headers: { "content-type": "application/json" }, status: 200 },
+      );
+    });
+    return { fetchMock, requests };
+  }
+
   it("requires an endpoint and API key", () => {
     expect(() => new AzureOpenAIProvider()).toThrow(MissingApiKeyError);
     process.env.AZURE_OPENAI_API_KEY = "secret";
     expect(() => new AzureOpenAIProvider()).toThrow(/requires apiBase/u);
   });
 
-  it("constructs an Azure SDK client with explicit configuration", () => {
+  it("constructs a generic OpenAI client at /openai/v1/", async () => {
+    const { fetchMock, requests } = captureFetch();
     const provider = new AzureOpenAIProvider({
       apiBase: "https://resource.openai.azure.com",
       apiKey: "secret",
-      apiVersion: "2025-01-01-preview",
+      clientOptions: { fetch: fetchMock, maxRetries: 0 },
     });
     expect(provider.metadata).toMatchObject({
       apiBase: "https://resource.openai.azure.com",
+      documentationUrl: "https://learn.microsoft.com/azure/foundry/openai/api-version-lifecycle",
       name: "azureopenai",
     });
+    await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "deployment",
+    });
+    expect(requests[0]?.origin).toBe("https://resource.openai.azure.com");
+    expect(requests[0]?.pathname).toBe("/openai/v1/chat/completions");
+  });
+
+  it("normalizes endpoints that already include /openai/v1", async () => {
+    const { fetchMock, requests } = captureFetch();
+    const provider = new AzureOpenAIProvider({
+      apiBase: "https://resource.openai.azure.com/openai/v1/",
+      apiKey: "secret",
+      clientOptions: { fetch: fetchMock, maxRetries: 0 },
+    });
+    await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "deployment",
+    });
+    expect(requests[0]?.pathname).toBe("/openai/v1/chat/completions");
+  });
+
+  it("rejects dated apiVersion and azureDeployment with migration guidance", () => {
+    expect(
+      () =>
+        new AzureOpenAIProvider({
+          apiBase: "https://resource.openai.azure.com",
+          apiKey: "secret",
+          apiVersion: "2025-01-01-preview",
+        }),
+    ).toThrow(UnsupportedParameterError);
+    expect(
+      () =>
+        new AzureOpenAIProvider({
+          apiBase: "https://resource.openai.azure.com",
+          apiKey: "secret",
+          apiVersion: "2025-01-01-preview",
+        }),
+    ).toThrow(/Remove the dated version/u);
+    expect(
+      () =>
+        new AzureOpenAIProvider({
+          apiBase: "https://resource.openai.azure.com",
+          apiKey: "secret",
+          clientOptions: { azureDeployment: "old" },
+        }),
+    ).toThrow(/Pass your Azure deployment name as `model`/u);
+  });
+
+  it("accepts apiVersion v1 and ignores a dated OPENAI_API_VERSION", () => {
+    process.env.OPENAI_API_VERSION = "2025-03-01-preview";
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    expect(
+      () =>
+        new AzureOpenAIProvider({
+          apiBase: "https://resource.openai.azure.com",
+          apiKey: "secret",
+          apiVersion: "v1",
+        }),
+    ).not.toThrow();
+    expect(warn).toHaveBeenCalledWith(
+      "Ignoring OPENAI_API_VERSION=2025-03-01-preview: the azureopenai provider always uses /openai/v1/.",
+    );
+    warn.mockRestore();
+  });
+
+  it("treats apiKey, azureADToken, and azureADTokenProvider as mutually exclusive", () => {
+    expect(
+      () =>
+        new AzureOpenAIProvider({
+          apiBase: "https://resource.openai.azure.com",
+          apiKey: "secret",
+          clientOptions: { azureADToken: "token" },
+        }),
+    ).toThrow(/mutually exclusive/u);
+    expect(
+      () =>
+        new AzureOpenAIProvider({
+          apiBase: "https://resource.openai.azure.com",
+          clientOptions: {
+            azureADToken: "token",
+            azureADTokenProvider: async () => "other-token",
+          },
+        }),
+    ).toThrow(/mutually exclusive/u);
+  });
+
+  it("does not fall back to environment credentials after an empty explicit apiKey", () => {
+    process.env.AZURE_OPENAI_API_KEY = "environment-key";
+    expect(
+      () =>
+        new AzureOpenAIProvider({
+          apiBase: "https://resource.openai.azure.com",
+          apiKey: "",
+        }),
+    ).toThrow(MissingApiKeyError);
   });
 
   it("accepts an Entra token or token provider instead of an API key", () => {
@@ -833,5 +1028,34 @@ describe("Azure OpenAI provider", () => {
     expect(
       () => new AzureOpenAIProvider({ apiBase: "https://resource.openai.azure.com" }),
     ).not.toThrow();
+  });
+
+  it("adds api-version=preview on media requests unless the caller set one", async () => {
+    const requests: URL[] = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const href = isString(input) ? input : input instanceof URL ? input.href : input.url;
+      requests.push(new URL(href));
+      return new Response(JSON.stringify({ created: 1, data: [{ b64_json: "aW1hZ2U=" }] }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      });
+    });
+    const provider = new AzureOpenAIProvider({
+      apiBase: "https://resource.openai.azure.com",
+      apiKey: "secret",
+      clientOptions: { fetch: fetchMock, maxRetries: 0 },
+    });
+    await provider.imageGeneration({ model: "image-deployment", prompt: "A cat" });
+    expect(requests[0]?.pathname).toBe("/openai/v1/images/generations");
+    expect(requests[0]?.searchParams.get("api-version")).toBe("preview");
+
+    requests.length = 0;
+    await provider.imageGeneration({
+      model: "image-deployment",
+      prompt: "A cat",
+      providerOptions: { extra_query: { "api-version": "v1", request: "yes" } },
+    });
+    expect(requests[0]?.searchParams.get("api-version")).toBe("v1");
+    expect(requests[0]?.searchParams.get("request")).toBe("yes");
   });
 });

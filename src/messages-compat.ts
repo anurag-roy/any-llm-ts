@@ -6,10 +6,12 @@ import { isNumber, isObject, isString } from "./utils.js";
 import { InvalidRequestError } from "./errors.js";
 import { normalizeOutputConfig } from "./structured-output.js";
 import type {
+  CacheCreationTokenDetails,
   ChatCompletion,
   ChatCompletionChunk,
   ChatMessage,
   CompletionParams,
+  CompletionUsage,
   ContentBlockStartEvent,
   ContentBlockStopEvent,
   FileContentPart,
@@ -23,9 +25,11 @@ import type {
   MessagesInputContentBlock,
   MessagesParams,
   MessageUsage,
+  PromptTokensDetails,
   TextContentPart,
   ToolCallDelta,
 } from "./types.js";
+import { produceClosingAsyncIterable } from "./utils.js";
 
 function systemText(system: MessagesParams["system"]): string | undefined {
   if (system === undefined || isString(system)) return system;
@@ -105,10 +109,15 @@ function convertToolResultContent(
   }
   const textParts: string[] = [];
   const extraParts: MessageContentPart[] = [];
+  let afterRenderedBlock = false;
   for (const block of content) {
     if (!isObject(block)) continue;
     const record = parseJsonObject(block);
     if (record.type === "text" && isString(record.text)) {
+      if (afterRenderedBlock && record.text.length > 0) {
+        textParts.push("\n");
+        afterRenderedBlock = false;
+      }
       textParts.push(record.text);
       continue;
     }
@@ -116,9 +125,50 @@ function convertToolResultContent(
       extraParts.push(convertImageBlock(record));
       continue;
     }
-    if (record.type === "document") extraParts.push(convertDocumentBlock(record));
+    if (record.type === "document") {
+      extraParts.push(convertDocumentBlock(record));
+      continue;
+    }
+    const rendered = renderToolResultBlockAsText(record);
+    if (rendered === undefined) continue;
+    if (textParts.some((part) => part.length > 0)) textParts.push("\n");
+    textParts.push(rendered);
+    afterRenderedBlock = true;
   }
   return [textParts.join(""), extraParts];
+}
+
+function renderToolResultBlockAsText(block: JsonObject): string | undefined {
+  if (block.type === "search_result") {
+    const content = Array.isArray(block.content) ? block.content : [];
+    const body = content
+      .flatMap((part): string[] => {
+        if (!isObject(part)) return [];
+        const record = parseJsonObject(part);
+        return record.type === "text" && isString(record.text) ? [record.text] : [];
+      })
+      .join("");
+    const title = isString(block.title) ? block.title : "";
+    const source = isString(block.source) ? block.source : "";
+    const rendered = [title, source, body].filter((part) => part.length > 0).join("\n");
+    return rendered.length > 0 ? rendered : undefined;
+  }
+  if (block.type === "tool_reference") {
+    const name = isString(block.tool_name)
+      ? block.tool_name
+      : isString(block.toolName)
+        ? block.toolName
+        : "";
+    return `Tool reference: ${name}`;
+  }
+  if (block.type === "browser_state") {
+    const rendered: JsonObject = {};
+    if ("tabs" in block) rendered.tabs = block.tabs;
+    if ("state_changes" in block) rendered.state_changes = block.state_changes;
+    else if ("stateChanges" in block) rendered.state_changes = block.stateChanges;
+    return JSON.stringify(rendered);
+  }
+  return undefined;
 }
 
 function assistantMessage(content: MessagesInputContentBlock[]): ChatMessage {
@@ -176,14 +226,18 @@ function userMessages(content: MessagesInputContentBlock[]): ChatMessage[] {
   for (const block of content) {
     if (block.type === "tool_result" && "toolUseId" in block && isString(block.toolUseId)) {
       flushUser();
-      const [toolText, extraParts] = convertToolResultContent(
+      const [convertedText, extraParts] = convertToolResultContent(
         "content" in block ? block.content : "",
       );
+      let toolText = convertedText;
+      if (block.isError === true) {
+        if (toolText.length === 0) toolText = "Error";
+        else if (!toolText.startsWith("Error:")) toolText = `Error: ${toolText}`;
+      }
       messages.push({
         content: toolText,
         role: "tool",
         toolCallId: block.toolUseId,
-        ...includeWhen(block.isError === true, { isError: true }),
       });
       heldParts.push(...extraParts);
       continue;
@@ -307,22 +361,71 @@ export function messagesToCompletionParams(params: MessagesParams): CompletionPa
 function stopReason(reason: ChatCompletion["choices"][number]["finishReason"]): MessageStopReason {
   if (reason === "length") return "max_tokens";
   if (reason === "tool_calls" || reason === "function_call") return "tool_use";
+  if (reason === "content_filter") return "refusal";
   return "end_turn";
 }
 
-function cachedTokens(details: JsonObject | undefined): number {
+function refusalText(value: string | null | undefined): string | undefined {
+  return isString(value) && value.length > 0 ? value : undefined;
+}
+
+function cachedTokensFromDetails(details: PromptTokensDetails | undefined): number | undefined {
   const value = details?.cachedTokens ?? details?.cached_tokens;
-  return isNumber(value) ? value : 0;
+  return isNumber(value) ? value : undefined;
+}
+
+function cacheWriteTokensFromDetails(details: PromptTokensDetails | undefined): number | undefined {
+  const value = details?.cacheWriteTokens ?? details?.cache_write_tokens;
+  return isNumber(value) ? value : undefined;
+}
+
+function cacheCreationFromDetails(
+  details: PromptTokensDetails | undefined,
+): CacheCreationTokenDetails | undefined {
+  const ttlValue = details?.cacheCreationTokenDetails ?? details?.cache_creation_token_details;
+  if (!isObject(ttlValue) || Array.isArray(ttlValue)) return undefined;
+  const ttl = parseJsonObject(ttlValue);
+  const ephemeral5m = ttl.ephemeral5mInputTokens ?? ttl.ephemeral_5m_input_tokens;
+  const ephemeral1h = ttl.ephemeral1hInputTokens ?? ttl.ephemeral_1h_input_tokens;
+  if (!isNumber(ephemeral5m) || !isNumber(ephemeral1h)) return undefined;
+  return { ephemeral1hInputTokens: ephemeral1h, ephemeral5mInputTokens: ephemeral5m };
+}
+
+export function splitCachedInputTokens(
+  promptTokens: number,
+  cachedTokens: number | undefined,
+  cacheWriteTokens?: number,
+): [number, number | undefined] {
+  const remaining = promptTokens - Math.min(Math.max(cacheWriteTokens ?? 0, 0), promptTokens);
+  const cached = Math.min(Math.max(cachedTokens ?? 0, 0), remaining);
+  const cacheRead =
+    cachedTokens !== undefined && (cachedTokens === 0 || cached > 0) ? cached : undefined;
+  return [remaining - cached, cacheRead];
 }
 
 function usageFromCompletion(completion: ChatCompletion): MessageUsage {
   const usage = completion.usage;
   if (usage === undefined) return { inputTokens: 0, outputTokens: 0 };
-  const cached = Math.min(Math.max(cachedTokens(usage.promptTokensDetails), 0), usage.promptTokens);
+  return messageUsageFromCompletionUsage(usage);
+}
+
+function messageUsageFromCompletionUsage(
+  usage: CompletionUsage,
+  outputTokens?: number,
+): MessageUsage {
+  const [inputTokens, cacheRead] = splitCachedInputTokens(
+    usage.promptTokens,
+    cachedTokensFromDetails(usage.promptTokensDetails),
+    cacheWriteTokensFromDetails(usage.promptTokensDetails),
+  );
+  const cacheWrite = cacheWriteTokensFromDetails(usage.promptTokensDetails);
+  const cacheCreation = cacheCreationFromDetails(usage.promptTokensDetails);
   return {
-    inputTokens: usage.promptTokens - cached,
-    outputTokens: usage.completionTokens,
-    ...includeWhen(!(cached === 0), { cacheReadInputTokens: cached }),
+    inputTokens,
+    outputTokens: outputTokens ?? usage.completionTokens,
+    ...includeWhen(!(cacheWrite === undefined), { cacheCreationInputTokens: cacheWrite }),
+    ...includeWhen(!(cacheRead === undefined), { cacheReadInputTokens: cacheRead }),
+    ...includeWhen(!(cacheCreation === undefined), { cacheCreation }),
   };
 }
 
@@ -355,6 +458,8 @@ export function completionToMessageResponse(completion: ChatCompletion): Message
   }
   const text = choice === undefined ? "" : textFromChatContent(choice.message.content);
   if (text.length > 0) content.push({ text, type: "text" });
+  const refusal = refusalText(choice?.message.refusal);
+  if (refusal !== undefined) content.push({ text: refusal, type: "text" });
   for (const call of choice?.message.toolCalls ?? []) {
     content.push({
       id: call.id,
@@ -369,7 +474,7 @@ export function completionToMessageResponse(completion: ChatCompletion): Message
     id: completion.id,
     model: completion.model,
     role: "assistant",
-    stopReason: stopReason(choice?.finishReason ?? null),
+    stopReason: refusal === undefined ? stopReason(choice?.finishReason ?? null) : "refusal",
     type: "message",
     usage: usageFromCompletion(completion),
     raw: completion,
@@ -378,8 +483,10 @@ export function completionToMessageResponse(completion: ChatCompletion): Message
 
 interface StreamState {
   blockIndex: number;
-  blockType?: "text" | "thinking" | "tool_use";
-  cacheReadInputTokens: number;
+  blockType?: "refusal" | "text" | "thinking" | "tool_use";
+  cacheCreation?: CacheCreationTokenDetails;
+  cacheCreationInputTokens?: number;
+  cacheReadInputTokens?: number;
   inputTokens: number;
   outputTokens: number;
   started: boolean;
@@ -446,9 +553,14 @@ function toolDeltaEvents(state: StreamState, call: ToolCallDelta): MessageStream
 function chunkEvents(chunk: ChatCompletionChunk, state: StreamState): MessageStreamEvent[] {
   const events: MessageStreamEvent[] = [];
   if (chunk.usage !== undefined) {
-    state.inputTokens = chunk.usage.promptTokens;
-    state.outputTokens = chunk.usage.completionTokens;
-    state.cacheReadInputTokens = cachedTokens(chunk.usage.promptTokensDetails);
+    if (chunk.usage.promptTokens) state.inputTokens = chunk.usage.promptTokens;
+    if (chunk.usage.completionTokens) state.outputTokens = chunk.usage.completionTokens;
+    const cached = cachedTokensFromDetails(chunk.usage.promptTokensDetails);
+    if (cached !== undefined) state.cacheReadInputTokens = cached;
+    const cacheWrite = cacheWriteTokensFromDetails(chunk.usage.promptTokensDetails);
+    if (cacheWrite !== undefined) state.cacheCreationInputTokens = cacheWrite;
+    const cacheCreation = cacheCreationFromDetails(chunk.usage.promptTokensDetails);
+    if (cacheCreation !== undefined) state.cacheCreation = cacheCreation;
   }
   if (!state.started) {
     state.started = true;
@@ -460,7 +572,25 @@ function chunkEvents(chunk: ChatCompletionChunk, state: StreamState): MessageStr
         role: "assistant",
         stopReason: null,
         type: "message",
-        usage: { inputTokens: state.inputTokens, outputTokens: 0 },
+        usage: messageUsageFromCompletionUsage(
+          {
+            completionTokens: 0,
+            promptTokens: state.inputTokens,
+            promptTokensDetails: {
+              ...includeWhen(!(state.cacheReadInputTokens === undefined), {
+                cachedTokens: state.cacheReadInputTokens,
+              }),
+              ...includeWhen(!(state.cacheCreationInputTokens === undefined), {
+                cacheWriteTokens: state.cacheCreationInputTokens,
+              }),
+              ...includeWhen(!(state.cacheCreation === undefined), {
+                cacheCreationTokenDetails: state.cacheCreation,
+              }),
+            },
+            totalTokens: state.inputTokens,
+          },
+          0,
+        ),
       },
       type: "message_start",
     });
@@ -485,29 +615,51 @@ function chunkEvents(chunk: ChatCompletionChunk, state: StreamState): MessageStr
       });
     }
   }
+  const refusal = refusalText(choice.delta.refusal);
+  if (refusal !== undefined) {
+    state.stopReason = "refusal";
+    events.push(...openBlock(state, "refusal", { text: "", type: "text" }));
+    events.push({
+      delta: { text: refusal, type: "text_delta" },
+      index: state.blockIndex,
+      type: "content_block_delta",
+    });
+  }
   for (const call of choice.delta.toolCalls ?? []) events.push(...toolDeltaEvents(state, call));
   if (choice.finishReason !== null) {
     events.push(...closeBlock(state));
-    state.stopReason = stopReason(choice.finishReason);
+    if (state.stopReason !== "refusal") state.stopReason = stopReason(choice.finishReason);
   }
   return events;
 }
 
 function finalUsage(state: StreamState): MessageUsage {
-  const cached = Math.min(Math.max(state.cacheReadInputTokens, 0), state.inputTokens);
-  return {
-    inputTokens: state.inputTokens - cached,
-    outputTokens: state.outputTokens,
-    ...includeWhen(!(cached === 0), { cacheReadInputTokens: cached }),
-  };
+  return messageUsageFromCompletionUsage(
+    {
+      completionTokens: state.outputTokens,
+      promptTokens: state.inputTokens,
+      promptTokensDetails: {
+        ...includeWhen(!(state.cacheReadInputTokens === undefined), {
+          cachedTokens: state.cacheReadInputTokens,
+        }),
+        ...includeWhen(!(state.cacheCreationInputTokens === undefined), {
+          cacheWriteTokens: state.cacheCreationInputTokens,
+        }),
+        ...includeWhen(!(state.cacheCreation === undefined), {
+          cacheCreationTokenDetails: state.cacheCreation,
+        }),
+      },
+      totalTokens: state.inputTokens + state.outputTokens,
+    },
+    state.outputTokens,
+  );
 }
 
-export async function* completionStreamToMessageEvents(
+async function* messageEventsFromCompletionStream(
   stream: AsyncIterable<ChatCompletionChunk>,
 ): AsyncIterable<MessageStreamEvent> {
   const state: StreamState = {
     blockIndex: -1,
-    cacheReadInputTokens: 0,
     inputTokens: 0,
     outputTokens: 0,
     started: false,
@@ -538,4 +690,10 @@ export async function* completionStreamToMessageEvents(
     yield delta;
     yield { type: "message_stop" };
   }
+}
+
+export function completionStreamToMessageEvents(
+  stream: AsyncIterable<ChatCompletionChunk>,
+): AsyncIterable<MessageStreamEvent> {
+  return produceClosingAsyncIterable(stream, messageEventsFromCompletionStream);
 }

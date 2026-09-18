@@ -4,12 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  BatchNotCompleteError,
-  OtariProvider,
-  RateLimitError,
-  UnsupportedParameterError,
-} from "../src/index.js";
+import { BatchNotCompleteError, OtariProvider, RateLimitError } from "../src/index.js";
 import type { ChatCompletionChunk, OtariClientLike } from "../src/index.js";
 
 function fakeClient(methods: Partial<OtariClientLike>): OtariClientLike {
@@ -65,13 +60,64 @@ describe("Otari provider", () => {
       }),
     ).resolves.toMatchObject({ id: "chat-1" });
     expect(fetch).toHaveBeenCalledWith(
-      "https://api.otari.ai/v1/chat/completions",
+      "https://api.otari.ai/api/v1/chat/completions",
       expect.objectContaining({
         headers: expect.objectContaining({
           Authorization: "Bearer platform-token",
         }),
         method: "POST",
       }),
+    );
+  });
+
+  it("rejects apiBase values that include an API path, query, or fragment", () => {
+    const fetch = vi.fn();
+    for (const apiBase of [
+      "https://self.example.com/v1",
+      "https://self.example.com/v1/",
+      "https://self.example.com/api/v1",
+      "https://self.example.com/api/v1/",
+      "https://self.example.com/v1?x=1",
+    ]) {
+      expect(
+        () => new OtariProvider({ apiBase, clientOptions: { fetch, platformToken: "token" } }),
+      ).toThrow(/api_base must be the gateway origin, without the \/(?:api\/)?v1 path prefix/u);
+    }
+    expect(
+      () =>
+        new OtariProvider({
+          apiBase: "https://self.example.com?x=1",
+          clientOptions: { fetch, platformToken: "token" },
+        }),
+    ).toThrow(/without a query string or fragment/u);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("accepts a gateway origin and lets an explicit apiBase win over the environment", async () => {
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(completionResponse()), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      }),
+    );
+    const previous = process.env.OTARI_API_BASE;
+    process.env.OTARI_API_BASE = "https://ignored.example.com/v1";
+    try {
+      const provider = new OtariProvider({
+        apiBase: "https://self.example.com/",
+        clientOptions: { fetch, platformToken: "token" },
+      });
+      await provider.completion({
+        messages: [{ content: "hello", role: "user" }],
+        model: "openai:model-a",
+      });
+    } finally {
+      if (previous === undefined) delete process.env.OTARI_API_BASE;
+      else process.env.OTARI_API_BASE = previous;
+    }
+    expect(fetch).toHaveBeenCalledWith(
+      "https://self.example.com/api/v1/chat/completions",
+      expect.anything(),
     );
   });
 
@@ -192,7 +238,7 @@ describe("Otari provider", () => {
       throw new Error(`Unexpected fetch: ${url}`);
     });
     const provider = new OtariProvider({
-      apiBase: "https://otari.example/v1/",
+      apiBase: "https://otari.example",
       apiKey: "gateway-key",
       clientOptions: { defaultHeaders: { "X-Test": "yes" }, fetch },
     });
@@ -433,7 +479,16 @@ describe("Otari provider", () => {
         messages: [{ content: "hello", role: "user" }],
         model: "anthropic:claude",
       }),
-    ).rejects.toBeInstanceOf(UnsupportedParameterError);
+    ).resolves.toMatchObject({
+      stopReason: "end_turn",
+      usage: { inputTokens: 2 },
+    });
+    expect(message).toHaveBeenCalledWith(
+      expect.objectContaining({
+        container: "container_123",
+        max_tokens: 10,
+      }),
+    );
   });
 
   it("normalizes embeddings, models, images, audio, moderation, and reranking", async () => {

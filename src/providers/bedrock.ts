@@ -52,6 +52,7 @@ import {
   compactObject,
   getEnvironmentVariable,
   isAsyncIterable,
+  iterateClosing,
   timeoutAbortOptions,
   unixTimestamp,
 } from "../utils.js";
@@ -80,6 +81,7 @@ const bedrockCapabilities: ProviderCapabilities = {
   batch: true,
   completion: true,
   embedding: true,
+  files: false,
   imageGeneration: false,
   listModels: true,
   messages: true,
@@ -627,7 +629,7 @@ async function* normalizeStream<Event>(
     model,
     toolIndices: new Map<number, number>(),
   };
-  for await (const event of stream) {
+  for await (const event of iterateClosing(stream)) {
     const chunk = streamChunk(event, state);
     if (chunk !== undefined) yield chunk;
   }

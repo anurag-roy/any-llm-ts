@@ -127,6 +127,8 @@ describe("AnyLLM registry and facade", () => {
       reason: "provider_specific_contract_pending",
       status: "unavailable",
     });
+    expect(AnyLLM.getProviderDescriptor("openai")).toEqual(openai);
+    expect(AnyLLM.getAllProviderDescriptors().length).toBe(descriptors.length);
   });
 
   it("normalizes provider names and exposes the selected provider", () => {
@@ -348,6 +350,19 @@ describe("AnyLLM registry and facade", () => {
     await expect(
       llm.rerank({ documents: ["document"], model: "rerank", query: "query" }),
     ).rejects.toBeInstanceOf(UnsupportedOperationError);
+    await expect(llm.uploadFile({ file: new Uint8Array([1]) })).rejects.toBeInstanceOf(
+      UnsupportedOperationError,
+    );
+    await expect(llm.listFiles()).rejects.toBeInstanceOf(UnsupportedOperationError);
+    await expect(llm.retrieveFile({ fileId: "file-1" })).rejects.toBeInstanceOf(
+      UnsupportedOperationError,
+    );
+    await expect(llm.deleteFile({ fileId: "file-1" })).rejects.toBeInstanceOf(
+      UnsupportedOperationError,
+    );
+    await expect(llm.downloadFile({ fileId: "file-1" })).rejects.toBeInstanceOf(
+      UnsupportedOperationError,
+    );
     await expect(
       llm.messages({
         maxTokens: 10,

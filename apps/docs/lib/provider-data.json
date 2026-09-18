@@ -6,6 +6,7 @@
       "batch": true,
       "completion": true,
       "embedding": false,
+      "files": true,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -20,6 +21,7 @@
     "documentationUrl": "https://docs.anthropic.com/en/api/",
     "envApiBase": "ANTHROPIC_BASE_URL",
     "envApiKey": "ANTHROPIC_API_KEY",
+    "fileOperations": ["delete", "download", "list", "retrieve", "upload"],
     "name": "anthropic",
     "requiresApiKey": true,
     "configuration": {
@@ -90,6 +92,7 @@
       "batch": false,
       "completion": true,
       "embedding": false,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -112,6 +115,7 @@
       "status": "unavailable"
     },
     "displayName": "Atlascloud",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -145,6 +149,7 @@
       "batch": false,
       "completion": true,
       "embedding": true,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -166,6 +171,7 @@
       "status": "unavailable"
     },
     "displayName": "Azure",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "unsupported",
@@ -199,6 +205,7 @@
       "batch": false,
       "completion": true,
       "embedding": false,
+      "files": false,
       "imageGeneration": false,
       "listModels": false,
       "messages": true,
@@ -220,6 +227,7 @@
       "status": "unavailable"
     },
     "displayName": "Azure Anthropic",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -253,6 +261,7 @@
       "batch": false,
       "completion": true,
       "embedding": true,
+      "files": true,
       "imageGeneration": true,
       "listModels": true,
       "messages": true,
@@ -264,9 +273,10 @@
       "streaming": true,
       "vision": true
     },
-    "documentationUrl": "https://learn.microsoft.com/azure/ai-foundry/openai/",
+    "documentationUrl": "https://learn.microsoft.com/azure/foundry/openai/api-version-lifecycle",
     "envApiBase": "AZURE_OPENAI_ENDPOINT",
     "envApiKey": "AZURE_OPENAI_API_KEY",
+    "fileOperations": ["delete", "download", "list", "retrieve", "upload"],
     "name": "azureopenai",
     "requiresApiKey": true,
     "configuration": {
@@ -307,6 +317,7 @@
       "batch": true,
       "completion": true,
       "embedding": true,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -328,6 +339,7 @@
       "status": "unavailable"
     },
     "displayName": "Amazon Bedrock",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "unsupported",
@@ -361,6 +373,7 @@
       "batch": false,
       "completion": true,
       "embedding": false,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -383,6 +396,7 @@
       "status": "unavailable"
     },
     "displayName": "Cascadia",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -416,6 +430,7 @@
       "batch": false,
       "completion": true,
       "embedding": false,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -438,6 +453,7 @@
       "status": "unavailable"
     },
     "displayName": "Cerebras",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -472,6 +488,7 @@
       "batch": false,
       "completion": true,
       "embedding": true,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -493,6 +510,7 @@
       "status": "unavailable"
     },
     "displayName": "Cohere",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -526,6 +544,7 @@
       "batch": false,
       "completion": true,
       "embedding": true,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -548,6 +567,7 @@
       "status": "unavailable"
     },
     "displayName": "Dashscope",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -581,6 +601,7 @@
       "batch": false,
       "completion": true,
       "embedding": true,
+      "files": false,
       "imageGeneration": false,
       "listModels": false,
       "messages": true,
@@ -602,6 +623,7 @@
       "status": "unavailable"
     },
     "displayName": "Databricks",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -635,6 +657,7 @@
       "batch": false,
       "completion": true,
       "embedding": true,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -657,6 +680,7 @@
       "status": "unavailable"
     },
     "displayName": "Deepinfra",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -690,6 +714,7 @@
       "batch": false,
       "completion": true,
       "embedding": false,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -712,6 +737,7 @@
       "status": "unavailable"
     },
     "displayName": "Deepseek",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -745,6 +771,7 @@
       "batch": false,
       "completion": true,
       "embedding": true,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -767,6 +794,7 @@
       "status": "unavailable"
     },
     "displayName": "Edenai",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -800,6 +828,7 @@
       "batch": false,
       "completion": true,
       "embedding": false,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -822,6 +851,7 @@
       "status": "unavailable"
     },
     "displayName": "Fireworks",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -855,6 +885,7 @@
       "batch": true,
       "completion": true,
       "embedding": true,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -876,6 +907,7 @@
       "status": "unavailable"
     },
     "displayName": "Google Gemini",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "unsupported",
@@ -910,6 +942,7 @@
       "batch": false,
       "completion": true,
       "embedding": true,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -931,6 +964,7 @@
       "status": "unavailable"
     },
     "displayName": "GitHub Models",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -964,6 +998,7 @@
       "batch": false,
       "completion": true,
       "embedding": false,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -986,6 +1021,7 @@
       "status": "unavailable"
     },
     "displayName": "Gmi",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -1019,6 +1055,7 @@
       "batch": false,
       "completion": true,
       "embedding": false,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -1041,6 +1078,7 @@
       "status": "unavailable"
     },
     "displayName": "Groq",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -1074,6 +1112,7 @@
       "batch": false,
       "completion": true,
       "embedding": false,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -1095,6 +1134,7 @@
       "status": "unavailable"
     },
     "displayName": "Hugging Face",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "unsupported",
@@ -1128,6 +1168,7 @@
       "batch": false,
       "completion": true,
       "embedding": false,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -1150,6 +1191,7 @@
       "status": "unavailable"
     },
     "displayName": "Inception",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -1183,6 +1225,7 @@
       "batch": false,
       "completion": true,
       "embedding": false,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -1205,6 +1248,7 @@
       "status": "unavailable"
     },
     "displayName": "Kenari",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -1238,6 +1282,7 @@
       "batch": false,
       "completion": true,
       "embedding": false,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -1260,6 +1305,7 @@
       "status": "unavailable"
     },
     "displayName": "Llama",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -1293,6 +1339,7 @@
       "batch": false,
       "completion": true,
       "embedding": true,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -1314,6 +1361,7 @@
       "status": "unavailable"
     },
     "displayName": "Llamacpp",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -1347,6 +1395,7 @@
       "batch": false,
       "completion": true,
       "embedding": false,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -1368,6 +1417,7 @@
       "status": "unavailable"
     },
     "displayName": "Llamafile",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -1401,6 +1451,7 @@
       "batch": false,
       "completion": true,
       "embedding": true,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -1423,6 +1474,7 @@
       "status": "unavailable"
     },
     "displayName": "LM Studio",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -1457,6 +1509,7 @@
       "batch": false,
       "completion": true,
       "embedding": false,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -1478,6 +1531,7 @@
       "status": "unavailable"
     },
     "displayName": "Meta",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -1511,6 +1565,7 @@
       "batch": false,
       "completion": true,
       "embedding": false,
+      "files": false,
       "imageGeneration": false,
       "listModels": false,
       "messages": true,
@@ -1533,6 +1588,7 @@
       "status": "unavailable"
     },
     "displayName": "Minimax",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -1567,6 +1623,7 @@
       "batch": true,
       "completion": true,
       "embedding": true,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -1588,6 +1645,7 @@
       "status": "unavailable"
     },
     "displayName": "Mistral",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -1621,6 +1679,7 @@
       "batch": false,
       "completion": true,
       "embedding": false,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -1643,6 +1702,7 @@
       "status": "unavailable"
     },
     "displayName": "Moonshot",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -1676,6 +1736,7 @@
       "batch": false,
       "completion": true,
       "embedding": true,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -1698,6 +1759,7 @@
       "status": "unavailable"
     },
     "displayName": "Mzai",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -1731,6 +1793,7 @@
       "batch": false,
       "completion": true,
       "embedding": true,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -1753,6 +1816,7 @@
       "status": "unavailable"
     },
     "displayName": "Nebius",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -1786,6 +1850,7 @@
       "batch": true,
       "completion": true,
       "embedding": true,
+      "files": false,
       "imageGeneration": true,
       "listModels": true,
       "messages": true,
@@ -1808,6 +1873,7 @@
       "status": "unavailable"
     },
     "displayName": "Neosantara",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -1841,6 +1907,7 @@
       "batch": false,
       "completion": true,
       "embedding": true,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -1862,6 +1929,7 @@
       "status": "unavailable"
     },
     "displayName": "Ollama",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -1896,6 +1964,7 @@
       "batch": true,
       "completion": true,
       "embedding": true,
+      "files": true,
       "imageGeneration": true,
       "listModels": true,
       "messages": true,
@@ -1910,6 +1979,7 @@
     "documentationUrl": "https://platform.openai.com/docs/api-reference",
     "envApiBase": "OPENAI_BASE_URL",
     "envApiKey": "OPENAI_API_KEY",
+    "fileOperations": ["delete", "download", "list", "retrieve", "upload"],
     "name": "openai",
     "requiresApiKey": true,
     "configuration": {
@@ -1981,6 +2051,7 @@
       "batch": false,
       "completion": true,
       "embedding": true,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -2003,6 +2074,7 @@
       "status": "unavailable"
     },
     "displayName": "OpenRouter",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -2036,6 +2108,7 @@
       "batch": true,
       "completion": true,
       "embedding": true,
+      "files": false,
       "imageGeneration": true,
       "listModels": true,
       "messages": true,
@@ -2057,6 +2130,7 @@
       "status": "unavailable"
     },
     "displayName": "Otari",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "unsupported",
@@ -2090,6 +2164,7 @@
       "batch": false,
       "completion": true,
       "embedding": false,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -2112,6 +2187,7 @@
       "status": "unavailable"
     },
     "displayName": "Ovhcloud",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -2145,6 +2221,7 @@
       "batch": false,
       "completion": true,
       "embedding": false,
+      "files": false,
       "imageGeneration": false,
       "listModels": false,
       "messages": true,
@@ -2167,6 +2244,7 @@
       "status": "unavailable"
     },
     "displayName": "Perplexity",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -2200,6 +2278,7 @@
       "batch": false,
       "completion": true,
       "embedding": false,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -2222,6 +2301,7 @@
       "status": "unavailable"
     },
     "displayName": "Portkey",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -2255,6 +2335,7 @@
       "batch": false,
       "completion": true,
       "embedding": true,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -2277,6 +2358,7 @@
       "status": "unavailable"
     },
     "displayName": "Qiniu",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -2310,6 +2392,7 @@
       "batch": false,
       "completion": true,
       "embedding": true,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -2332,6 +2415,7 @@
       "status": "unavailable"
     },
     "displayName": "Requesty",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -2365,6 +2449,7 @@
       "batch": false,
       "completion": true,
       "embedding": true,
+      "files": false,
       "imageGeneration": false,
       "listModels": false,
       "messages": true,
@@ -2386,6 +2471,7 @@
       "status": "unavailable"
     },
     "displayName": "Amazon SageMaker",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "unsupported",
@@ -2419,6 +2505,7 @@
       "batch": false,
       "completion": true,
       "embedding": true,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -2441,6 +2528,7 @@
       "status": "unavailable"
     },
     "displayName": "Sambanova",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -2474,6 +2562,7 @@
       "batch": false,
       "completion": true,
       "embedding": false,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -2496,6 +2585,7 @@
       "status": "unavailable"
     },
     "displayName": "Telnyx",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -2530,6 +2620,7 @@
       "batch": true,
       "completion": true,
       "embedding": true,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -2551,6 +2642,7 @@
       "status": "unavailable"
     },
     "displayName": "Together",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -2584,6 +2676,7 @@
       "batch": true,
       "completion": true,
       "embedding": true,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -2605,6 +2698,7 @@
       "status": "unavailable"
     },
     "displayName": "Google Vertex AI",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "unsupported",
@@ -2638,6 +2732,7 @@
       "batch": false,
       "completion": true,
       "embedding": false,
+      "files": false,
       "imageGeneration": false,
       "listModels": false,
       "messages": true,
@@ -2659,6 +2754,7 @@
       "status": "unavailable"
     },
     "displayName": "Vertex AI Anthropic",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -2692,6 +2788,7 @@
       "batch": false,
       "completion": true,
       "embedding": true,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -2714,6 +2811,7 @@
       "status": "unavailable"
     },
     "displayName": "Vllm",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -2747,6 +2845,7 @@
       "batch": false,
       "completion": false,
       "embedding": true,
+      "files": false,
       "imageGeneration": false,
       "listModels": false,
       "messages": false,
@@ -2768,6 +2867,7 @@
       "status": "unavailable"
     },
     "displayName": "Voyage",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "unsupported",
@@ -2801,6 +2901,7 @@
       "batch": false,
       "completion": true,
       "embedding": false,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -2822,6 +2923,7 @@
       "status": "unavailable"
     },
     "displayName": "IBM watsonx",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "unsupported",
@@ -2855,6 +2957,7 @@
       "batch": false,
       "completion": true,
       "embedding": false,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -2877,6 +2980,7 @@
       "status": "unavailable"
     },
     "displayName": "Xai",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",
@@ -2910,6 +3014,7 @@
       "batch": false,
       "completion": true,
       "embedding": false,
+      "files": false,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -2932,6 +3037,7 @@
       "status": "unavailable"
     },
     "displayName": "Zai",
+    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "supported",

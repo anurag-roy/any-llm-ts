@@ -24,9 +24,17 @@ import type {
   CompletionParams,
   CompletionUsage,
   CreateBatchParams,
+  DownloadFileParams,
+  FileDeleted,
+  FileDownload,
+  FileMetadata,
+  FileOperation,
+  FilePage,
+  FileResourceParams,
   FinishReason,
   FunctionTool,
   ListBatchesParams,
+  ListFilesParams,
   MessageContentBlock,
   MessageResponse,
   MessageStopReason,
@@ -38,12 +46,14 @@ import type {
   ProviderMetadata,
   ProviderOptions,
   ToolCall,
+  UploadFileParams,
 } from "../types.js";
 import {
   compactObject,
   completionRequestOptions,
   getEnvironmentVariable,
   isAsyncIterable,
+  iterateClosing,
   mapAsyncIterable,
   notifyCompletionDispatch,
   timeoutRequestOptions,
@@ -51,6 +61,13 @@ import {
 } from "../utils.js";
 import { BaseProvider } from "./base.js";
 import { completeProviderMetadata } from "../provider-metadata.js";
+import {
+  deleteAnthropicFile,
+  downloadAnthropicFile,
+  listAnthropicFiles,
+  retrieveAnthropicFile,
+  uploadAnthropicFile,
+} from "./anthropic-files.js";
 
 const anthropicCapabilities: ProviderCapabilities = {
   audioSpeech: false,
@@ -58,6 +75,7 @@ const anthropicCapabilities: ProviderCapabilities = {
   batch: true,
   completion: true,
   embedding: false,
+  files: false,
   imageGeneration: false,
   listModels: true,
   messages: true,
@@ -69,6 +87,14 @@ const anthropicCapabilities: ProviderCapabilities = {
   streaming: true,
   vision: true,
 };
+
+const anthropicFileOperations: FileOperation[] = [
+  "delete",
+  "download",
+  "list",
+  "retrieve",
+  "upload",
+];
 
 const ANTHROPIC_CONTENT_FILTER_REFUSAL = "Response blocked by Anthropic content filtering.";
 
@@ -389,6 +415,25 @@ export function nativeMessage<Value>(value: Value): MessageResponse {
   if (isNumber(usage.cache_read_input_tokens)) {
     normalizedUsage.cacheReadInputTokens = usage.cache_read_input_tokens;
   }
+  if (isObject(usage.cache_creation) && !Array.isArray(usage.cache_creation)) {
+    const ttl = parseJsonObject(usage.cache_creation);
+    const ephemeral5m = isNumber(ttl.ephemeral_5m_input_tokens)
+      ? ttl.ephemeral_5m_input_tokens
+      : isNumber(ttl.ephemeral5mInputTokens)
+        ? ttl.ephemeral5mInputTokens
+        : undefined;
+    const ephemeral1h = isNumber(ttl.ephemeral_1h_input_tokens)
+      ? ttl.ephemeral_1h_input_tokens
+      : isNumber(ttl.ephemeral1hInputTokens)
+        ? ttl.ephemeral1hInputTokens
+        : undefined;
+    if (ephemeral5m !== undefined || ephemeral1h !== undefined) {
+      normalizedUsage.cacheCreation = {
+        ...includeWhen(!(ephemeral5m === undefined), { ephemeral5mInputTokens: ephemeral5m }),
+        ...includeWhen(!(ephemeral1h === undefined), { ephemeral1hInputTokens: ephemeral1h }),
+      };
+    }
+  }
   return {
     content: Array.isArray(response.content) ? response.content.map(nativeContentBlock) : [],
     id: stringValue(response.id),
@@ -524,20 +569,47 @@ function refusalStopDetails<Value>(value: Value): JsonObject | undefined {
 }
 
 function anthropicUsage(value: JsonObject): CompletionUsage {
-  const promptTokens = isNumber(value.input_tokens) ? value.input_tokens : 0;
+  const cacheRead = isNumber(value.cache_read_input_tokens)
+    ? value.cache_read_input_tokens
+    : undefined;
+  const cacheWrite = isNumber(value.cache_creation_input_tokens)
+    ? value.cache_creation_input_tokens
+    : undefined;
+  const ttl =
+    isObject(value.cache_creation) && !Array.isArray(value.cache_creation)
+      ? parseJsonObject(value.cache_creation)
+      : undefined;
+  const ephemeral5m =
+    ttl !== undefined && isNumber(ttl.ephemeral_5m_input_tokens)
+      ? ttl.ephemeral_5m_input_tokens
+      : undefined;
+  const ephemeral1h =
+    ttl !== undefined && isNumber(ttl.ephemeral_1h_input_tokens)
+      ? ttl.ephemeral_1h_input_tokens
+      : undefined;
+  const cacheCreationTokenDetails =
+    ttl === undefined
+      ? undefined
+      : {
+          ...includeWhen(!(ephemeral5m === undefined), { ephemeral5mInputTokens: ephemeral5m }),
+          ...includeWhen(!(ephemeral1h === undefined), { ephemeral1hInputTokens: ephemeral1h }),
+        };
+  const promptTokens =
+    (isNumber(value.input_tokens) ? value.input_tokens : 0) + (cacheRead ?? 0) + (cacheWrite ?? 0);
   const completionTokens = isNumber(value.output_tokens) ? value.output_tokens : 0;
-  const promptTokensDetails: JsonObject = {};
-  if (isNumber(value.cache_creation_input_tokens)) {
-    promptTokensDetails.cacheCreationTokens = value.cache_creation_input_tokens;
-  }
-  if (isNumber(value.cache_read_input_tokens)) {
-    promptTokensDetails.cachedTokens = value.cache_read_input_tokens;
-  }
+  const promptTokensDetails =
+    cacheRead === undefined && cacheWrite === undefined && ttl === undefined
+      ? undefined
+      : {
+          ...includeWhen(!(cacheRead === undefined), { cachedTokens: cacheRead }),
+          ...includeWhen(!(cacheWrite === undefined), { cacheWriteTokens: cacheWrite }),
+          ...includeWhen(!(cacheCreationTokenDetails === undefined), { cacheCreationTokenDetails }),
+        };
   return {
     completionTokens,
     promptTokens,
     totalTokens: completionTokens + promptTokens,
-    ...includeWhen(!(Object.keys(promptTokensDetails).length === 0), { promptTokensDetails }),
+    ...includeWhen(!(promptTokensDetails === undefined), { promptTokensDetails }),
   };
 }
 
@@ -570,6 +642,7 @@ export class AnthropicProvider extends BaseProvider {
         documentationUrl: config.documentationUrl ?? "https://docs.anthropic.com/en/api/",
         envApiBase: config.envApiBase ?? "ANTHROPIC_BASE_URL",
         envApiKey: config.envApiKey ?? "ANTHROPIC_API_KEY",
+        fileOperations: this.providerName === "anthropic" ? anthropicFileOperations : [],
         name: this.providerName,
         requiresApiKey: config.requiresApiKey ?? true,
         ...includeWhen(!(apiBase === undefined), { apiBase }),
@@ -772,6 +845,37 @@ export class AnthropicProvider extends BaseProvider {
     });
   }
 
+  override uploadFile(params: UploadFileParams): Promise<FileMetadata> {
+    if (!this.metadata.fileOperations.includes("upload")) return super.uploadFile(params);
+    return this.execute(() => uploadAnthropicFile(this.client, params, this.providerName));
+  }
+
+  override listFiles(params: ListFilesParams = {}): Promise<FilePage> {
+    if (!this.metadata.fileOperations.includes("list")) return super.listFiles(params);
+    return this.execute(() => listAnthropicFiles(this.client, params, this.providerName));
+  }
+
+  override retrieveFile(params: FileResourceParams): Promise<FileMetadata> {
+    if (!this.metadata.fileOperations.includes("retrieve")) return super.retrieveFile(params);
+    return this.execute(() => retrieveAnthropicFile(this.client, params, this.providerName), {
+      fileOperation: true,
+    });
+  }
+
+  override deleteFile(params: FileResourceParams): Promise<FileDeleted> {
+    if (!this.metadata.fileOperations.includes("delete")) return super.deleteFile(params);
+    return this.execute(() => deleteAnthropicFile(this.client, params, this.providerName), {
+      fileOperation: true,
+    });
+  }
+
+  override downloadFile(params: DownloadFileParams): Promise<FileDownload> {
+    if (!this.metadata.fileOperations.includes("download")) return super.downloadFile(params);
+    return this.execute(() => downloadAnthropicFile(this.client, params, this.providerName), {
+      fileOperation: true,
+    });
+  }
+
   private completionRequest(params: CompletionParams) {
     const convertedMessages = convertMessages(params.messages);
     const maxTokens = params.maxTokens ?? params.maxCompletionTokens ?? 8_192;
@@ -875,7 +979,7 @@ export class AnthropicProvider extends BaseProvider {
     let inputTokens = 0;
     let pendingUsage: CompletionUsage | undefined;
 
-    for await (const event of stream) {
+    for await (const event of iterateClosing(stream)) {
       if (event.type === "message_start") {
         const message = parseJsonObject(event.message);
         const messageUsage = parseJsonObject(message.usage ?? {});

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  closeAsyncIterableQuietly,
   compactObject,
   flattenResponsesTools,
   getEnvironmentVariable,
@@ -109,6 +110,109 @@ describe("runtime utilities", () => {
     await expect(iterator[Symbol.asyncIterator]().next()).rejects.toMatchObject({
       provider: "test-provider",
     });
+  });
+
+  it("closes the source iterable when a mapped stream is abandoned", async () => {
+    let closed = 0;
+    const source = {
+      async *[Symbol.asyncIterator]() {
+        try {
+          yield 1;
+          yield 2;
+        } finally {
+          closed += 1;
+        }
+      },
+    };
+    const mapped = mapAsyncIterable(source, (value) => value);
+    const iterator = mapped[Symbol.asyncIterator]();
+    await iterator.next();
+    await iterator.return?.();
+    expect(closed).toBe(1);
+  });
+
+  it("closes the source iterable when a mapped stream is closed before the first read", async () => {
+    let closed = 0;
+    const source = {
+      async *[Symbol.asyncIterator]() {
+        yield 1;
+      },
+      async close() {
+        closed += 1;
+      },
+    };
+    const mapped = mapAsyncIterable(source, (value) => value);
+    const iterator = mapped[Symbol.asyncIterator]();
+    await iterator.return?.();
+    expect(closed).toBe(1);
+  });
+
+  it("closes streams through aclose, cancel, abort, and destroy fallbacks", async () => {
+    let closed = 0;
+    const unusedIterator = {
+      next: async () => ({ done: true as const, value: undefined }),
+    };
+    // SAFETY: Provider streams expose aclose/cancel/controller outside AsyncIterable.
+    await closeAsyncIterableQuietly({
+      [Symbol.asyncIterator]() {
+        return unusedIterator;
+      },
+      async aclose() {
+        closed += 1;
+      },
+    } as AsyncIterable<unknown>);
+    // SAFETY: Provider streams expose aclose/cancel/controller outside AsyncIterable.
+    await closeAsyncIterableQuietly({
+      [Symbol.asyncIterator]() {
+        return unusedIterator;
+      },
+      async cancel() {
+        closed += 1;
+      },
+    } as AsyncIterable<unknown>);
+    // SAFETY: Provider streams expose aclose/cancel/controller outside AsyncIterable.
+    await closeAsyncIterableQuietly({
+      [Symbol.asyncIterator]() {
+        return unusedIterator;
+      },
+      controller: {
+        abort() {
+          closed += 1;
+        },
+      },
+      destroy() {
+        closed += 1;
+      },
+    } as AsyncIterable<unknown>);
+    await expect(
+      closeAsyncIterableQuietly({
+        [Symbol.asyncIterator]() {
+          return unusedIterator;
+        },
+        async return() {
+          throw new Error("already closed");
+        },
+      }),
+    ).resolves.toBeUndefined();
+    expect(closed).toBe(4);
+  });
+
+  it("closes the source iterable when an error-mapping stream is closed before the first read", async () => {
+    let closed = 0;
+    const source = {
+      async *[Symbol.asyncIterator]() {
+        yield 1;
+      },
+      controller: {
+        abort() {
+          closed += 1;
+        },
+      },
+    };
+    const mapped = mapAsyncIterableErrors(source, "test-provider");
+    const iterator = mapped[Symbol.asyncIterator]();
+    await iterator.return?.();
+    expect(closed).toBe(1);
   });
 
   it("flattens response tools and validates timeout options", () => {

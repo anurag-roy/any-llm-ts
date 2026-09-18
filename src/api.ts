@@ -11,11 +11,18 @@ import type {
   CompletionResult,
   CreateBatchParams,
   DirectCompletionParams,
+  DownloadFileParams,
   EmbeddingParams,
   EmbeddingResponse,
+  FileDeleted,
+  FileDownload,
+  FileMetadata,
+  FilePage,
+  FileResourceParams,
   ImageGenerationParams,
   ImageGenerationResponse,
   ListBatchesParams,
+  ListFilesParams,
   Model,
   MessageResponse,
   MessageResult,
@@ -39,6 +46,7 @@ import type {
   StructuredResponsesParams,
   Transcription,
   TranscriptionParams,
+  UploadFileParams,
 } from "./types.js";
 
 export interface DirectProviderOptions extends ProviderOptions {
@@ -279,4 +287,45 @@ export function rerank(params: DirectRerankParams): Promise<RerankResponse> {
     ...request,
     model: target.model,
   });
+}
+
+export interface DirectUploadFileParams extends UploadFileParams, DirectProviderOptions {
+  provider: string;
+}
+
+export function uploadFile(params: DirectUploadFileParams): Promise<FileMetadata> {
+  const { apiBase, apiKey, clientOptions, provider, ...request } = params;
+  return client(provider, directOptions(apiBase, apiKey, clientOptions)).uploadFile(request);
+}
+
+export interface DirectListFilesParams extends ListFilesParams, DirectProviderOptions {
+  provider: string;
+}
+
+export function listFiles(params: DirectListFilesParams): Promise<FilePage> {
+  const { apiBase, apiKey, clientOptions, provider, ...request } = params;
+  return client(provider, directOptions(apiBase, apiKey, clientOptions)).listFiles(request);
+}
+
+export interface DirectFileResourceParams extends FileResourceParams, DirectProviderOptions {
+  provider: string;
+}
+
+export function retrieveFile(params: DirectFileResourceParams): Promise<FileMetadata> {
+  const { apiBase, apiKey, clientOptions, provider, ...request } = params;
+  return client(provider, directOptions(apiBase, apiKey, clientOptions)).retrieveFile(request);
+}
+
+export function deleteFile(params: DirectFileResourceParams): Promise<FileDeleted> {
+  const { apiBase, apiKey, clientOptions, provider, ...request } = params;
+  return client(provider, directOptions(apiBase, apiKey, clientOptions)).deleteFile(request);
+}
+
+export interface DirectDownloadFileParams extends DownloadFileParams, DirectProviderOptions {
+  provider: string;
+}
+
+export function downloadFile(params: DirectDownloadFileParams): Promise<FileDownload> {
+  const { apiBase, apiKey, clientOptions, provider, ...request } = params;
+  return client(provider, directOptions(apiBase, apiKey, clientOptions)).downloadFile(request);
 }

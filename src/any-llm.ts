@@ -11,11 +11,18 @@ import type {
   CompletionParams,
   CompletionResult,
   CreateBatchParams,
+  DownloadFileParams,
   EmbeddingParams,
   EmbeddingResponse,
+  FileDeleted,
+  FileDownload,
+  FileMetadata,
+  FilePage,
+  FileResourceParams,
   ImageGenerationParams,
   ImageGenerationResponse,
   ListBatchesParams,
+  ListFilesParams,
   Model,
   MessageResponse,
   MessageResult,
@@ -41,6 +48,7 @@ import type {
   StructuredResponsesParams,
   Transcription,
   TranscriptionParams,
+  UploadFileParams,
 } from "./types.js";
 import {
   completionResponseFormat,
@@ -283,6 +291,26 @@ export class AnyLLM {
 
   rerank(params: RerankParams): Promise<RerankResponse> {
     return this.adapter.rerank(params);
+  }
+
+  uploadFile(params: UploadFileParams): Promise<FileMetadata> {
+    return this.adapter.uploadFile(params);
+  }
+
+  listFiles(params: ListFilesParams = {}): Promise<FilePage> {
+    return this.adapter.listFiles(params);
+  }
+
+  retrieveFile(params: FileResourceParams): Promise<FileMetadata> {
+    return this.adapter.retrieveFile(params);
+  }
+
+  deleteFile(params: FileResourceParams): Promise<FileDeleted> {
+    return this.adapter.deleteFile(params);
+  }
+
+  downloadFile(params: DownloadFileParams): Promise<FileDownload> {
+    return this.adapter.downloadFile(params);
   }
 
   messages<T>(params: StructuredMessagesParams<T>): Promise<ParsedMessageResponse<T>>;

@@ -205,9 +205,9 @@ describe("Anthropic provider", () => {
       provider: "anthropic",
       usage: {
         completionTokens: 5,
-        promptTokens: 10,
-        promptTokensDetails: { cacheCreationTokens: 2, cachedTokens: 3 },
-        totalTokens: 15,
+        promptTokens: 15,
+        promptTokensDetails: { cacheWriteTokens: 2, cachedTokens: 3 },
+        totalTokens: 20,
       },
     });
   });

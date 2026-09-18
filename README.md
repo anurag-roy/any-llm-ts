@@ -12,7 +12,7 @@ An independent TypeScript port inspired by [mozilla-ai/any-llm](https://github.c
 
 </div>
 
-`any-llm-ts` is a thin, framework-independent layer over official provider SDKs. It gives applications one API for chat completions, Messages, streaming, tools, structured output, embeddings, model discovery, the OpenAI Responses API, batches, reranking, images, moderation, and audio without requiring a hosted proxy.
+`any-llm-ts` is a thin, framework-independent layer over official provider SDKs. It gives applications one API for chat completions, Messages, streaming, tools, structured output, embeddings, model discovery, the OpenAI Responses API, batches, reranking, images, moderation, audio, and provider-hosted files without requiring a hosted proxy.
 
 The package uses official provider SDKs where native translation is required. OpenAI-compatible providers share a data-driven adapter, so switching providers is usually one string change.
 
@@ -207,6 +207,11 @@ await llm.retrieveBatch(batchId);
 await llm.cancelBatch(batchId);
 await llm.listBatches();
 await llm.retrieveBatchResults(batchId);
+await llm.uploadFile({ file });
+await llm.listFiles();
+await llm.retrieveFile({ fileId });
+await llm.downloadFile({ fileId });
+await llm.deleteFile({ fileId });
 ```
 
 Stateless camel-cased helpers with the same names are exported from the package. An unsupported operation rejects with `UnsupportedOperationError`. Provider-specific request fields can be added through `providerOptions` and SDK constructor fields through `clientOptions`.
@@ -224,6 +229,7 @@ Provider SDK failures are converted into a common hierarchy:
 - `ContextLengthExceededError`
 - `ContentFilterError`
 - `ProviderError`, `UpstreamProviderError`, and `GatewayTimeoutError`
+- `ProviderFileNotFoundError`
 
 Each `AnyLLMError` retains the original error as `cause` and exposes provider-independent `statusCode`, `code`, `param`, `errorType`, and `provider` fields where available.
 

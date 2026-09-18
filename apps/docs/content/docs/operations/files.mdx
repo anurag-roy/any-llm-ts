@@ -1,0 +1,173 @@
+---
+title: Files
+description: Upload, list, retrieve, download, and delete provider-hosted files.
+---
+
+The Files API is available on an `AnyLLM` instance. Anthropic, OpenAI, and Azure OpenAI support
+all five operations. Other providers, including custom OpenAI-compatible endpoints, do not inherit
+Files support automatically.
+
+| Provider     | Upload                  | List | Retrieve | Download                | Delete |
+| ------------ | ----------------------- | ---- | -------- | ----------------------- | ------ |
+| Anthropic    | Yes                     | Yes  | Yes      | Generated files         | Yes    |
+| OpenAI       | Yes, requires `purpose` | Yes  | Yes      | Depends on file purpose | Yes    |
+| Azure OpenAI | Yes, requires `purpose` | Yes  | Yes      | Depends on file purpose | Yes    |
+
+```ts
+import { AnyLLM } from "any-llm-ts";
+
+const llm = AnyLLM.create("anthropic");
+console.log(llm.metadata.capabilities.files);
+console.log(llm.metadata.fileOperations);
+```
+
+## Upload and use a file
+
+```ts
+const uploaded = await llm.uploadFile({
+  file: "./report.pdf",
+  mimeType: "application/pdf",
+  expiresIn: 3600,
+});
+
+try {
+  const response = await llm.messages({
+    model: "claude-sonnet-4-6",
+    maxTokens: 1024,
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "document", source: { type: "file", file_id: uploaded.id } },
+          { type: "text", text: "Summarize this report." },
+        ],
+      },
+    ],
+  });
+  console.log(response.content);
+} finally {
+  await llm.deleteFile({ fileId: uploaded.id });
+}
+```
+
+`file` accepts a filesystem path, `Uint8Array`, `ArrayBuffer`, `Blob`, or a Node.js readable
+stream. `filename` and `mimeType` override the multipart part metadata. Path uploads use the
+basename by default; byte inputs default to `upload` and `application/octet-stream`.
+
+## OpenAI uploads
+
+OpenAI requires an explicit, nonempty `purpose` for every upload. Choose the purpose for the API
+that will consume the file: `user_data` for general model inputs, `batch` for Batch API input JSONL,
+or `fine-tune` for training data. Other upload purposes include `assistants`, `vision`, and `evals`.
+
+```ts
+const openai = AnyLLM.create("openai");
+const uploaded = await openai.uploadFile({
+  file: new TextEncoder().encode("Revenue grew by 10 percent.\n"),
+  filename: "report.txt",
+  mimeType: "text/plain",
+  purpose: "user_data",
+  expiresIn: 3600,
+});
+```
+
+`expiresIn` maps to OpenAI's `expires_after` with `anchor: "created_at"` and `seconds: expiresIn`.
+Omit it to use the provider's retention policy. OpenAI's `bytes` field becomes `sizeBytes`.
+Timestamps become RFC 3339 strings. Missing metadata, including `mimeType` and `downloadable`,
+stays unset.
+
+## Azure OpenAI Files
+
+Azure OpenAI uses the same public methods and metadata normalization as OpenAI, routed to your
+Azure resource's `/openai/v1/files` endpoint. Configure `AZURE_OPENAI_ENDPOINT` and
+`AZURE_OPENAI_API_KEY`, or the existing Microsoft Entra options (`azureADToken` /
+`azureADTokenProvider`). Files requests use the v1 routes without a preview query parameter or a
+deployment name.
+
+Azure documents upload purposes `assistants`, `batch`, `fine-tune`, and `evals`. Do not assume
+OpenAI's `user_data` or `vision` purposes are available. For batch uploads Microsoft documents
+1,209,600 to 2,592,000 seconds (14 to 30 days). A one-hour expiry accepted by OpenAI may be
+rejected by Azure with HTTP 400.
+
+File IDs remain scoped to their originating provider account; do not pass OpenAI file IDs to Azure
+or vice versa.
+
+## Methods
+
+| Method                                                                               | Result         |
+| ------------------------------------------------------------------------------------ | -------------- |
+| `uploadFile({ file, filename?, mimeType?, purpose?, expiresIn?, providerOptions? })` | `FileMetadata` |
+| `listFiles({ limit?, cursor?, purpose?, providerOptions? })`                         | `FilePage`     |
+| `retrieveFile({ fileId, providerOptions? })`                                         | `FileMetadata` |
+| `downloadFile({ fileId, chunkSize?, providerOptions? })`                             | `FileDownload` |
+| `deleteFile({ fileId, providerOptions? })`                                           | `FileDeleted`  |
+
+These are instance methods. Reuse the client configured for the originating provider account; file
+IDs are not portable. Stateless helpers with the same names are also exported and require `provider`.
+
+`FileMetadata`, `FilePage`, and `FileDeleted` keep omitted fields unset. Provider-specific fields
+are preserved on the object. Timestamps stay as RFC 3339 strings.
+
+## Pagination
+
+Listing fetches exactly one page. Continue with the opaque `nextCursor`; omit it on the final page.
+
+```ts
+const page = await llm.listFiles({ limit: 20 });
+if (page.nextCursor !== undefined) {
+  const nextPage = await llm.listFiles({ cursor: page.nextCursor, limit: 20 });
+}
+```
+
+OpenAI and Azure OpenAI map `cursor` to `after` and derive `nextCursor` from the last file ID when
+`has_more` is true. Use `purpose` to filter a listing and `providerOptions.order` of `"asc"` or
+`"desc"` to select the order. Keep the same purpose and order on subsequent pages.
+
+Anthropic maps `cursor` / `nextCursor` to `page` / `next_page`. Listing rejects the legacy
+`files-api-2025-04-14` beta because it changes the page shape. For a known set of IDs, Anthropic
+accepts `providerOptions.ids`.
+
+## Downloads and provider restrictions
+
+OpenAI download eligibility depends on the file's purpose. Batch input files can be downloaded
+through the Files API. OpenAI rejects downloads of `user_data` files with HTTP 400, even when
+uploading and retrieving their metadata succeeds. Consult
+[OpenAI's Files reference](https://platform.openai.com/docs/api-reference/files) before assuming a
+file can be downloaded.
+
+Azure downloads use `/openai/v1/files/{fileId}/content`. Download eligibility is determined by
+Azure, not by OpenAI's purpose restrictions.
+
+Anthropic marks user uploads as non-downloadable. Download files returned by native code execution
+or supported skills. `FileDownload` exposes `statusCode` and `headers` before body reads begin.
+
+```ts
+const download = await llm.downloadFile({ fileId, chunkSize: 65_536 });
+try {
+  for await (const chunk of download) {
+    // Write chunk to a destination.
+  }
+} finally {
+  await download.close();
+}
+```
+
+Always close the download after full consumption, early exit, or cancellation. `await using` also
+works where `Symbol.asyncDispose` is available.
+
+## Provider options and errors
+
+OpenAI and Azure OpenAI Files methods accept `timeout` (seconds), `maxRetries`, and `extraHeaders`
+through `providerOptions`. Upload requires the shared `purpose` parameter and accepts `expiresIn`.
+Listing accepts `purpose` and `order`. Anthropic's `betas` and `ids` options are not accepted.
+
+Anthropic Files methods accept `timeout` (seconds), `maxRetries`, `betas`, and `extraHeaders`
+through `providerOptions`. Upload also accepts `expiresIn`, a positive integer duration in seconds.
+Anthropic rejects a non-omitted shared `purpose` parameter. Uploads default to zero automatic
+retries.
+
+Unsupported options raise `UnsupportedParameterError`. Invalid IDs, limits, expiry, chunk sizes, and
+unreadable upload paths raise `InvalidRequestError`. A retrieve, download, or delete HTTP 404 becomes
+`ProviderFileNotFoundError`. Upload and list 404s keep the general mapping.
+
+Check `metadata.capabilities.files` before using the operation.

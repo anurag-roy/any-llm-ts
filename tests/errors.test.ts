@@ -10,6 +10,7 @@ import {
   InvalidRequestError,
   ModelNotFoundError,
   ProviderError,
+  ProviderFileNotFoundError,
   RateLimitError,
   UpstreamProviderError,
 } from "../src/index.js";
@@ -46,6 +47,21 @@ describe("provider error normalization", () => {
       statusCode: status,
     });
     expect(normalized.cause).toBe(original);
+  });
+
+  it("classifies file-operation 404s as ProviderFileNotFoundError", () => {
+    const normalized = normalizeProviderError(
+      { message: "File not found", status: 404 },
+      "anthropic",
+      {
+        fileOperation: true,
+      },
+    );
+    expect(normalized).toBeInstanceOf(ProviderFileNotFoundError);
+    expect(normalized.statusCode).toBe(404);
+    expect(normalizeProviderError({ message: "missing", status: 404 }, "anthropic")).toBeInstanceOf(
+      ModelNotFoundError,
+    );
   });
 
   it("preserves retry-after details on rate limits", () => {

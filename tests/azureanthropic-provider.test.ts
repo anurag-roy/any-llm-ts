@@ -94,6 +94,19 @@ describe("Azure Anthropic provider", () => {
         inputFilePath: "unused.jsonl",
       }),
     ).rejects.toBeInstanceOf(UnsupportedOperationError);
+    await expect(provider.uploadFile({ file: new Uint8Array([1]) })).rejects.toBeInstanceOf(
+      UnsupportedOperationError,
+    );
+    await expect(provider.listFiles()).rejects.toBeInstanceOf(UnsupportedOperationError);
+    await expect(provider.retrieveFile({ fileId: "file-1" })).rejects.toBeInstanceOf(
+      UnsupportedOperationError,
+    );
+    await expect(provider.deleteFile({ fileId: "file-1" })).rejects.toBeInstanceOf(
+      UnsupportedOperationError,
+    );
+    await expect(provider.downloadFile({ fileId: "file-1" })).rejects.toBeInstanceOf(
+      UnsupportedOperationError,
+    );
   });
 
   it("is registered as a supported provider", () => {

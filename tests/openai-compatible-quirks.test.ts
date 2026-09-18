@@ -141,6 +141,34 @@ describe("OpenAI-compatible provider quirks", () => {
     expect(request.messages[1].content).toContain("Return an answer");
   });
 
+  it("renames reasoning_content to reasoning and drops extra_content for Groq and Cerebras", async () => {
+    const create = vi.fn().mockResolvedValue(response("ok"));
+    const provider = new OpenAIProvider(
+      config("groq", { reasoningField: "reasoning" }),
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+    await provider.completion({
+      messages: [
+        {
+          content: null,
+          extraContent: { anthropic: { signature: "sig" }, google: { thoughtSignature: "keep" } },
+          reasoning: "thought",
+          role: "assistant",
+        },
+      ],
+      model: "openai/gpt-oss-120b",
+    });
+    const request = create.mock.calls[0]?.[0];
+    expect(request.messages[0]).toEqual({
+      content: null,
+      reasoning: "thought",
+      role: "assistant",
+    });
+    expect(request.messages[0]).not.toHaveProperty("reasoning_content");
+    expect(request.messages[0]).not.toHaveProperty("extra_content");
+  });
+
   it("leaves DeepSeek thinking and effort unset for auto and omitted reasoningEffort", async () => {
     const create = vi.fn().mockResolvedValue(response("ok"));
     const provider = new OpenAIProvider(

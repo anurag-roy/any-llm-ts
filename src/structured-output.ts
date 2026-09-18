@@ -117,8 +117,10 @@ export function parseMessage<T>(
           // SAFETY: The provider contract establishes the asserted representation at this boundary.
           return block as Exclude<MessageContentBlock, MessagesTextBlock>;
         }
+        const refused = message.stopReason === "refusal";
         const parsedBlock: ParsedMessageTextBlock<T> = {
-          parsedOutput: block.text.length === 0 ? null : format.parse(JSON.parse(block.text)),
+          parsedOutput:
+            refused || block.text.length === 0 ? null : format.parse(JSON.parse(block.text)),
           text: block.text,
           type: "text",
         };
