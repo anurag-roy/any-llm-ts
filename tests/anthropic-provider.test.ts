@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BatchNotCompleteError, MissingApiKeyError, ProviderError } from "../src/index.js";
-import { AnthropicProvider } from "../src/providers/anthropic.js";
+import { AnthropicProvider, normalizeAnthropicTypeArrays } from "../src/providers/anthropic.js";
 import type {
   ChatCompletion,
   ChatCompletionChunk,
@@ -720,6 +720,221 @@ describe("Anthropic provider", () => {
       }),
     ).toThrow(/json_schema.schema must be an object/u);
   });
+
+  it("rewrites JSON Schema type arrays before Anthropic structured output", async () => {
+    const create = vi.fn().mockResolvedValue(anthropicResponse());
+    const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
+    await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "claude-test",
+      responseFormat: {
+        json_schema: {
+          name: "CodeStep",
+          schema: {
+            additionalProperties: false,
+            properties: {
+              answer: { type: ["string", "null"] },
+              code: { type: "string" },
+            },
+            required: ["code", "answer"],
+            type: "object",
+          },
+        },
+        type: "json_schema",
+      },
+    });
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        output_config: {
+          format: {
+            schema: {
+              additionalProperties: false,
+              properties: {
+                answer: { anyOf: [{ type: "string" }, { type: "null" }] },
+                code: { type: "string" },
+              },
+              required: ["code", "answer"],
+              type: "object",
+            },
+            type: "json_schema",
+          },
+        },
+      }),
+    );
+  });
+
+  it("keeps type arrays separate from composition keywords", () => {
+    expect(
+      normalizeAnthropicTypeArrays({
+        anyOf: [{ maxLength: 20, type: "string" }, { type: "null" }],
+        type: ["string", "null"],
+      }),
+    ).toEqual({
+      allOf: [
+        { anyOf: [{ type: "string" }, { type: "null" }] },
+        { anyOf: [{ maxLength: 20, type: "string" }, { type: "null" }] },
+      ],
+    });
+  });
+
+  it.each(["anyOf", "oneOf", "allOf"] as const)(
+    "rejects type arrays combined with %s $ref constraints",
+    (compositionKeyword) => {
+      expect(() =>
+        normalizeAnthropicTypeArrays({
+          $defs: { Value: { type: "string" } },
+          [compositionKeyword]: [{ $ref: "#/$defs/Value" }],
+          type: ["string", "null"],
+        }),
+      ).toThrow(
+        /Anthropic structured outputs do not support combining type arrays with composition constraints containing \$ref/u,
+      );
+    },
+  );
+
+  it.each([
+    { properties: { value: { $ref: "#/$defs/Value" } } },
+    { items: [{ $ref: "#/$defs/Value" }] },
+    { not: { $ref: "#/$defs/Value" } },
+  ])("rejects nested composition $ref in %j", (schemaWithRef) => {
+    expect(() =>
+      normalizeAnthropicTypeArrays({
+        anyOf: [schemaWithRef],
+        type: ["object", "null"],
+      }),
+    ).toThrow(/composition constraints containing \$ref/u);
+  });
+
+  it("ignores $ref keys in instance values and property names", () => {
+    const compositionSchema = {
+      additionalProperties: false,
+      const: { $ref: "literal const" },
+      default: { $ref: "literal default" },
+      enum: [{ $ref: "literal enum" }],
+      examples: [{ $ref: "literal example" }],
+      properties: { $ref: { type: "string" } },
+      type: "object",
+    };
+    expect(
+      normalizeAnthropicTypeArrays({
+        anyOf: [compositionSchema],
+        type: ["object", "null"],
+      }),
+    ).toMatchObject({
+      allOf: [{ anyOf: [{ type: "object" }, { type: "null" }] }, { anyOf: [compositionSchema] }],
+    });
+  });
+
+  it("keeps nested nullable objects linear", () => {
+    let schema: JsonObject = { type: "string" };
+    for (let index = 0; index < 16; index += 1) {
+      schema = {
+        description: "Nullable node",
+        properties: { child: schema },
+        required: ["child"],
+        type: ["object", "null"],
+      };
+    }
+    const normalized = parseJsonObject(normalizeAnthropicTypeArrays(schema));
+    expect(JSON.stringify(normalized).length).toBeLessThan(JSON.stringify(schema).length * 3);
+    expect(normalized).toMatchObject({
+      anyOf: [{ type: "object" }, { type: "null" }],
+      description: "Nullable node",
+    });
+    const objectBranch = Array.isArray(normalized.anyOf) ? normalized.anyOf[0] : undefined;
+    expect(objectBranch).toMatchObject({ properties: expect.any(Object) });
+  });
+
+  it("rejects legacy definitions and accepts $defs", async () => {
+    const create = vi.fn().mockResolvedValue(anthropicResponse());
+    const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
+    expect(() =>
+      provider.completion({
+        messages: [{ content: "Hi", role: "user" }],
+        model: "claude-test",
+        responseFormat: {
+          json_schema: {
+            name: "LegacyDefinitions",
+            schema: {
+              definitions: { Value: { type: "string" } },
+              properties: { value: { $ref: "#/definitions/Value" } },
+              type: ["object", "null"],
+            },
+          },
+          type: "json_schema",
+        },
+      }),
+    ).toThrow(
+      "The Anthropic SDK schema transformer does not support legacy 'definitions'; use '$defs' and update '#/definitions/...' references to '#/$defs/...'",
+    );
+
+    await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "claude-test",
+      responseFormat: {
+        json_schema: {
+          name: "ModernDefinitions",
+          schema: {
+            $defs: { Value: { type: "string" } },
+            properties: { value: { $ref: "#/$defs/Value" } },
+            required: ["value"],
+            type: "object",
+          },
+        },
+        type: "json_schema",
+      },
+    });
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        output_config: {
+          format: {
+            schema: {
+              $defs: { Value: { type: "string" } },
+              properties: { value: { $ref: "#/$defs/Value" } },
+              required: ["value"],
+              type: "object",
+            },
+            type: "json_schema",
+          },
+        },
+      }),
+    );
+  });
+
+  it("preserves instance values and recurses only through subschemas", () => {
+    const schema = {
+      const: { type: ["integer", "null"] },
+      default: { definitions: {}, type: ["string", "null"] },
+      enum: [{ type: [] }, { type: ["number", "null"] }],
+      examples: [{ type: [] }],
+      type: "object",
+    };
+    expect(normalizeAnthropicTypeArrays(schema)).toEqual(schema);
+    expect(
+      normalizeAnthropicTypeArrays({
+        $defs: { optionalName: { type: ["string", "null"] } },
+        allOf: [{ properties: { count: { type: ["integer", "null"] } } }],
+        items: { type: ["boolean", "null"] },
+      }),
+    ).toEqual({
+      $defs: { optionalName: { anyOf: [{ type: "string" }, { type: "null" }] } },
+      allOf: [
+        {
+          properties: {
+            count: { anyOf: [{ type: "integer" }, { type: "null" }] },
+          },
+        },
+      ],
+      items: { anyOf: [{ type: "boolean" }, { type: "null" }] },
+    });
+  });
+
+  it.each([{ type: [] }, { type: ["string", 1] }])(
+    "rejects invalid type arrays %j",
+    (typeSchema) => {
+      expect(() => normalizeAnthropicTypeArrays(typeSchema)).toThrow(/at least one string type/u);
+    },
+  );
 
   it("converts document data URLs and ignores unsupported content blocks", async () => {
     const create = vi.fn().mockResolvedValue(anthropicResponse());
