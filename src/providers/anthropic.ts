@@ -7,7 +7,7 @@ import {
   parseOptionalJsonObject,
 } from "../utils.js";
 import type { JsonObject } from "../types.js";
-import { isNumber, isObject, isString } from "../utils.js";
+import { isJsonObject, isNumber, isObject, isString } from "../utils.js";
 import { readFile } from "node:fs/promises";
 
 import Anthropic from "@anthropic-ai/sdk";
@@ -277,6 +277,148 @@ function reasoningConfiguration(params: CompletionParams) {
   };
 }
 
+const JSON_SCHEMA_MAPPING_KEYWORDS = new Set([
+  "$defs",
+  "dependencies",
+  "dependentSchemas",
+  "patternProperties",
+  "properties",
+]);
+const JSON_SCHEMA_COMPOSITION_KEYWORDS = ["anyOf", "oneOf", "allOf"] as const;
+const JSON_SCHEMA_SEQUENCE_KEYWORDS = new Set([...JSON_SCHEMA_COMPOSITION_KEYWORDS, "prefixItems"]);
+const JSON_SCHEMA_VALUE_KEYWORDS = new Set([
+  "additionalItems",
+  "additionalProperties",
+  "contains",
+  "contentSchema",
+  "else",
+  "if",
+  "not",
+  "propertyNames",
+  "then",
+  "unevaluatedItems",
+  "unevaluatedProperties",
+]);
+const JSON_SCHEMA_TYPE_SPECIFIC_KEYWORDS = {
+  array: new Set(["contains", "items", "maxItems", "minItems", "uniqueItems"]),
+  boolean: new Set<string>(),
+  integer: new Set(["exclusiveMaximum", "exclusiveMinimum", "maximum", "minimum", "multipleOf"]),
+  null: new Set<string>(),
+  number: new Set(["exclusiveMaximum", "exclusiveMinimum", "maximum", "minimum", "multipleOf"]),
+  object: new Set([
+    "additionalProperties",
+    "maxProperties",
+    "minProperties",
+    "patternProperties",
+    "properties",
+    "required",
+  ]),
+  string: new Set(["format", "maxLength", "minLength", "pattern"]),
+} as const satisfies Record<string, ReadonlySet<string>>;
+
+function jsonSchemaTypeSpecificKeywords(typeName: string): ReadonlySet<string> {
+  if (!Object.hasOwn(JSON_SCHEMA_TYPE_SPECIFIC_KEYWORDS, typeName)) return new Set();
+  // SAFETY: Object.hasOwn confirms typeName is one of the typed schema-type keys.
+  return JSON_SCHEMA_TYPE_SPECIFIC_KEYWORDS[
+    typeName as keyof typeof JSON_SCHEMA_TYPE_SPECIFIC_KEYWORDS
+  ];
+}
+
+function normalizeAnthropicSchemaKeyword(keyword: string, value: JsonValue): JsonValue {
+  if (JSON_SCHEMA_MAPPING_KEYWORDS.has(keyword) && isJsonObject(value)) {
+    return Object.fromEntries(
+      Object.entries(value).flatMap(([name, schema]) =>
+        schema === undefined ? [] : [[name, normalizeAnthropicTypeArrays(schema)]],
+      ),
+    );
+  }
+  if (JSON_SCHEMA_SEQUENCE_KEYWORDS.has(keyword) && Array.isArray(value)) {
+    return value.map((schema) => normalizeAnthropicTypeArrays(schema));
+  }
+  if (keyword === "items" && Array.isArray(value)) {
+    return value.map((schema) => normalizeAnthropicTypeArrays(schema));
+  }
+  if (keyword === "items" || JSON_SCHEMA_VALUE_KEYWORDS.has(keyword)) {
+    return normalizeAnthropicTypeArrays(value);
+  }
+  return value;
+}
+
+function containsJsonSchemaRef(value: JsonValue): boolean {
+  if (!isJsonObject(value)) return false;
+  if ("$ref" in value) return true;
+
+  for (const [keyword, item] of Object.entries(value)) {
+    if (item === undefined) continue;
+    if (JSON_SCHEMA_MAPPING_KEYWORDS.has(keyword) && isJsonObject(item)) {
+      if (
+        Object.values(item).some((schema) => schema !== undefined && containsJsonSchemaRef(schema))
+      ) {
+        return true;
+      }
+    } else if (JSON_SCHEMA_SEQUENCE_KEYWORDS.has(keyword) && Array.isArray(item)) {
+      if (item.some((schema) => containsJsonSchemaRef(schema))) return true;
+    } else if (keyword === "items" && Array.isArray(item)) {
+      if (item.some((schema) => containsJsonSchemaRef(schema))) return true;
+    } else if (keyword === "items" || JSON_SCHEMA_VALUE_KEYWORDS.has(keyword)) {
+      if (containsJsonSchemaRef(item)) return true;
+    }
+  }
+  return false;
+}
+
+/** Rewrite JSON Schema type arrays that Anthropic structured output rejects. */
+export function normalizeAnthropicTypeArrays(value: JsonValue): JsonValue {
+  if (!isJsonObject(value)) return value;
+  if ("definitions" in value) {
+    throw new TypeError(
+      "The Anthropic SDK schema transformer does not support legacy 'definitions'; use '$defs' and update '#/definitions/...' references to '#/$defs/...'",
+    );
+  }
+
+  const normalized: JsonObject = {};
+  for (const [key, item] of Object.entries(value)) {
+    normalized[key] = item === undefined ? item : normalizeAnthropicSchemaKeyword(key, item);
+  }
+  const typeValue = value.type;
+  if (!Array.isArray(typeValue)) return normalized;
+  if (typeValue.length === 0 || !typeValue.every((item) => isString(item))) {
+    throw new TypeError("JSON Schema type arrays must contain at least one string type");
+  }
+
+  const compositionConstraints = JSON_SCHEMA_COMPOSITION_KEYWORDS.filter(
+    (keyword) => keyword in normalized,
+  ).map((keyword) => ({ [keyword]: normalized[keyword] }));
+  if (compositionConstraints.some((constraint) => containsJsonSchemaRef(constraint))) {
+    throw new TypeError(
+      "Anthropic structured outputs do not support combining type arrays with composition constraints containing $ref",
+    );
+  }
+  const typeSpecificKeywords = new Set(
+    typeValue.flatMap((typeName) =>
+      [...jsonSchemaTypeSpecificKeywords(typeName)].filter((keyword) => keyword in normalized),
+    ),
+  );
+  const typeUnion = {
+    anyOf: typeValue.map((typeName) => {
+      const extras: JsonObject = {};
+      for (const keyword of jsonSchemaTypeSpecificKeywords(typeName)) {
+        if (keyword in normalized) extras[keyword] = normalized[keyword];
+      }
+      return { type: typeName, ...extras };
+    }),
+  };
+  const excluded = new Set(["type", ...JSON_SCHEMA_COMPOSITION_KEYWORDS, ...typeSpecificKeywords]);
+  const rootKeywords: JsonObject = {};
+  for (const [key, item] of Object.entries(normalized)) {
+    if (!excluded.has(key)) rootKeywords[key] = item;
+  }
+  if (compositionConstraints.length > 0) {
+    return { ...rootKeywords, allOf: [typeUnion, ...compositionConstraints] };
+  }
+  return { ...rootKeywords, ...typeUnion };
+}
+
 function structuredOutputConfiguration(responseFormat: JsonObject | undefined) {
   if (responseFormat === undefined) return {};
   if (responseFormat.type !== "json_schema") {
@@ -292,7 +434,14 @@ function structuredOutputConfiguration(responseFormat: JsonObject | undefined) {
   if (!isObject(schema)) {
     throw new TypeError("responseFormat.json_schema.schema must be an object.");
   }
-  return { output_config: { format: { schema, type: "json_schema" } } };
+  return {
+    output_config: {
+      format: {
+        schema: normalizeAnthropicTypeArrays(parseJsonObject(schema)),
+        type: "json_schema",
+      },
+    },
+  };
 }
 
 function nativeInputBlock(block: MessagesInputContentBlock) {
