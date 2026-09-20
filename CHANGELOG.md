@@ -1,5 +1,17 @@
 # any-llm-ts
 
+## 0.6.0
+
+### Minor Changes
+
+- 13272a4: Sync with Python any-llm through `bcfdbe0`: add the provider-neutral Files API with Anthropic support, preserve cache write and TTL usage details, and close provider streams when a wrapped stream is closed.
+- 13272a4: Sync with Python any-llm through `c472371`: migrate Azure OpenAI to `/openai/v1/`, close SDK streams that are abandoned before the first read, and map Messages content-filter/refusal turns to `stopReason: "refusal"`.
+- 13272a4: Sync with Python any-llm through `f72e739`: prefix Messages tool-result errors in content, add OpenAI and Azure OpenAI Files, and target Otari's `/api/v1` gateway origin.
+
+### Patch Changes
+
+- c75c18c: Sync with Python any-llm through `412bc59`: rewrite Anthropic JSON Schema type arrays into equivalent unions before structured output.
+
 ## 0.5.1
 
 ### Patch Changes
