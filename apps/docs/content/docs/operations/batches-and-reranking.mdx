@@ -48,8 +48,9 @@ job lifecycle while returning the same normalized batch types.
 
 ## Reranking
 
-Reranking scores candidate documents against a query. Cohere and Otari currently advertise the
-operation.
+Reranking scores candidate documents against a query. Cohere, Otari, Together, and Voyage
+currently advertise the operation. Together serves no rerank model on its serverless tier, so a
+dedicated endpoint is required. Voyage maps `topN` to `topK` and does not return a response id.
 
 ```ts
 import { rerank } from "any-llm-ts";

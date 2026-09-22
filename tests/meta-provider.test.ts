@@ -124,6 +124,12 @@ describe("Meta provider", () => {
     await expect(
       provider.messages({ ...common, container: "container_123" }),
     ).rejects.toBeInstanceOf(UnsupportedParameterError);
+    await expect(
+      provider.messages({
+        ...common,
+        container: { skills: [{ skillId: "xlsx", type: "anthropic" }] },
+      }),
+    ).rejects.toBeInstanceOf(UnsupportedParameterError);
     await expect(provider.messages({ ...common, stopSequences: ["stop"] })).rejects.toBeInstanceOf(
       UnsupportedParameterError,
     );

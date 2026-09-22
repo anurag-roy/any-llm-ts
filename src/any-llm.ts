@@ -113,6 +113,9 @@ export class AnyLLM {
         ...includeWhen(!(options.clientOptions === undefined), {
           clientOptions: options.clientOptions,
         }),
+        ...includeWhen(!(options.unifiedExceptions === undefined), {
+          unifiedExceptions: options.unifiedExceptions,
+        }),
       }),
     );
   }

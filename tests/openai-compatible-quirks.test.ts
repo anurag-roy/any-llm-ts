@@ -332,6 +332,88 @@ describe("OpenAI-compatible provider quirks", () => {
     ).rejects.toBeInstanceOf(InvalidRequestError);
   });
 
+  it("forwards DeepSeek auto and none tool_choice while thinking is enabled", async () => {
+    const create = vi.fn().mockResolvedValue(response("ok"));
+    const provider = new OpenAIProvider(
+      config("deepseek", { reasoningDirective: "deepseek" }),
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+    await provider.completion({
+      messages: [{ content: "hello", role: "user" }],
+      model: "deepseek-v4-flash",
+      toolChoice: "auto",
+      tools: [{ function: { name: "lookup" }, type: "function" }],
+    });
+    await provider.completion({
+      messages: [{ content: "hello", role: "user" }],
+      model: "deepseek-v4-flash",
+      reasoningEffort: "high",
+      toolChoice: "none",
+      tools: [{ function: { name: "lookup" }, type: "function" }],
+    });
+    expect(create.mock.calls[0]?.[0].tool_choice).toBe("auto");
+    expect(create.mock.calls[1]?.[0].tool_choice).toBe("none");
+  });
+
+  it("rejects forced DeepSeek tool_choice while thinking is effectively enabled", async () => {
+    const provider = new OpenAIProvider(
+      config("deepseek", { reasoningDirective: "deepseek" }),
+      {},
+      fakeClient(),
+    );
+    await expect(
+      provider.completion({
+        messages: [{ content: "hello", role: "user" }],
+        model: "deepseek-v4-flash",
+        toolChoice: "required",
+        tools: [{ function: { name: "lookup" }, type: "function" }],
+      }),
+    ).rejects.toBeInstanceOf(InvalidRequestError);
+    await expect(
+      provider.completion({
+        messages: [{ content: "hello", role: "user" }],
+        model: "deepseek-v4-flash",
+        reasoningEffort: "none",
+        providerOptions: { thinking: { type: "enabled" } },
+        toolChoice: { function: { name: "lookup" }, type: "function" },
+        tools: [{ function: { name: "lookup" }, type: "function" }],
+      }),
+    ).rejects.toBeInstanceOf(InvalidRequestError);
+  });
+
+  it("forwards forced DeepSeek tool_choice when thinking is explicitly disabled", async () => {
+    const create = vi.fn().mockResolvedValue(response("ok"));
+    const provider = new OpenAIProvider(
+      config("deepseek", { reasoningDirective: "deepseek" }),
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+    await provider.completion({
+      messages: [{ content: "hello", role: "user" }],
+      model: "deepseek-v4-flash",
+      reasoningEffort: "none",
+      toolChoice: "required",
+      tools: [{ function: { name: "lookup" }, type: "function" }],
+    });
+    await provider.completion({
+      messages: [{ content: "hello", role: "user" }],
+      model: "deepseek-v4-flash",
+      providerOptions: { thinking: { type: "disabled" } },
+      reasoningEffort: "high",
+      toolChoice: { function: { name: "lookup" }, type: "function" },
+      tools: [{ function: { name: "lookup" }, type: "function" }],
+    });
+    expect(create.mock.calls[0]?.[0]).toMatchObject({
+      thinking: { type: "disabled" },
+      tool_choice: "required",
+    });
+    expect(create.mock.calls[1]?.[0]).toMatchObject({
+      thinking: { type: "disabled" },
+      tool_choice: { function: { name: "lookup" }, type: "function" },
+    });
+  });
+
   it("keeps caller DeepSeek thinking and user_id overrides without validating the shared user", async () => {
     const create = vi.fn().mockResolvedValue(response("ok"));
     const provider = new OpenAIProvider(
@@ -447,6 +529,55 @@ describe("OpenAI-compatible provider quirks", () => {
       expect(nonStreaming.choices[0]?.message).toMatchObject({
         content: "final",
         reasoning: "plan",
+      });
+    }
+
+    const mixed = await new OpenAIProvider(
+      config("sambanova", { xmlReasoning: true }),
+      {},
+      fakeClient({
+        chat: {
+          completions: {
+            create: vi
+              .fn()
+              .mockResolvedValueOnce(
+                response("<think>first</think>middle<thinking>second</thinking>end"),
+              )
+              .mockResolvedValueOnce(response("<think></think>answer<think>kept</think>")),
+          },
+        },
+      }),
+    ).completion({
+      messages: [{ content: "hello", role: "user" }],
+      model: "model-1",
+    });
+    expect(Symbol.asyncIterator in mixed).toBe(false);
+    if (!(Symbol.asyncIterator in mixed)) {
+      expect(mixed.choices[0]?.message).toMatchObject({
+        content: "middleend",
+        reasoning: "first\nsecond",
+      });
+    }
+
+    const emptyThenReal = await new OpenAIProvider(
+      config("sambanova", { xmlReasoning: true }),
+      {},
+      fakeClient({
+        chat: {
+          completions: {
+            create: vi.fn().mockResolvedValue(response("<think></think>answer<think>kept</think>")),
+          },
+        },
+      }),
+    ).completion({
+      messages: [{ content: "hello", role: "user" }],
+      model: "model-1",
+    });
+    expect(Symbol.asyncIterator in emptyThenReal).toBe(false);
+    if (!(Symbol.asyncIterator in emptyThenReal)) {
+      expect(emptyThenReal.choices[0]?.message).toMatchObject({
+        content: "answer",
+        reasoning: "kept",
       });
     }
 

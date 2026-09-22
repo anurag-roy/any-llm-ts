@@ -348,7 +348,7 @@ export class WatsonxProvider extends BaseProvider {
   private readonly configuration: WatsonxConfiguration;
 
   constructor(options: ProviderOptions = {}, client?: WatsonxClientLike) {
-    super();
+    super(options);
     const apiBase = options.apiBase ?? getEnvironmentVariable("WATSONX_URL");
     this.configuration = createWatsonxConfiguration(options, client);
     this.metadata = completeProviderMetadata({

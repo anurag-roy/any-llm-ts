@@ -489,6 +489,28 @@ describe("Otari provider", () => {
         max_tokens: 10,
       }),
     );
+
+    await expect(
+      provider.messages({
+        container: {
+          id: "container_123",
+          skills: [{ skillId: "xlsx", type: "anthropic", version: "latest" }],
+        },
+        maxTokens: 10,
+        messages: [{ content: "hello", role: "user" }],
+        model: "anthropic:claude",
+      }),
+    ).resolves.toMatchObject({
+      stopReason: "end_turn",
+    });
+    expect(message).toHaveBeenCalledWith(
+      expect.objectContaining({
+        container: {
+          id: "container_123",
+          skills: [{ skill_id: "xlsx", type: "anthropic", version: "latest" }],
+        },
+      }),
+    );
   });
 
   it("normalizes embeddings, models, images, audio, moderation, and reranking", async () => {

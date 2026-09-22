@@ -1,7 +1,7 @@
 {
   "source": {
     "repository": "mozilla-ai/any-llm",
-    "commit": "412bc5964676ad3c8de34cc0c00269bd4e195345"
+    "commit": "ebc4e367a7dc55f15cc85a664a2b6807ac48d387"
   },
   "providers": [
     "anthropic",
@@ -397,7 +397,7 @@
       "xai",
       "zai"
     ],
-    "rerank": ["cohere", "otari"],
+    "rerank": ["cohere", "otari", "together", "voyage"],
     "responses": [
       "azureopenai",
       "fireworks",

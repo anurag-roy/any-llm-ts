@@ -16,6 +16,7 @@ import {
   completionStreamToMessageEvents,
   completionToMessageResponse,
   messagesToCompletionParams,
+  normalizeMessagesContainer,
 } from "../src/messages-compat.js";
 import type {
   ChatCompletion,
@@ -386,6 +387,68 @@ describe("Messages compatibility API", () => {
       message: expect.stringContaining("container"),
       name: "UnsupportedOperationError",
     });
+    await expect(
+      llm.messages({
+        container: { skills: [{ skillId: "xlsx", type: "anthropic", version: "latest" }] },
+        maxTokens: 10,
+        messages: [],
+        model: "model-a",
+      }),
+    ).rejects.toBeInstanceOf(UnsupportedOperationError);
+    await expect(
+      llm.messages({
+        container: {},
+        maxTokens: 10,
+        messages: [],
+        model: "model-a",
+      }),
+    ).rejects.toThrow(/id, skills, or both/u);
+  });
+
+  it("accepts Anthropic Skills container objects and rejects malformed ones", () => {
+    expect(
+      normalizeMessagesContainer({
+        skills: [{ skill_id: "xlsx", type: "anthropic", version: "latest" }],
+      }),
+    ).toEqual({
+      skills: [{ skillId: "xlsx", type: "anthropic", version: "latest" }],
+    });
+    expect(
+      normalizeMessagesContainer({
+        id: "container_123",
+        skills: [
+          { skillId: "skill_abc", type: "custom" },
+          { skillId: "pdf", type: "anthropic", version: "latest" },
+        ],
+      }),
+    ).toEqual({
+      id: "container_123",
+      skills: [
+        { skillId: "skill_abc", type: "custom" },
+        { skillId: "pdf", type: "anthropic", version: "latest" },
+      ],
+    });
+    expect(() => normalizeMessagesContainer({ skills: [{ type: "anthropic" }] })).toThrow(
+      /skillId/u,
+    );
+    expect(() =>
+      normalizeMessagesContainer({ skills: [{ skillId: "xlsx", type: "unknown" }] }),
+    ).toThrow(/anthropic" or "custom/u);
+    expect(() =>
+      normalizeMessagesContainer({
+        skills: [{ skillId: "xlsx", type: "anthropic" }],
+        unexpected: true,
+      }),
+    ).toThrow(/unexpected fields/u);
+    expect(() => normalizeMessagesContainer(123)).toThrow(/string container ID/u);
+    expect(() =>
+      normalizeMessagesContainer({
+        skills: Array.from({ length: 21 }, (_, index) => ({
+          skillId: `skill-${index}`,
+          type: "anthropic",
+        })),
+      }),
+    ).toThrow(/20 entries/u);
   });
 
   it("maps optional request controls and uncommon content blocks", () => {

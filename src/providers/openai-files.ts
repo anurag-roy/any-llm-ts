@@ -403,6 +403,7 @@ export async function downloadOpenAIFile(
   client: OpenAI,
   params: DownloadFileParams,
   providerName: string,
+  conversion: { unifiedExceptions?: boolean } = {},
 ): Promise<FileDownload> {
   validateOpenAIFileId(params.fileId, providerName);
   const chunkSize = params.chunkSize ?? 65_536;
@@ -418,6 +419,9 @@ export async function downloadOpenAIFile(
   return createFileDownload(
     response.status,
     headers,
-    mapAsyncIterableErrors(chunks, providerName, { fileOperation: true }),
+    mapAsyncIterableErrors(chunks, providerName, {
+      fileOperation: true,
+      unifiedExceptions: conversion.unifiedExceptions !== false,
+    }),
   );
 }

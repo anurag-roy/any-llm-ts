@@ -390,7 +390,7 @@ export class AzureProvider extends BaseProvider {
   private readonly client: AzureInferenceClientLike;
 
   constructor(options: ProviderOptions = {}, client?: AzureInferenceClientLike) {
-    super();
+    super(options);
     const apiBase = options.apiBase ?? getEnvironmentVariable("AZURE_AI_CHAT_ENDPOINT");
     this.client = client ?? createAzureClient(options);
     this.metadata = completeProviderMetadata({

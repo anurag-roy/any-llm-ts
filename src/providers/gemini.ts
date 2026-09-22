@@ -1022,7 +1022,7 @@ export class GeminiProvider extends BaseProvider {
     client?: GoogleGenAI,
     config: GeminiProviderConfig = {},
   ) {
-    super();
+    super(options);
     this.providerName = config.name ?? "gemini";
     const apiBase =
       options.apiBase ?? getEnvironmentVariable(config.envApiBase ?? "GOOGLE_GEMINI_BASE_URL");

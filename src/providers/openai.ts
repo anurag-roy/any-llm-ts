@@ -317,6 +317,7 @@ interface DeepSeekChatRequest {
   seed?: number;
   service_tier?: string;
   thinking?: JsonValue;
+  tool_choice?: CompletionParams["toolChoice"];
   user?: string;
   user_id?: JsonValue;
 }
@@ -377,6 +378,20 @@ function applyDeepSeekV4ChatRequest(request: DeepSeekChatRequest, params: Comple
   }
   if (controls.thinkingType !== undefined && request.thinking === undefined) {
     request.thinking = { type: controls.thinkingType };
+  }
+
+  if (request.tool_choice === undefined) return;
+  const thinking = isObject(request.thinking) ? parseJsonObject(request.thinking) : undefined;
+  const thinkingEnabled = thinking?.type !== "disabled";
+  const forcedToolChoice = request.tool_choice === "required" || isObject(request.tool_choice);
+  if (thinkingEnabled && forcedToolChoice) {
+    throw new InvalidRequestError(
+      `tool_choice=${JSON.stringify(request.tool_choice)} is not supported while DeepSeek thinking is enabled; ` +
+        "DeepSeek returns HTTP 400 for required or named-function tool choices in thinking mode. " +
+        'Disable thinking (providerOptions: { thinking: { type: "disabled" } }) or use ' +
+        "tool_choice='auto' or 'none'.",
+      { provider: "deepseek" },
+    );
   }
 }
 
@@ -477,15 +492,15 @@ function normalizeFinishReason(
 const reasoningTags = ["reasoning_content", "thinking", "think", "chain_of_thought"] as const;
 
 function extractXmlReasoning(content: string) {
+  const tagNames = reasoningTags
+    .map((tag) => tag.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"))
+    .join("|");
+  const pattern = new RegExp(`<(${tagNames})>([\\s\\S]*?)</\\1>`, "gu");
   const reasoning: string[] = [];
-  let remaining = content;
-  for (const tag of reasoningTags) {
-    const pattern = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, "gu");
-    remaining = remaining.replace(pattern, (_match, value: string) => {
-      reasoning.push(value);
-      return "";
-    });
-  }
+  const remaining = content.replace(pattern, (_match, _tag: string, value: string) => {
+    if (value.length > 0) reasoning.push(value);
+    return "";
+  });
   const joined = reasoning.join("\n");
   return {
     content: remaining.trim(),
@@ -868,7 +883,7 @@ export class OpenAIProvider extends BaseProvider {
   protected readonly config: OpenAIProviderConfig;
 
   constructor(config: OpenAIProviderConfig, options: ProviderOptions = {}, client?: OpenAI) {
-    super();
+    super(options);
     this.config = config;
     const apiBase = options.apiBase ?? getEnvironmentVariable(config.envApiBase) ?? config.apiBase;
     const clientOptions = options.clientOptions ?? {};
@@ -1312,9 +1327,13 @@ export class OpenAIProvider extends BaseProvider {
 
   override downloadFile(params: DownloadFileParams): Promise<FileDownload> {
     if (!this.metadata.fileOperations.includes("download")) return super.downloadFile(params);
-    return this.execute(() => downloadOpenAIFile(this.client, params, this.metadata.name), {
-      fileOperation: true,
-    });
+    return this.execute(
+      () =>
+        downloadOpenAIFile(this.client, params, this.metadata.name, {
+          unifiedExceptions: this.unifiedExceptions,
+        }),
+      { fileOperation: true },
+    );
   }
 
   protected completionRequest(params: CompletionParams) {

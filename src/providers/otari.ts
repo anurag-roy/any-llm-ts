@@ -6,6 +6,7 @@ import { isFunction, isJsonValue, isNumber, isObject, isString } from "../utils.
 import { readFile } from "node:fs/promises";
 
 import { BatchNotCompleteError } from "../errors.js";
+import { normalizeMessagesContainer } from "../messages-compat.js";
 import { normalizeOutputConfig } from "../structured-output.js";
 import type {
   Batch,
@@ -608,6 +609,9 @@ export class OtariProvider extends OpenAIProvider {
       const { providerOptions, ...request } = params;
       if (request.outputFormat !== undefined) {
         request.outputFormat = normalizeOutputConfig(request.outputFormat);
+      }
+      if (request.container !== undefined) {
+        request.container = normalizeMessagesContainer(request.container);
       }
       const messageRequest: JsonObject = parseJsonObject(
         snakeize(request),

@@ -59,6 +59,7 @@ import {
   timeoutRequestOptions,
   unixTimestamp,
 } from "../utils.js";
+import { messagesContainerRequest, normalizeMessagesContainer } from "../messages-compat.js";
 import { BaseProvider } from "./base.js";
 import { completeProviderMetadata } from "../provider-metadata.js";
 import {
@@ -231,12 +232,17 @@ function convertTools(tools: CompletionParams["tools"]) {
     if (tool.type !== "function" || !("function" in tool)) return [];
     // SAFETY: The provider contract establishes the asserted representation at this boundary.
     const functionTool = tool as FunctionTool;
+    const parameters = isObject(functionTool.function.parameters)
+      ? parseJsonObject(functionTool.function.parameters)
+      : {};
     return [
       {
         description: functionTool.function.description,
-        input_schema: functionTool.function.parameters ?? {
-          additionalProperties: true,
+        input_schema: {
+          properties: {},
+          required: [],
           type: "object",
+          ...parameters,
         },
         name: functionTool.function.name,
       },
@@ -256,9 +262,9 @@ function convertToolChoice(value: CompletionParams["toolChoice"]): AnthropicTool
   if (value === "auto") return { type: "auto" };
   if (value === "required") return { type: "any" };
   if (isObject(value)) {
-    const fn = value.function;
-    if (isObject(fn)) {
-      const name = parseJsonObject(fn).name;
+    const named = value.function ?? value.custom;
+    if (isObject(named)) {
+      const name = parseJsonObject(named).name;
       if (isString(name)) return { name, type: "tool" };
     }
   }
@@ -479,7 +485,10 @@ export function nativeMessagesRequest(params: MessagesParams) {
   return {
     betas: params.betas,
     cache_control: params.cacheControl,
-    container: params.container,
+    container:
+      params.container === undefined
+        ? undefined
+        : messagesContainerRequest(normalizeMessagesContainer(params.container)),
     context_management: params.contextManagement,
     max_tokens: params.maxTokens,
     messages: params.messages.map((message) => ({
@@ -773,7 +782,7 @@ export class AnthropicProvider extends BaseProvider {
     client?: Anthropic,
     config: AnthropicProviderConfig = {},
   ) {
-    super();
+    super(options);
     this.providerName = config.name ?? "anthropic";
     const apiBase =
       options.apiBase ?? getEnvironmentVariable(config.envApiBase ?? "ANTHROPIC_BASE_URL");
@@ -1020,9 +1029,13 @@ export class AnthropicProvider extends BaseProvider {
 
   override downloadFile(params: DownloadFileParams): Promise<FileDownload> {
     if (!this.metadata.fileOperations.includes("download")) return super.downloadFile(params);
-    return this.execute(() => downloadAnthropicFile(this.client, params, this.providerName), {
-      fileOperation: true,
-    });
+    return this.execute(
+      () =>
+        downloadAnthropicFile(this.client, params, this.providerName, {
+          unifiedExceptions: this.unifiedExceptions,
+        }),
+      { fileOperation: true },
+    );
   }
 
   private completionRequest(params: CompletionParams) {

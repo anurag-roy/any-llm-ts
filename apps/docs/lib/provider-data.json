@@ -2627,7 +2627,7 @@
       "moderation": false,
       "pdfInput": false,
       "reasoning": true,
-      "rerank": false,
+      "rerank": true,
       "responses": false,
       "streaming": true,
       "vision": true
@@ -2852,7 +2852,7 @@
       "moderation": false,
       "pdfInput": false,
       "reasoning": false,
-      "rerank": false,
+      "rerank": true,
       "responses": false,
       "streaming": false,
       "vision": false
