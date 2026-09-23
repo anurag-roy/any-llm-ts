@@ -447,6 +447,7 @@ export async function downloadAnthropicFile(
   client: Anthropic,
   params: DownloadFileParams,
   providerName: string,
+  conversion: { unifiedExceptions?: boolean } = {},
 ): Promise<FileDownload> {
   validateFileId(params.fileId, providerName);
   const chunkSize = params.chunkSize ?? 65_536;
@@ -466,6 +467,9 @@ export async function downloadAnthropicFile(
   return createFileDownload(
     response.status,
     headers,
-    mapAsyncIterableErrors(chunks, providerName, { fileOperation: true }),
+    mapAsyncIterableErrors(chunks, providerName, {
+      fileOperation: true,
+      unifiedExceptions: conversion.unifiedExceptions !== false,
+    }),
   );
 }

@@ -1893,6 +1893,7 @@ describe("Gemini provider", () => {
         embedding: true,
         listModels: true,
         reasoning: true,
+        responses: true,
         streaming: true,
         vision: true,
       },
@@ -1902,7 +1903,7 @@ describe("Gemini provider", () => {
     });
     expect(AnyLLM.getSupportedProviders()).toContain("gemini");
     expect(AnyLLM.getProviderMetadata("gemini")).toMatchObject({
-      capabilities: { batch: true, embedding: true, vision: true },
+      capabilities: { batch: true, embedding: true, responses: true, vision: true },
       name: "gemini",
     });
   });

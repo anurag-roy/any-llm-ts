@@ -98,4 +98,11 @@ describe("Python source parity contract", () => {
     expect(AnyLLM.getProviderMetadata("otari").promptCacheKeySupport).toBe("passthrough");
     expect(AnyLLM.getProviderMetadata("anthropic").promptCacheKeySupport).toBe("unsupported");
   });
+
+  it("matches Python native Messages providers", () => {
+    const expected = new Set(sourceParity.messagesNative);
+    for (const metadata of AnyLLM.getAllProviderMetadata()) {
+      expect(metadata.messagesNative, metadata.name).toBe(expected.has(metadata.name));
+    }
+  });
 });

@@ -259,7 +259,7 @@ export class SageMakerProvider extends BaseProvider {
   private readonly client: SageMakerRuntimeClientLike;
 
   constructor(options: ProviderOptions = {}, client?: SageMakerRuntimeClientLike) {
-    super();
+    super(options);
     const apiBase = options.apiBase ?? getEnvironmentVariable("SAGEMAKER_ENDPOINT_URL");
     this.client = client ?? createSageMakerClient(options);
     this.metadata = completeProviderMetadata({

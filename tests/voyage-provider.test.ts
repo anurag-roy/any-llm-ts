@@ -4,13 +4,17 @@ import {
   AnyLLM,
   MissingApiKeyError,
   UnsupportedOperationError,
+  UnsupportedParameterError,
   VoyageProvider,
 } from "../src/index.js";
 import type { VoyageAIClientLike } from "../src/providers/voyage.js";
 
-function fakeVoyage(embed: ReturnType<typeof vi.fn>): VoyageAIClientLike {
+function fakeVoyage(
+  embed: ReturnType<typeof vi.fn>,
+  rerank: ReturnType<typeof vi.fn> = vi.fn(),
+): VoyageAIClientLike {
   // SAFETY: This test double implements the provider surface exercised by this test.
-  return { embed } as VoyageAIClientLike;
+  return { embed, rerank } as VoyageAIClientLike;
 }
 
 afterEach(() => {
@@ -107,9 +111,57 @@ describe("Voyage provider", () => {
         embedding: true,
         listModels: false,
         messages: false,
+        rerank: true,
         streaming: false,
       },
       name: "voyage",
     });
+  });
+
+  it("maps topN to topK and omits a Voyage response id", async () => {
+    const rerank = vi.fn().mockResolvedValue({
+      data: [
+        { index: 0, relevanceScore: 0.3 },
+        { index: 1, relevanceScore: 0.9 },
+      ],
+      usage: { totalTokens: 17 },
+    });
+    const provider = new VoyageProvider({}, fakeVoyage(vi.fn(), rerank));
+    await expect(
+      provider.rerank({
+        documents: ["doc1", "doc2"],
+        model: "rerank-2.5-lite",
+        providerOptions: { truncation: false },
+        query: "What does a reranker do?",
+        topN: 1,
+      }),
+    ).resolves.toMatchObject({
+      results: [
+        { index: 1, relevanceScore: 0.9 },
+        { index: 0, relevanceScore: 0.3 },
+      ],
+      usage: { totalTokens: 17 },
+    });
+    expect(rerank).toHaveBeenCalledWith({
+      documents: ["doc1", "doc2"],
+      model: "rerank-2.5-lite",
+      query: "What does a reranker do?",
+      topK: 1,
+      truncation: false,
+    });
+    const result = await provider.rerank({
+      documents: ["doc1", "doc2"],
+      model: "rerank-2.5-lite",
+      query: "q",
+    });
+    expect(result.id).toBeUndefined();
+    await expect(
+      provider.rerank({
+        documents: ["d"],
+        maxTokensPerDoc: 512,
+        model: "rerank-2.5-lite",
+        query: "q",
+      }),
+    ).rejects.toBeInstanceOf(UnsupportedParameterError);
   });
 });

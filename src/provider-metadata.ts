@@ -194,6 +194,7 @@ type GeneratedProviderMetadataKeys =
   | "fileOperations"
   | "gateway"
   | "id"
+  | "messagesNative"
   | "promptCacheKeySupport"
   | "provenance"
   | "tier";
@@ -238,6 +239,7 @@ export function completeProviderMetadata(
     fileOperations,
     gateway: metadata.gateway ?? gatewayContract(family),
     id: metadata.id ?? name,
+    messagesNative: metadata.messagesNative === true,
     name,
     promptCacheKeySupport: metadata.promptCacheKeySupport ?? providerPromptCacheKeySupport(name),
     provenance: metadata.provenance ?? {
@@ -416,6 +418,9 @@ export function validateProviderMetadata(metadata: ProviderMetadata, expectedId?
     throw new TypeError(`Provider "${metadata.id}" has invalid file operations.`);
   }
 
+  if (!isBoolean(metadata.messagesNative)) {
+    throw new TypeError(`Provider "${metadata.id}" messagesNative must be boolean.`);
+  }
   if (!isBoolean(metadata.requiresApiKey)) {
     throw new TypeError(`Provider "${metadata.id}" requiresApiKey must be boolean.`);
   }

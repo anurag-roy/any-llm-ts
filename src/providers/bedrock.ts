@@ -795,7 +795,7 @@ export class BedrockProvider extends BaseProvider {
   private readonly s3: BedrockS3ClientLike;
 
   constructor(options: ProviderOptions = {}, clients: BedrockProviderClients = {}) {
-    super();
+    super(options);
     const resolved = createClients(options, clients);
     this.control = resolved.control;
     this.runtime = resolved.runtime;

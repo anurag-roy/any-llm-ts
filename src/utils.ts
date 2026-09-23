@@ -1,4 +1,4 @@
-import { normalizeProviderError } from "./errors.js";
+import { AnyLLMError, normalizeProviderError } from "./errors.js";
 import type { CompletionOperationOptions, JsonObject, JsonValue } from "./types.js";
 
 type OptionalKeys<Value extends object> = {
@@ -158,6 +158,7 @@ class ClosingMappedAsyncIterator<TInput, TOutput>
     private readonly mapper: (value: TInput) => TOutput,
     private readonly provider?: string,
     private readonly fileOperation = false,
+    private readonly unifiedExceptions = true,
   ) {}
 
   [Symbol.asyncIterator](): AsyncIterator<TOutput> {
@@ -177,6 +178,7 @@ class ClosingMappedAsyncIterator<TInput, TOutput>
     } catch (error) {
       await this.close();
       if (this.provider === undefined) throw error;
+      if (!this.unifiedExceptions && !(error instanceof AnyLLMError)) throw error;
       throw normalizeProviderError(error, this.provider, { fileOperation: this.fileOperation });
     }
   }
@@ -252,13 +254,14 @@ export function mapAsyncIterable<TInput, TOutput>(
 export function mapAsyncIterableErrors<T>(
   iterable: AsyncIterable<T>,
   provider: string,
-  options: { fileOperation?: boolean } = {},
+  options: { fileOperation?: boolean; unifiedExceptions?: boolean } = {},
 ): AsyncIterable<T> {
   return new ClosingMappedAsyncIterator(
     iterable,
     (value) => value,
     provider,
     options.fileOperation === true,
+    options.unifiedExceptions !== false,
   );
 }
 

@@ -1,5 +1,6 @@
 import type { JsonObject } from "../types.js";
 import {
+  AnyLLMError,
   UnsupportedOperationError,
   UnsupportedParameterError,
   normalizeProviderError,
@@ -31,6 +32,7 @@ import type {
   ModerationParams,
   ModerationResponse,
   ProviderMetadata,
+  ProviderOptions,
   RerankParams,
   RerankResponse,
   ResponsesParams,
@@ -45,6 +47,7 @@ import {
   completionStreamToMessageEvents,
   completionToMessageResponse,
   messagesToCompletionParams,
+  normalizeMessagesContainer,
 } from "../messages-compat.js";
 import { mapAsyncIterableErrors } from "../utils.js";
 
@@ -52,6 +55,11 @@ export abstract class BaseProvider {
   abstract readonly metadata: ProviderMetadata;
   /** Whether native Messages structured output can be streamed. */
   readonly supportsMessagesStructuredOutputStreaming: boolean = false;
+  protected readonly unifiedExceptions: boolean;
+
+  constructor(options: ProviderOptions = {}) {
+    this.unifiedExceptions = options.unifiedExceptions !== false;
+  }
 
   abstract completion(
     params: CompletionParams,
@@ -135,6 +143,7 @@ export abstract class BaseProvider {
     options?: CompletionOperationOptions,
   ): Promise<AsyncIterable<MessageStreamEvent> | MessageResponse> {
     if (params.container !== undefined) {
+      normalizeMessagesContainer(params.container);
       throw new UnsupportedOperationError("Messages container continuity", this.metadata.name);
     }
     if (params.contextManagement !== undefined || (params.betas?.length ?? 0) > 0) {
@@ -170,6 +179,7 @@ export abstract class BaseProvider {
     try {
       return await operation();
     } catch (error) {
+      if (!this.unifiedExceptions && !(error instanceof AnyLLMError)) throw error;
       throw normalizeProviderError(error, this.metadata.name, conversion);
     }
   }
@@ -178,6 +188,9 @@ export abstract class BaseProvider {
     stream: AsyncIterable<T>,
     conversion: { fileOperation?: boolean } = {},
   ): AsyncIterable<T> {
-    return mapAsyncIterableErrors(stream, this.metadata.name, conversion);
+    return mapAsyncIterableErrors(stream, this.metadata.name, {
+      ...conversion,
+      unifiedExceptions: this.unifiedExceptions,
+    });
   }
 }

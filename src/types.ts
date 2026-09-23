@@ -697,14 +697,31 @@ export interface MessagesTool {
   cacheControl?: JsonObject;
 }
 
+export interface MessageContainerSkill {
+  skillId: string;
+  type: "anthropic" | "custom";
+  version?: string;
+}
+
+export interface MessageContainer {
+  id?: string;
+  skills?: MessageContainerSkill[];
+}
+
 export interface MessagesParams {
   maxTokens: number;
   messages: MessagesInputMessage[];
   model: string;
   betas?: string[];
   cacheControl?: JsonObject;
-  /** Container identifier for continuing a previous top-level Anthropic container. */
-  container?: string;
+  /**
+   * Container identifier, or an object with optional `id` and `skills`.
+   * A string reuses an existing container. An object selects Skills for a
+   * fresh container or reuses one while attaching Skills. Anthropic deprecates
+   * inferring a skills beta header; `messages.create` accepts the object on
+   * the GA path.
+   */
+  container?: MessageContainer | string;
   contextManagement?: JsonObject;
   metadata?: JsonObject;
   /** Raw Anthropic `output_config`, or a bare `{ type: "json_schema", schema }` format object. */
@@ -715,13 +732,16 @@ export interface MessagesParams {
   stopSequences?: string[];
   stream?: boolean;
   system?: MessagesTextBlock[] | string;
+  /** Controls randomness. Anthropic deprecates this for current Claude models. */
   temperature?: number;
   thinking?: JsonObject;
   /** Per-request timeout in seconds. */
   timeout?: number;
   toolChoice?: JsonObject;
   tools?: MessagesTool[];
+  /** Restricts sampling to the top K options. Anthropic deprecates this for current Claude models. */
   topK?: number;
+  /** Controls nucleus sampling. Anthropic deprecates this for current Claude models. */
   topP?: number;
 }
 
@@ -945,6 +965,11 @@ export interface ProviderMetadata {
   fileOperations: FileOperation[];
   gateway: ProviderGatewayContract;
   id: string;
+  /**
+   * Whether `messages()` talks to a real Anthropic Messages endpoint instead of
+   * the Completions compatibility bridge.
+   */
+  messagesNative: boolean;
   name: string;
   promptCacheKeySupport: PromptCacheKeySupport;
   provenance: ProviderAdapterProvenance;
@@ -958,6 +983,13 @@ export interface ProviderOptions {
   apiBase?: string;
   apiKey?: string;
   clientOptions?: object;
+  /**
+   * Convert provider SDK errors to the unified any-llm-ts hierarchy.
+   * Defaults to true. An explicit false keeps the original error for this
+   * instance, including errors raised while iterating a stream or downloading
+   * a file.
+   */
+  unifiedExceptions?: boolean;
 }
 
 export interface OpenAICompatibleOptions extends ProviderOptions {

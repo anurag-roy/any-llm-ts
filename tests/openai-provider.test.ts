@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  AuthenticationError,
   BatchNotCompleteError,
   MissingApiKeyError,
   ProviderError,
@@ -1057,5 +1058,50 @@ describe("Azure OpenAI provider", () => {
     });
     expect(requests[0]?.searchParams.get("api-version")).toBe("v1");
     expect(requests[0]?.searchParams.get("request")).toBe("yes");
+  });
+});
+
+describe("per-instance unified exceptions", () => {
+  const original = Object.assign(new Error("Invalid API key"), { status: 401 });
+
+  it("normalizes provider errors by default", async () => {
+    const create = vi.fn().mockRejectedValue(original);
+    const provider = new OpenAIProvider(
+      config,
+      { apiKey: "secret" },
+      fakeClient({ chat: { completions: { create } } }),
+    );
+    await expect(
+      provider.completion({
+        messages: [{ content: "hello", role: "user" }],
+        model: "model-a",
+      }),
+    ).rejects.toBeInstanceOf(AuthenticationError);
+  });
+
+  it("keeps the original SDK error when unifiedExceptions is false", async () => {
+    const create = vi.fn().mockRejectedValue(original);
+    const provider = new OpenAIProvider(
+      config,
+      { apiKey: "secret", unifiedExceptions: false },
+      fakeClient({ chat: { completions: { create } } }),
+    );
+    await expect(
+      provider.completion({
+        messages: [{ content: "hello", role: "user" }],
+        model: "model-a",
+      }),
+    ).rejects.toBe(original);
+  });
+
+  it("still raises AnyLLMError subclasses when unification is disabled", async () => {
+    const provider = new OpenAIProvider(
+      config,
+      { apiKey: "secret", unifiedExceptions: false },
+      fakeClient(),
+    );
+    await expect(
+      provider.rerank({ documents: ["a"], model: "r", query: "q" }),
+    ).rejects.toBeInstanceOf(UnsupportedOperationError);
   });
 });

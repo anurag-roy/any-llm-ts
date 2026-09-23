@@ -61,6 +61,7 @@ export class MetaProvider extends OpenAIProvider {
         documentationUrl: "https://dev.meta.ai/docs",
         envApiBase: "META_API_BASE",
         envApiKey: "MODEL_API_KEY",
+        messagesNative: true,
         name: "meta",
       },
       { ...options, apiBase, apiKey },

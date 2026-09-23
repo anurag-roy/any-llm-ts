@@ -263,6 +263,49 @@ describe("Anthropic provider", () => {
     });
   });
 
+  it("copies complete tool schemas and named custom tool_choice", async () => {
+    const schema = {
+      $defs: { count: { type: "integer" } },
+      additionalProperties: false,
+      properties: {},
+      required: [],
+      type: "object",
+      "x-future": { enabled: false },
+    };
+    const create = vi.fn().mockResolvedValue({
+      content: [{ text: "ok", type: "text" }],
+      id: "msg-tools",
+      model: "claude-test",
+      role: "assistant",
+      stop_reason: "end_turn",
+      type: "message",
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+    const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
+    await provider.completion({
+      messages: [{ content: "hello", role: "user" }],
+      model: "claude-test",
+      parallelToolCalls: false,
+      toolChoice: { custom: { name: "ping" }, type: "custom" },
+      tools: [{ function: { name: "ping", parameters: schema }, type: "function" }],
+    });
+    const request = parseJsonObject(create.mock.calls[0]?.[0]);
+    expect(request.tool_choice).toEqual({
+      disable_parallel_tool_use: true,
+      name: "ping",
+      type: "tool",
+    });
+    expect(request.tools).toMatchObject([
+      {
+        input_schema: schema,
+        name: "ping",
+      },
+    ]);
+    expect(request.tools?.[0]?.input_schema).not.toBe(schema);
+    schema.additionalProperties = true;
+    expect(request.tools?.[0]?.input_schema).toMatchObject({ additionalProperties: false });
+  });
+
   it("forwards container continuity on the native Messages request", async () => {
     const create = vi.fn().mockResolvedValue({
       content: [{ text: "ok", type: "text" }],
@@ -282,6 +325,40 @@ describe("Anthropic provider", () => {
     });
     expect(create.mock.calls[0]?.[0]).toMatchObject({
       container: "container_123",
+    });
+  });
+
+  it("forwards Anthropic Skills container objects on the native Messages request", async () => {
+    const create = vi.fn().mockResolvedValue({
+      content: [{ text: "ok", type: "text" }],
+      id: "msg-skills",
+      model: "claude-test",
+      role: "assistant",
+      stop_reason: "end_turn",
+      type: "message",
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+    const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
+    await provider.messages({
+      container: {
+        id: "container_123",
+        skills: [
+          { skillId: "xlsx", type: "anthropic", version: "latest" },
+          { skillId: "skill_abc", type: "custom" },
+        ],
+      },
+      maxTokens: 100,
+      messages: [{ content: "Create a spreadsheet", role: "user" }],
+      model: "claude-test",
+    });
+    expect(create.mock.calls[0]?.[0]).toMatchObject({
+      container: {
+        id: "container_123",
+        skills: [
+          { skill_id: "xlsx", type: "anthropic", version: "latest" },
+          { skill_id: "skill_abc", type: "custom" },
+        ],
+      },
     });
   });
 

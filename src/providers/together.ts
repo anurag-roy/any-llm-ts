@@ -1,4 +1,4 @@
-import { parseJsonObject } from "../utils.js";
+import { includeWhen, parseJsonObject, parseJsonObjectArray } from "../utils.js";
 import type { JsonObject } from "../types.js";
 import { isFunction, isNumber, isObject, isString } from "../utils.js";
 import { basename } from "node:path";
@@ -6,7 +6,6 @@ import { readFile } from "node:fs/promises";
 
 import type OpenAI from "openai";
 import { toFile } from "openai";
-
 import { BatchNotCompleteError, ProviderError, UnsupportedParameterError } from "../errors.js";
 import type {
   Batch,
@@ -19,6 +18,8 @@ import type {
   CreateBatchParams,
   ListBatchesParams,
   ProviderOptions,
+  RerankParams,
+  RerankResponse,
 } from "../types.js";
 import { OpenAIProvider } from "./openai.js";
 
@@ -36,6 +37,38 @@ const statusMap = {
 
 function record<Value>(value: Value): JsonObject {
   return isObject(value) ? parseJsonObject(value) : {};
+}
+
+function withoutRankFields(providerOptions: JsonObject | undefined): JsonObject {
+  if (providerOptions === undefined) return {};
+  return Object.fromEntries(
+    Object.entries(providerOptions).filter(
+      ([key]) => key !== "rank_fields" && key !== "rankFields",
+    ),
+  );
+}
+
+function normalizeTogetherRerank<Value>(value: Value): RerankResponse {
+  const response = record(value);
+  const rawResults = Array.isArray(response.results) ? parseJsonObjectArray(response.results) : [];
+  const results = rawResults
+    .flatMap((result) =>
+      isNumber(result.index) && isNumber(result.relevance_score ?? result.relevanceScore)
+        ? [
+            {
+              index: result.index,
+              relevanceScore: Number(result.relevance_score ?? result.relevanceScore),
+            },
+          ]
+        : [],
+    )
+    .sort((left, right) => right.relevanceScore - left.relevanceScore);
+  const usage = record(response.usage);
+  const totalTokens = usage.total_tokens ?? usage.totalTokens;
+  const normalized: RerankResponse = { results, raw: value };
+  if (isString(response.id)) normalized.id = response.id;
+  if (isNumber(totalTokens)) normalized.usage = { totalTokens };
+  return normalized;
 }
 
 function epoch<Value>(value: Value): number | undefined {
@@ -129,6 +162,7 @@ export class TogetherProvider extends OpenAIProvider {
           batch: true,
           embedding: true,
           reasoning: true,
+          rerank: true,
           vision: true,
         },
         documentationUrl: "https://docs.together.ai/reference/",
@@ -140,6 +174,43 @@ export class TogetherProvider extends OpenAIProvider {
       options,
       client,
     );
+  }
+
+  override rerank(params: RerankParams): Promise<RerankResponse> {
+    if (params.maxTokensPerDoc !== undefined) {
+      return Promise.reject(
+        new UnsupportedParameterError(
+          "maxTokensPerDoc",
+          "together",
+          "Together's rerank endpoint has no per-document truncation limit.",
+        ),
+      );
+    }
+    const rankFields = params.providerOptions?.rank_fields ?? params.providerOptions?.rankFields;
+    if (rankFields !== undefined) {
+      return Promise.reject(
+        new UnsupportedParameterError(
+          "rank_fields",
+          "together",
+          "Together only honors rank_fields when documents are JSON objects, and the rerank signature types documents as string[].",
+        ),
+      );
+    }
+    return this.execute(async () => {
+      const response = await this.client.post("/rerank", {
+        body: {
+          documents: params.documents,
+          model: params.model,
+          query: params.query,
+          ...includeWhen(!(params.topN === undefined), { top_n: params.topN }),
+          ...includeWhen(!(params.returnDocuments === undefined), {
+            return_documents: params.returnDocuments,
+          }),
+          ...withoutRankFields(params.providerOptions),
+        },
+      });
+      return normalizeTogetherRerank(response);
+    });
   }
 
   override completion(

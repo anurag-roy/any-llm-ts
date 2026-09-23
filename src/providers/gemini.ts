@@ -2,7 +2,7 @@ import { includeWhen } from "../utils.js";
 import type { JsonValue } from "../types.js";
 import { parseJsonObject } from "../utils.js";
 import type { JsonObject } from "../types.js";
-import { isObject, isString } from "../utils.js";
+import { isJsonObject, isObject, isString } from "../utils.js";
 import { readFile } from "node:fs/promises";
 
 import {
@@ -52,6 +52,9 @@ import type {
   ProviderCapabilities,
   ProviderMetadata,
   ProviderOptions,
+  Response,
+  ResponsesParams,
+  ResponseStreamEvent,
   Tool,
   ToolCall,
   ToolCallDelta,
@@ -59,6 +62,8 @@ import type {
 import {
   compactObject,
   getEnvironmentVariable,
+  isAsyncIterable,
+  isFunction,
   timeoutMilliseconds,
   unixTimestamp,
   isJsonValue,
@@ -66,6 +71,15 @@ import {
   parseJsonValue as validateJsonValue,
 } from "../utils.js";
 import { BaseProvider } from "./base.js";
+import {
+  convertInteractionToResponse,
+  convertResponsesParams,
+  interactionsApiVersion,
+  transportCreateParams,
+  type GeminiInteraction,
+  type GeminiInteractionCreateParams,
+} from "./gemini-interactions.js";
+import { convertInteractionStream } from "./gemini-interactions-stream.js";
 import { completeProviderMetadata } from "../provider-metadata.js";
 
 const INLINE_DATA_LIMIT_BYTES = 20 * 1024 * 1024;
@@ -126,7 +140,7 @@ const geminiCapabilities: ProviderCapabilities = {
   pdfInput: true,
   reasoning: true,
   rerank: false,
-  responses: false,
+  responses: true,
   streaming: true,
   vision: true,
 };
@@ -173,6 +187,23 @@ function decodeEncodedJson(value: string | Uint8Array): string {
 
 function encodedJsonLength(value: string | Uint8Array): number {
   return isString(value) ? value.length : value.byteLength;
+}
+
+interface GeminiClientHttpOptions {
+  apiVersion?: string;
+  api_version?: string;
+}
+
+function geminiClientOptions(
+  clientOptions: ProviderOptions["clientOptions"],
+): { httpOptions?: GeminiClientHttpOptions } | undefined {
+  if (!isJsonObject(clientOptions)) return undefined;
+  const httpOptions = clientOptions.httpOptions;
+  if (!isJsonObject(httpOptions)) return {};
+  const http: GeminiClientHttpOptions = {};
+  if (isString(httpOptions.apiVersion)) http.apiVersion = httpOptions.apiVersion;
+  if (isString(httpOptions.api_version)) http.api_version = httpOptions.api_version;
+  return { httpOptions: http };
 }
 
 function resolveApiKey(options: ProviderOptions): string {
@@ -1015,6 +1046,7 @@ function inlinedBatchRequest(entry: JsonObject, provider: string): InlinedReques
 export class GeminiProvider extends BaseProvider {
   readonly metadata: ProviderMetadata;
   private readonly client: GoogleGenAI;
+  private readonly interactionsVersion: string | undefined;
   private readonly providerName: string;
 
   constructor(
@@ -1022,13 +1054,17 @@ export class GeminiProvider extends BaseProvider {
     client?: GoogleGenAI,
     config: GeminiProviderConfig = {},
   ) {
-    super();
+    super(options);
     this.providerName = config.name ?? "gemini";
     const apiBase =
       options.apiBase ?? getEnvironmentVariable(config.envApiBase ?? "GOOGLE_GEMINI_BASE_URL");
     this.client = client ?? new GoogleGenAI(mergeClientOptions(options, apiBase));
+    this.interactionsVersion = interactionsApiVersion(geminiClientOptions(options.clientOptions));
     this.metadata = completeProviderMetadata({
-      capabilities: { ...geminiCapabilities },
+      capabilities: {
+        ...geminiCapabilities,
+        responses: this.providerName === "gemini",
+      },
       documentationUrl: config.documentationUrl ?? "https://ai.google.dev/gemini-api/docs",
       envApiBase: config.envApiBase ?? "GOOGLE_GEMINI_BASE_URL",
       envApiKey: config.envApiKey ?? "GEMINI_API_KEY or GOOGLE_API_KEY",
@@ -1058,6 +1094,31 @@ export class GeminiProvider extends BaseProvider {
       const result = this.normalizeCompletion(response, params.model);
       assertStructuredOutputCompleted(params, result, this.providerName);
       return result;
+    });
+  }
+
+  override responses(
+    params: ResponsesParams,
+  ): Promise<AsyncIterable<ResponseStreamEvent> | Response> {
+    if (!this.metadata.capabilities.responses) return super.responses(params);
+    return this.execute(async () => {
+      const extras = transportCreateParams(params.providerOptions);
+      const createParams: GeminiInteractionCreateParams = {
+        ...convertResponsesParams(params, this.providerName, this.interactionsVersion),
+        ...extras,
+        ...includeWhen(params.timeout !== undefined, { timeout: params.timeout }),
+      };
+      const created = await this.interactionsCreate(createParams);
+      if (params.stream === true) {
+        if (!isAsyncIterable(created)) {
+          throw new TypeError("Gemini Interactions streaming did not return a stream.");
+        }
+        return this.protectStream(convertInteractionStream(created, params.model));
+      }
+      if (isAsyncIterable(created)) {
+        throw new TypeError("Gemini Interactions returned a stream for a non-streaming request.");
+      }
+      return convertInteractionToResponse(created, params.model);
     });
   }
 
@@ -1235,6 +1296,22 @@ export class GeminiProvider extends BaseProvider {
       });
       return { results };
     });
+  }
+
+  private interactionsCreate(
+    params: GeminiInteractionCreateParams,
+  ): Promise<AsyncIterable<unknown> | GeminiInteraction> {
+    // SAFETY: The GenAI client optionally exposes interactions.create; tests inject the same surface.
+    const client = this.client as { interactions?: { create?: unknown } };
+    const interactions = client.interactions;
+    if (!isObject(interactions) || !isFunction(interactions.create)) {
+      throw new TypeError("Gemini Interactions API is not available on this client.");
+    }
+    // SAFETY: isFunction established callability; tests and the GenAI SDK share this create contract.
+    const create = interactions.create as (
+      request: GeminiInteractionCreateParams,
+    ) => Promise<AsyncIterable<unknown> | GeminiInteraction>;
+    return create(params);
   }
 
   private completionRequest(params: CompletionParams): GenerateContentParameters {

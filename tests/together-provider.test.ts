@@ -68,8 +68,61 @@ describe("Together provider", () => {
   it("uses the native adapter and advertises embeddings and batches", () => {
     expect(createProvider("together", { apiKey: "secret" })).toBeInstanceOf(TogetherProvider);
     expect(AnyLLM.getProviderMetadata("together")).toMatchObject({
-      capabilities: { batch: true, embedding: true },
+      capabilities: { batch: true, embedding: true, rerank: true },
     });
+  });
+
+  it("reranks documents and sorts by descending relevance", async () => {
+    const post = vi.fn().mockResolvedValue({
+      id: "rerank-together-1",
+      results: [
+        { index: 0, relevance_score: 0.3 },
+        { index: 1, relevance_score: 0.9 },
+      ],
+      usage: { total_tokens: 42 },
+    });
+    const sdk = client();
+    sdk.post = post;
+    const provider = new TogetherProvider({ apiKey: "secret" }, sdk);
+    await expect(
+      provider.rerank({
+        documents: ["doc1", "doc2"],
+        model: "Salesforce/Llama-Rank-v1",
+        query: "What does a reranker do?",
+        topN: 2,
+      }),
+    ).resolves.toMatchObject({
+      id: "rerank-together-1",
+      results: [
+        { index: 1, relevanceScore: 0.9 },
+        { index: 0, relevanceScore: 0.3 },
+      ],
+      usage: { totalTokens: 42 },
+    });
+    expect(post).toHaveBeenCalledWith("/rerank", {
+      body: {
+        documents: ["doc1", "doc2"],
+        model: "Salesforce/Llama-Rank-v1",
+        query: "What does a reranker do?",
+        top_n: 2,
+      },
+    });
+    await expect(
+      provider.rerank({
+        documents: ["d"],
+        maxTokensPerDoc: 512,
+        model: "Salesforce/Llama-Rank-v1",
+        query: "q",
+      }),
+    ).rejects.toBeInstanceOf(UnsupportedParameterError);
+    await expect(
+      provider.rerank({
+        documents: ["d"],
+        model: "Salesforce/Llama-Rank-v1",
+        providerOptions: { rank_fields: ["title"] },
+        query: "q",
+      }),
+    ).rejects.toBeInstanceOf(UnsupportedParameterError);
   });
 
   it("normalizes embeddings through Together's OpenAI-compatible endpoint", async () => {

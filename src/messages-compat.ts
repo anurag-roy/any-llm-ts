@@ -16,6 +16,8 @@ import type {
   ContentBlockStopEvent,
   FileContentPart,
   ImageUrlContentPart,
+  MessageContainer,
+  MessageContainerSkill,
   MessageContentBlock,
   MessageContentPart,
   MessageDeltaEvent,
@@ -696,4 +698,94 @@ export function completionStreamToMessageEvents(
   stream: AsyncIterable<ChatCompletionChunk>,
 ): AsyncIterable<MessageStreamEvent> {
   return produceClosingAsyncIterable(stream, messageEventsFromCompletionStream);
+}
+
+const CONTAINER_SKILL_ID_LIMIT = 64;
+const CONTAINER_SKILL_LIMIT = 20;
+
+function boundedIdentifier(value: JsonValue | undefined, field: string): string {
+  if (!isString(value) || value.length === 0 || value.length > CONTAINER_SKILL_ID_LIMIT) {
+    throw new TypeError(
+      `container skill ${field} must be a string between 1 and ${CONTAINER_SKILL_ID_LIMIT} characters`,
+    );
+  }
+  return value;
+}
+
+function normalizeContainerSkill(value: JsonValue): MessageContainerSkill {
+  if (!isObject(value) || Array.isArray(value)) {
+    throw new TypeError("container skills must be objects");
+  }
+  const skill = parseJsonObject(value);
+  const extra = Object.keys(skill).filter(
+    (key) => key !== "skillId" && key !== "skill_id" && key !== "type" && key !== "version",
+  );
+  if (extra.length > 0) {
+    throw new TypeError(`container skill has unexpected fields: ${extra.join(", ")}`);
+  }
+  if (skill.type !== "anthropic" && skill.type !== "custom") {
+    throw new TypeError('container skill type must be "anthropic" or "custom"');
+  }
+  const normalized: MessageContainerSkill = {
+    skillId: boundedIdentifier(skill.skillId ?? skill.skill_id, "skillId"),
+    type: skill.type,
+  };
+  if (skill.version !== undefined) {
+    normalized.version = boundedIdentifier(skill.version, "version");
+  }
+  return normalized;
+}
+
+export function normalizeMessagesContainer(
+  value: JsonValue | MessageContainer,
+): MessageContainer | string {
+  if (isString(value)) return value;
+  if (!isObject(value) || Array.isArray(value)) {
+    throw new TypeError(
+      "container must be a string container ID or an object with optional id and skills",
+    );
+  }
+  const container = parseJsonObject(value);
+  const extra = Object.keys(container).filter((key) => key !== "id" && key !== "skills");
+  if (extra.length > 0) {
+    throw new TypeError(`container object has unexpected fields: ${extra.join(", ")}`);
+  }
+  const normalized: MessageContainer = {};
+  if (container.id !== undefined) {
+    if (!isString(container.id) || container.id.length === 0) {
+      throw new TypeError("container id must be a non-empty string");
+    }
+    normalized.id = container.id;
+  }
+  if (container.skills !== undefined) {
+    if (!Array.isArray(container.skills)) {
+      throw new TypeError("container skills must be an array");
+    }
+    if (container.skills.length > CONTAINER_SKILL_LIMIT) {
+      throw new TypeError(
+        `container skills cannot contain more than ${CONTAINER_SKILL_LIMIT} entries`,
+      );
+    }
+    normalized.skills = container.skills.map((skill) =>
+      normalizeContainerSkill(parseJsonValue(skill, "container skill")),
+    );
+  }
+  if (normalized.id === undefined && normalized.skills === undefined) {
+    throw new TypeError("container object must set id, skills, or both");
+  }
+  return normalized;
+}
+
+export function messagesContainerRequest(value: MessageContainer | string): JsonObject | string {
+  if (isString(value)) return value;
+  return {
+    ...includeWhen(!(value.id === undefined), { id: value.id }),
+    ...includeWhen(!(value.skills === undefined), {
+      skills: value.skills?.map((skill) => ({
+        skill_id: skill.skillId,
+        type: skill.type,
+        ...includeWhen(!(skill.version === undefined), { version: skill.version }),
+      })),
+    }),
+  };
 }

@@ -1,7 +1,7 @@
 {
   "source": {
     "repository": "mozilla-ai/any-llm",
-    "commit": "412bc5964676ad3c8de34cc0c00269bd4e195345"
+    "commit": "57186d5c7ed95992315b2ed35d86f4854fe9d8ce"
   },
   "providers": [
     "anthropic",
@@ -58,6 +58,7 @@
     "xai",
     "zai"
   ],
+  "messagesNative": ["anthropic", "azureanthropic", "meta", "otari", "vertexaianthropic"],
   "verifiedProviders": [
     "anthropic",
     "azureopenai",
@@ -397,10 +398,11 @@
       "xai",
       "zai"
     ],
-    "rerank": ["cohere", "otari"],
+    "rerank": ["cohere", "otari", "together", "voyage"],
     "responses": [
       "azureopenai",
       "fireworks",
+      "gemini",
       "gmi",
       "groq",
       "huggingface",
