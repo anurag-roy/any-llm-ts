@@ -117,6 +117,7 @@ interface OpenAIProviderConfig {
   gatewayControls?: boolean;
   name: string;
   fileOperations?: FileOperation[];
+  messagesNative?: boolean;
   promptCacheKeySupport?: ProviderMetadata["promptCacheKeySupport"];
   quirks?: OpenAIProviderQuirks;
   requiresApiKey?: boolean;
@@ -911,6 +912,7 @@ export class OpenAIProvider extends BaseProvider {
           promptCacheKeySupport: config.promptCacheKeySupport,
         }),
         fileOperations: config.fileOperations ?? [],
+        ...includeWhen(config.messagesNative === true, { messagesNative: true }),
       },
       config.gatewayControls === false ? "other" : "openai",
     );

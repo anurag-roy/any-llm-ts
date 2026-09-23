@@ -801,6 +801,7 @@ export class AnthropicProvider extends BaseProvider {
         envApiBase: config.envApiBase ?? "ANTHROPIC_BASE_URL",
         envApiKey: config.envApiKey ?? "ANTHROPIC_API_KEY",
         fileOperations: this.providerName === "anthropic" ? anthropicFileOperations : [],
+        messagesNative: true,
         name: this.providerName,
         requiresApiKey: config.requiresApiKey ?? true,
         ...includeWhen(!(apiBase === undefined), { apiBase }),

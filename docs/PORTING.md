@@ -46,7 +46,7 @@ Composition keeps the public client stable even when a provider adapter has a co
 
 ## Current scope
 
-The port now tracks the Python source at commit `ebc4e367a7dc55f15cc85a664a2b6807ac48d387` with:
+The port now tracks the Python source at commit `57186d5c7ed95992315b2ed35d86f4854fe9d8ce` with:
 
 - the same 53 registered provider names and the same stateless operation set;
 - native adapters for Anthropic, Google Gen AI, Bedrock, SageMaker, Azure AI Inference, Cohere,
@@ -55,8 +55,8 @@ The port now tracks the Python source at commit `ebc4e367a7dc55f15cc85a664a2b680
   embeddings, models, batches, reranking, images, audio, moderation, and provider-hosted files;
 - provider-specific request and response behavior for compatible providers rather than empty marker
   classes;
-- provider tiers, prompt-cache-key policy, PDF and image capability metadata, normalized errors,
-  and dual ESM/CommonJS output.
+- provider tiers, prompt-cache-key policy, native Messages metadata, PDF and image capability
+  metadata, normalized errors, and dual ESM/CommonJS output.
 
 The machine-readable source manifest in `parity/python-source.json` and `tests/parity.test.ts` keep
 provider names, operations, capability flags, and verification tiers from drifting. Two inherited

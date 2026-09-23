@@ -516,6 +516,7 @@ export class OtariProvider extends OpenAIProvider {
         envApiBase: "OTARI_API_BASE or GATEWAY_API_BASE",
         envApiKey: "OTARI_AI_TOKEN or GATEWAY_API_KEY",
         gatewayControls: false,
+        messagesNative: true,
         name: "otari",
         requiresApiKey: false,
       },

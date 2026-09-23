@@ -6,6 +6,8 @@ description: Use a normalized Messages-shaped API across native and compatible p
 `messages()` accepts Messages-style content blocks, tools, thinking controls, and stream events.
 Anthropic-family adapters use their native Messages protocol. Other compatible providers translate
 the request through chat completions and translate the result back into `MessageResponse`.
+`metadata.messagesNative` is true only for providers that call a real Anthropic Messages endpoint
+(`anthropic`, `azureanthropic`, `vertexaianthropic`, `meta`, and `otari`).
 
 ```ts
 import { messages } from "any-llm-ts";

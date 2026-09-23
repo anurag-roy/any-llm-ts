@@ -85,6 +85,26 @@ describe("AnyLLM registry and facade", () => {
     metadata.capabilities.completion = false;
     expect(AnyLLM.getProviderMetadata("openai").capabilities.completion).toBe(true);
     expect(AnyLLM.getAllProviderMetadata().length).toBe(AnyLLM.getSupportedProviders().length);
+    expect(AnyLLM.getProviderMetadata("anthropic").messagesNative).toBe(true);
+    expect(AnyLLM.getProviderMetadata("openai").messagesNative).toBe(false);
+  });
+
+  it("treats cascadia, llamacpp, and vllm API keys as optional and honors their env vars", () => {
+    expect(AnyLLM.getProviderMetadata("cascadia")).toMatchObject({
+      envApiKey: "CASCADIA_API_KEY",
+      requiresApiKey: false,
+    });
+    expect(AnyLLM.getProviderMetadata("llamacpp")).toMatchObject({
+      envApiKey: "LLAMACPP_API_KEY",
+      requiresApiKey: false,
+    });
+    expect(AnyLLM.getProviderMetadata("vllm")).toMatchObject({
+      envApiKey: "VLLM_API_KEY",
+      requiresApiKey: false,
+    });
+    expect(() => AnyLLM.create("cascadia")).not.toThrow();
+    expect(() => AnyLLM.create("llamacpp")).not.toThrow();
+    expect(() => AnyLLM.create("vllm")).not.toThrow();
   });
 
   it("exposes complete stable descriptors without a provider switch", () => {
@@ -196,6 +216,9 @@ describe("AnyLLM registry and facade", () => {
       },
       (metadata: ProviderMetadata) => {
         Reflect.deleteProperty(metadata, "requiresApiKey");
+      },
+      (metadata: ProviderMetadata) => {
+        Reflect.deleteProperty(metadata, "messagesNative");
       },
       (metadata: ProviderMetadata) => {
         Reflect.deleteProperty(metadata.gateway.completion.normalizedOutput, "tools");

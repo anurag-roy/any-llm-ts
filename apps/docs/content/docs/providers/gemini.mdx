@@ -1,6 +1,6 @@
 ---
 title: Gemini
-description: Use Google's native Gemini API for completions, streaming, tools, thinking, multimodal input, embeddings, and model discovery.
+description: Use Google's native Gemini API for completions, streaming, tools, thinking, multimodal input, embeddings, Responses, and model discovery.
 ---
 
 The `gemini` adapter uses Google's official `@google/genai` SDK. It translates the common
@@ -186,13 +186,34 @@ const models = await gemini.listModels({ pageSize: 20 });
 Gemini embeddings accept a string or an array of strings and return float vectors. Base64
 embedding output is not supported. Model listing consumes all pages returned by the SDK.
 
+## Responses
+
+Text-only `responses()` calls use Google's Interactions API and return an OpenAI-shaped `Response`.
+`completion()` continues to use `generateContent`. The supported subset is a string `input` plus
+optional `instructions`, `maxOutputTokens`, `timeout`, and streaming. Tools, media, chaining,
+structured output, `store`, `metadata`, and `background` raise `UnsupportedParameterError` before
+any request is sent.
+
+```ts
+const response = await gemini.responses({
+  model: "gemini-3.5-flash",
+  input: "Explain event loops in one paragraph.",
+  instructions: "Be concise.",
+  maxOutputTokens: 256,
+});
+
+console.log(response.output_text);
+```
+
+Set `stream: true` to receive the OpenAI Responses event lifecycle. Vertex AI keeps Responses
+disabled; it never imports the Interactions path.
+
 ## Capability boundary
 
 The adapter advertises completions, streaming, thinking, image and PDF input, embeddings, model
-listing, and batch jobs. Batch creation accepts `/v1/chat/completions` JSONL input, translates each
-record into an inline Google batch request, and normalizes inline results through the same
-completion converter.
+listing, batch jobs, and text-only Responses. Batch creation accepts `/v1/chat/completions` JSONL
+input, translates each record into an inline Google batch request, and normalizes inline results
+through the same completion converter.
 
 `messages()` is available through the common Messages compatibility layer. Image generation,
-moderation, speech, transcription, and the OpenAI Responses API remain outside this adapter's
-current public surface.
+moderation, speech, and transcription remain outside this adapter's current public surface.

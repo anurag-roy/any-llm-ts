@@ -1,7 +1,12 @@
 import { GoogleGenAI } from "@google/genai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { AnyLLM, MissingApiKeyError, VertexAIProvider } from "../src/index.js";
+import {
+  AnyLLM,
+  MissingApiKeyError,
+  UnsupportedOperationError,
+  VertexAIProvider,
+} from "../src/index.js";
 import type { ChatCompletion } from "../src/types.js";
 
 function fakeVertexAI() {
@@ -120,8 +125,17 @@ describe("Vertex AI provider", () => {
   it("is registered as a supported provider", () => {
     expect(AnyLLM.getSupportedProviders()).toContain("vertexai");
     expect(AnyLLM.getProviderMetadata("vertexai")).toMatchObject({
+      capabilities: { responses: false },
       name: "vertexai",
       requiresApiKey: false,
     });
+  });
+
+  it("does not expose Gemini Interactions Responses", async () => {
+    const sdk = fakeVertexAI();
+    const provider = new VertexAIProvider({}, sdk.client);
+    await expect(
+      provider.responses({ input: "Hello", model: "gemini-2.5-flash" }),
+    ).rejects.toBeInstanceOf(UnsupportedOperationError);
   });
 });

@@ -965,6 +965,11 @@ export interface ProviderMetadata {
   fileOperations: FileOperation[];
   gateway: ProviderGatewayContract;
   id: string;
+  /**
+   * Whether `messages()` talks to a real Anthropic Messages endpoint instead of
+   * the Completions compatibility bridge.
+   */
+  messagesNative: boolean;
   name: string;
   promptCacheKeySupport: PromptCacheKeySupport;
   provenance: ProviderAdapterProvenance;
