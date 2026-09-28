@@ -1,5 +1,12 @@
 # any-llm-ts
 
+## 0.7.0
+
+### Minor Changes
+
+- f270129: Sync with Python any-llm through `57186d5`: add Gemini text Interactions Responses (including streaming), expose `messagesNative` for Anthropic Messages endpoints, and treat Cascadia/llama.cpp API keys as optional.
+- f270129: Sync with Python any-llm through `ebc4e36`: add per-instance `unifiedExceptions`, DeepSeek thinking-mode `tool_choice` gating, Together and Voyage rerank, Anthropic Skills container objects, and preserve XML reasoning tag order.
+
 ## 0.6.0
 
 ### Minor Changes
