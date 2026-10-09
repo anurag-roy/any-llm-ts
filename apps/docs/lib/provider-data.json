@@ -900,7 +900,7 @@
       "batch": true,
       "completion": true,
       "embedding": true,
-      "files": false,
+      "files": true,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -915,6 +915,7 @@
     "documentationUrl": "https://ai.google.dev/gemini-api/docs",
     "envApiBase": "GOOGLE_GEMINI_BASE_URL",
     "envApiKey": "GEMINI_API_KEY or GOOGLE_API_KEY",
+    "fileOperations": ["delete", "list", "retrieve", "upload"],
     "name": "gemini",
     "requiresApiKey": true,
     "configuration": {
@@ -922,7 +923,6 @@
       "status": "unavailable"
     },
     "displayName": "Google Gemini",
-    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "unsupported",
@@ -1833,7 +1833,7 @@
       "pdfInput": false,
       "reasoning": true,
       "rerank": false,
-      "responses": false,
+      "responses": true,
       "streaming": true,
       "vision": true
     },

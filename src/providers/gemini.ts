@@ -42,12 +42,20 @@ import type {
   CompletionParams,
   CompletionUsage,
   CreateBatchParams,
+  DownloadFileParams,
   EmbeddingParams,
   EmbeddingResponse,
+  FileDeleted,
+  FileDownload,
+  FileMetadata,
+  FileOperation,
+  FilePage,
+  FileResourceParams,
   FinishReason,
   FunctionTool,
   ImageContent,
   ListBatchesParams,
+  ListFilesParams,
   Model,
   ProviderCapabilities,
   ProviderMetadata,
@@ -58,6 +66,7 @@ import type {
   Tool,
   ToolCall,
   ToolCallDelta,
+  UploadFileParams,
 } from "../types.js";
 import {
   compactObject,
@@ -80,6 +89,14 @@ import {
   type GeminiInteractionCreateParams,
 } from "./gemini-interactions.js";
 import { convertInteractionStream } from "./gemini-interactions-stream.js";
+import {
+  deleteGeminiFile,
+  downloadGeminiFile,
+  listGeminiFiles,
+  retrieveGeminiFile,
+  uploadGeminiFile,
+  type GeminiFileAuth,
+} from "./gemini-files.js";
 import { completeProviderMetadata } from "../provider-metadata.js";
 
 const INLINE_DATA_LIMIT_BYTES = 20 * 1024 * 1024;
@@ -144,6 +161,8 @@ const geminiCapabilities: ProviderCapabilities = {
   streaming: true,
   vision: true,
 };
+
+const geminiFileOperations: FileOperation[] = ["delete", "list", "retrieve", "upload"];
 
 export interface GeminiProviderConfig {
   documentationUrl?: string;
@@ -473,6 +492,15 @@ function assistantParts(
   return parts;
 }
 
+function pendingFunctionResponseParts(contents: Content[]): Part[] | undefined {
+  const last = contents.at(-1);
+  if (last?.role !== "user" || last.parts === undefined || last.parts.length === 0) {
+    return undefined;
+  }
+  if (last.parts.some((part) => part.functionResponse === undefined)) return undefined;
+  return last.parts;
+}
+
 function convertMessages(messages: ChatMessage[], provider: string): ConvertedMessages {
   const systemInstruction = messages
     .filter((message) => message.role === "developer" || message.role === "system")
@@ -492,13 +520,17 @@ function convertMessages(messages: ChatMessage[], provider: string): ConvertedMe
       continue;
     }
     if (message.role === "tool") {
-      contents.push({
-        parts: [functionResponse(message, namesById)],
-        role: "user",
-      });
+      const part = functionResponse(message, namesById);
+      const pending = pendingFunctionResponseParts(contents);
+      if (pending !== undefined) pending.push(part);
+      else contents.push({ parts: [part], role: "user" });
       continue;
     }
     contents.push({ parts: contentParts(message.content, provider), role: "user" });
+  }
+
+  if (contents.length === 0 && systemInstruction.length > 0) {
+    return { contents: [{ parts: [{ text: systemInstruction }], role: "user" }] };
   }
 
   return systemInstruction.length === 0 ? { contents } : { contents, systemInstruction };
@@ -1046,6 +1078,7 @@ function inlinedBatchRequest(entry: JsonObject, provider: string): InlinedReques
 export class GeminiProvider extends BaseProvider {
   readonly metadata: ProviderMetadata;
   private readonly client: GoogleGenAI;
+  private readonly fileAuth: GeminiFileAuth;
   private readonly interactionsVersion: string | undefined;
   private readonly providerName: string;
 
@@ -1058,7 +1091,15 @@ export class GeminiProvider extends BaseProvider {
     this.providerName = config.name ?? "gemini";
     const apiBase =
       options.apiBase ?? getEnvironmentVariable(config.envApiBase ?? "GOOGLE_GEMINI_BASE_URL");
+    const apiKey =
+      options.apiKey ??
+      getEnvironmentVariable("GEMINI_API_KEY") ??
+      getEnvironmentVariable("GOOGLE_API_KEY");
     this.client = client ?? new GoogleGenAI(mergeClientOptions(options, apiBase));
+    this.fileAuth = {
+      ...includeWhen(!(apiBase === undefined), { apiBase }),
+      ...includeWhen(!(apiKey === undefined), { apiKey }),
+    };
     this.interactionsVersion = interactionsApiVersion(geminiClientOptions(options.clientOptions));
     this.metadata = completeProviderMetadata({
       capabilities: {
@@ -1068,6 +1109,7 @@ export class GeminiProvider extends BaseProvider {
       documentationUrl: config.documentationUrl ?? "https://ai.google.dev/gemini-api/docs",
       envApiBase: config.envApiBase ?? "GOOGLE_GEMINI_BASE_URL",
       envApiKey: config.envApiKey ?? "GEMINI_API_KEY or GOOGLE_API_KEY",
+      fileOperations: this.providerName === "gemini" ? geminiFileOperations : [],
       name: this.providerName,
       requiresApiKey: config.requiresApiKey ?? true,
       ...includeWhen(!(apiBase === undefined), { apiBase }),
@@ -1256,6 +1298,37 @@ export class GeminiProvider extends BaseProvider {
       }
       return batches;
     });
+  }
+
+  override uploadFile(params: UploadFileParams): Promise<FileMetadata> {
+    if (!this.metadata.fileOperations.includes("upload")) return super.uploadFile(params);
+    return this.execute(() => uploadGeminiFile(this.client, params));
+  }
+
+  override listFiles(params: ListFilesParams = {}): Promise<FilePage> {
+    if (!this.metadata.fileOperations.includes("list")) return super.listFiles(params);
+    return this.execute(() => listGeminiFiles(this.client, params));
+  }
+
+  override retrieveFile(params: FileResourceParams): Promise<FileMetadata> {
+    if (!this.metadata.fileOperations.includes("retrieve")) return super.retrieveFile(params);
+    return this.execute(() => retrieveGeminiFile(this.client, params), { fileOperation: true });
+  }
+
+  override deleteFile(params: FileResourceParams): Promise<FileDeleted> {
+    if (!this.metadata.fileOperations.includes("delete")) return super.deleteFile(params);
+    return this.execute(() => deleteGeminiFile(this.client, params), { fileOperation: true });
+  }
+
+  override downloadFile(params: DownloadFileParams): Promise<FileDownload> {
+    if (this.providerName !== "gemini") return super.downloadFile(params);
+    return this.execute(
+      () =>
+        downloadGeminiFile(this.client, params, this.fileAuth, {
+          unifiedExceptions: this.unifiedExceptions,
+        }),
+      { fileOperation: true },
+    );
   }
 
   override retrieveBatchResults(

@@ -61,6 +61,6 @@ for await (const event of events) {
 }
 ```
 
-Gemini advertises Responses for a text-only Interactions subset. Vertex AI does not. Check
-`metadata.capabilities.responses` first. Unsupported providers reject with
-`UnsupportedOperationError`.
+Gemini advertises Responses for a text-only Interactions subset. Vertex AI does not. Nebius
+advertises an OpenAI-compatible `/v1/responses` endpoint. Check `metadata.capabilities.responses`
+first. Unsupported providers reject with `UnsupportedOperationError`.

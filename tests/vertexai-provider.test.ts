@@ -125,7 +125,8 @@ describe("Vertex AI provider", () => {
   it("is registered as a supported provider", () => {
     expect(AnyLLM.getSupportedProviders()).toContain("vertexai");
     expect(AnyLLM.getProviderMetadata("vertexai")).toMatchObject({
-      capabilities: { responses: false },
+      capabilities: { files: false, responses: false },
+      fileOperations: [],
       name: "vertexai",
       requiresApiKey: false,
     });

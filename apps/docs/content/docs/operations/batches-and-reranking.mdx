@@ -66,8 +66,12 @@ const result = await rerank({
   topN: 1,
 });
 
-console.log(result.results[0]?.index, result.results[0]?.relevanceScore);
+console.log(result.model, result.results[0]?.index, result.results[0]?.relevanceScore);
 ```
+
+`result.model` is the provider-reported serving model when one is available, otherwise the
+requested model. Together copies `model` from its rerank payload; Cohere and Voyage fall back to
+the requested model.
 
 Documents may be strings or provider-compatible records. Use `providerOptions` for reranker fields
 outside the common contract.

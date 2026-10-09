@@ -618,6 +618,8 @@ export interface RerankUsage {
 export interface RerankResponse {
   results: RerankResult[];
   id?: string;
+  /** Model that served the request: the provider-reported one when available, else the requested model. */
+  model?: string;
   meta?: RerankMeta;
   usage?: RerankUsage;
   raw?: unknown;
