@@ -1,6 +1,6 @@
 ---
 title: Gemini
-description: Use Google's native Gemini API for completions, streaming, tools, thinking, multimodal input, embeddings, Responses, and model discovery.
+description: Use Google's native Gemini API for completions, streaming, tools, thinking, multimodal input, embeddings, Responses, Files, and model discovery.
 ---
 
 The `gemini` adapter uses Google's official `@google/genai` SDK. It translates the common
@@ -54,8 +54,11 @@ console.log(response.choices[0]?.message.content);
 Set `stream: true` to receive normalized `ChatCompletionChunk` values. Text is exposed on
 `delta.content`, thinking on `delta.reasoning`, and tool calls on `delta.toolCalls`.
 
-System and developer messages are combined into Gemini's `systemInstruction`. User, assistant,
-and tool messages are translated into native `Content` and `Part` values.
+System and developer messages are combined into Gemini's `systemInstruction`. A request made only
+of system or developer messages is sent as the user turn, because Gemini rejects empty `contents`.
+User, assistant, and tool messages are translated into native `Content` and `Part` values. Tool
+results use a `user` turn carrying `functionResponse` parts; consecutive parallel tool results
+share one turn.
 
 ## Thinking
 
@@ -211,9 +214,15 @@ disabled; it never imports the Interactions path.
 ## Capability boundary
 
 The adapter advertises completions, streaming, thinking, image and PDF input, embeddings, model
-listing, batch jobs, and text-only Responses. Batch creation accepts `/v1/chat/completions` JSONL
-input, translates each record into an inline Google batch request, and normalizes inline results
-through the same completion converter.
+listing, batch jobs, Files (upload, list, retrieve, delete), and text-only Responses. Batch
+creation accepts `/v1/chat/completions` JSONL input, translates each record into an inline Google
+batch request, and normalizes inline results through the same completion converter.
+
+See the [Files](/docs/operations/files) page for Gemini upload, list, retrieve, and delete.
 
 `messages()` is available through the common Messages compatibility layer. Image generation,
-moderation, speech, and transcription remain outside this adapter's current public surface.
+moderation, speech, and transcription remain outside this adapter's current public surface. Vertex
+AI does not inherit Files or Responses. Vertex completions for Model Garden partner IDs
+(`qwen`, `openai/gpt-oss-`, `deepseek-ai`, `llama`, `meta/llama`, `minimaxai/`, `moonshotai/`,
+`zai-org/`) go to Vertex's OpenAI-compatible endpoint. IDs starting with `mistral` or `codestral`
+go to the `mistralai` publisher's `rawPredict` endpoints. Gemini models stay on `generateContent`.

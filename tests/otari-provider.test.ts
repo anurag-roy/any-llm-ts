@@ -4,7 +4,13 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { BatchNotCompleteError, OtariProvider, RateLimitError } from "../src/index.js";
+import {
+  AuthenticationError,
+  BatchNotCompleteError,
+  OtariProvider,
+  RateLimitError,
+  UnsupportedParameterError,
+} from "../src/index.js";
 import type { ChatCompletionChunk, OtariClientLike } from "../src/index.js";
 
 function fakeClient(methods: Partial<OtariClientLike>): OtariClientLike {
@@ -746,5 +752,67 @@ describe("Otari provider", () => {
     expect(message).toHaveBeenCalledWith(
       expect.objectContaining({ output_format: { effort: "high" } }),
     );
+  });
+
+  it("rejects maxRetries because the Otari client has no retry count", () => {
+    expect(() => new OtariProvider({ apiBase: "https://otari.example", maxRetries: 0 })).toThrow(
+      UnsupportedParameterError,
+    );
+  });
+
+  it("raises classified errors when the Messages stream emits an error event", async () => {
+    async function* events() {
+      yield { type: "message_start", message: { id: "msg-1" } };
+      yield {
+        error: { message: "upstream closed", type: "api_error" },
+        type: "error",
+      };
+    }
+    const provider = new OtariProvider(
+      { apiBase: "https://otari.example" },
+      fakeClient({ message: vi.fn().mockResolvedValue(events()) }),
+    );
+    const stream = await provider.messages({
+      maxTokens: 100,
+      messages: [{ content: "Hello", role: "user" }],
+      model: "anthropic:claude",
+      stream: true,
+    });
+    const collected: { type: string }[] = [];
+    await expect(async () => {
+      // SAFETY: This test double implements the provider surface exercised by this test.
+      for await (const event of stream as AsyncIterable<{ type: string }>) collected.push(event);
+    }).rejects.toMatchObject({
+      errorType: "api_error",
+      message: "upstream closed (error type: api_error)",
+      provider: "otari",
+    });
+    expect(collected).toEqual([{ message: { id: "msg-1" }, type: "message_start" }]);
+  });
+
+  it("maps mid-stream authentication errors from error events", async () => {
+    async function* events() {
+      yield { type: "ping" };
+      yield {
+        error: { message: "nope", type: "authentication_error" },
+        type: "error",
+      };
+    }
+    const provider = new OtariProvider(
+      { apiBase: "https://otari.example" },
+      fakeClient({ message: vi.fn().mockResolvedValue(events()) }),
+    );
+    const stream = await provider.messages({
+      maxTokens: 100,
+      messages: [{ content: "Hello", role: "user" }],
+      model: "anthropic:claude",
+      stream: true,
+    });
+    await expect(async () => {
+      // SAFETY: This test double implements the provider surface exercised by this test.
+      for await (const event of stream as AsyncIterable<{ type: string }>) {
+        expect(event.type).toBeDefined();
+      }
+    }).rejects.toBeInstanceOf(AuthenticationError);
   });
 });

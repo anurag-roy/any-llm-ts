@@ -675,6 +675,45 @@ describe("OpenAI-compatible provider", () => {
     });
   });
 
+  it("names in-memory transcription uploads from filename or sniffed bytes", async () => {
+    const transcription = vi.fn().mockResolvedValue({ text: "ok" });
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({
+        audio: {
+          speech: { create: vi.fn() },
+          transcriptions: { create: transcription },
+        },
+      }),
+    );
+    const flac = new Uint8Array([0x66, 0x4c, 0x61, 0x43, 0x00]);
+    await provider.transcription({ file: flac, model: "whisper" });
+    const uploaded = transcription.mock.calls[0]?.[0]?.file;
+    expect(uploaded).toBeInstanceOf(File);
+    expect(uploaded).toMatchObject({ name: "audio.flac", type: "audio/flac" });
+
+    await provider.transcription({
+      file: new Blob([flac]),
+      filename: "voice.bin",
+      mimeType: "audio/flac",
+      model: "whisper",
+    });
+    const named = transcription.mock.calls[1]?.[0]?.file;
+    expect(named).toBeInstanceOf(File);
+    expect(named).toMatchObject({ name: "voice.bin.flac" });
+  });
+
+  it("honors maxRetries on the OpenAI SDK client", () => {
+    class InspectableOpenAIProvider extends OpenAIProvider {
+      clientMaxRetries(): number {
+        return this.client.maxRetries;
+      }
+    }
+    const provider = new InspectableOpenAIProvider(config, { apiKey: "secret", maxRetries: 0 });
+    expect(provider.clientMaxRetries()).toBe(0);
+  });
+
   it("accepts plain-text transcription responses", async () => {
     const provider = new OpenAIProvider(
       config,

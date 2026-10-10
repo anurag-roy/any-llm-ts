@@ -7,7 +7,7 @@ import {
 
 import { MissingApiKeyError } from "../errors.js";
 import type { ProviderOptions } from "../types.js";
-import { getEnvironmentVariable } from "../utils.js";
+import { getEnvironmentVariable, resolvedMaxRetries } from "../utils.js";
 import { AnthropicProvider } from "./anthropic.js";
 
 function createAnthropicVertexClient(options: ProviderOptions): AnthropicVertex {
@@ -24,11 +24,13 @@ function createAnthropicVertexClient(options: ProviderOptions): AnthropicVertex 
     clientOptions.region ?? getEnvironmentVariable("GOOGLE_CLOUD_LOCATION") ?? "us-central1";
   const baseURL = options.apiBase ?? getEnvironmentVariable("VERTEXAI_ANTHROPIC_API_BASE");
 
+  const maxRetries = resolvedMaxRetries(options);
   return new AnthropicVertex({
     ...clientOptions,
     projectId,
     region,
     ...includeWhen(!(baseURL === undefined), { baseURL }),
+    ...includeWhen(maxRetries !== undefined, { maxRetries }),
   });
 }
 

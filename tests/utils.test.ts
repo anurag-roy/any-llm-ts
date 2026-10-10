@@ -20,7 +20,10 @@ import {
   parseJsonObjectArray,
   parseJsonValue,
   parseOptionalJsonObject,
+  rejectMaxRetries,
+  resolvedMaxRetries,
   timeoutAbortOptions,
+  validateMaxRetries,
   timeoutMilliseconds,
   timeoutRequestOptions,
   unixTimestamp,
@@ -238,5 +241,16 @@ describe("runtime utilities", () => {
     expect(timeoutAbortOptions(undefined)).toBeUndefined();
     expect(timeoutAbortOptions(2)?.abortSignal).toBeInstanceOf(AbortSignal);
     expect(unixTimestamp()).toBe(Math.floor(Date.now() / 1_000));
+  });
+
+  it("validates maxRetries and rejects it for unsupported providers", () => {
+    expect(validateMaxRetries(0)).toBe(0);
+    expect(validateMaxRetries(3)).toBe(3);
+    expect(resolvedMaxRetries({})).toBeUndefined();
+    expect(resolvedMaxRetries({ maxRetries: 2 })).toBe(2);
+    expect(() => validateMaxRetries(-1)).toThrow("non-negative integer");
+    expect(() => validateMaxRetries(1.5)).toThrow("non-negative integer");
+    expect(() => validateMaxRetries(Number.NaN)).toThrow("non-negative integer");
+    expect(() => rejectMaxRetries("azure")).toThrow(/maxRetries.*azure/u);
   });
 });

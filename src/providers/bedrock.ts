@@ -2,12 +2,13 @@ import { includeWhen } from "../utils.js";
 import type { JsonValue } from "../types.js";
 import { parseJsonObject, parseJsonValue, parseOptionalJsonObject } from "../utils.js";
 import type { JsonObject } from "../types.js";
-import { isNumber, isObject, isString } from "../utils.js";
+import { isJsonValue, isNumber, isObject, isString } from "../utils.js";
 import {
   BedrockClient,
   CreateModelInvocationJobCommand,
   GetModelInvocationJobCommand,
   ListFoundationModelsCommand,
+  ListInferenceProfilesCommand,
   ListModelInvocationJobsCommand,
   StopModelInvocationJobCommand,
   type BedrockClientConfig,
@@ -53,6 +54,7 @@ import {
   getEnvironmentVariable,
   isAsyncIterable,
   iterateClosing,
+  rejectMaxRetries,
   timeoutAbortOptions,
   unixTimestamp,
 } from "../utils.js";
@@ -155,6 +157,89 @@ function createClients(
 
 function invalidRequest(message: string): InvalidRequestError {
   return new InvalidRequestError(message, { provider: "bedrock" });
+}
+
+function supportsOnDemand(model: JsonObject): boolean {
+  const types = model.inferenceTypesSupported;
+  return Array.isArray(types) && types.includes("ON_DEMAND");
+}
+
+function foundationModelId(arn: string): string {
+  const marker = "foundation-model/";
+  const index = arn.indexOf(marker);
+  return index === -1 ? "" : arn.slice(index + marker.length);
+}
+
+function routesOnlyTo(profile: JsonObject, modelIds: Set<string>): boolean {
+  const models = Array.isArray(profile.models) ? profile.models : [];
+  return models.every((entry) => {
+    const model = parseJsonObject(entry);
+    return isString(model.modelArn) && modelIds.has(foundationModelId(model.modelArn));
+  });
+}
+
+function isAccessDenied(error: Error): boolean {
+  return error.name === "AccessDeniedException";
+}
+
+function asModel(id: string, raw: JsonValue): Model {
+  return {
+    created: 0,
+    id,
+    object: "model",
+    ownedBy: "aws",
+    raw,
+  };
+}
+
+function convertBedrockListModels(summaries: readonly unknown[], profiles: JsonObject[]): Model[] {
+  const models: Model[] = [];
+  for (const entry of summaries) {
+    if (!isJsonValue(entry)) continue;
+    const model = parseJsonObject(entry);
+    if (isString(model.modelId) && supportsOnDemand(model)) {
+      models.push(asModel(model.modelId, entry));
+    }
+  }
+  for (const profile of profiles) {
+    if (isString(profile.inferenceProfileId)) {
+      models.push(asModel(profile.inferenceProfileId, profile));
+    }
+  }
+  return models;
+}
+
+async function listSystemInferenceProfiles(
+  control: BedrockControlClientLike,
+): Promise<JsonObject[]> {
+  const profiles: JsonObject[] = [];
+  let nextToken: string | undefined;
+  try {
+    do {
+      const response = parseJsonObject(
+        await control.send(
+          new ListInferenceProfilesCommand({
+            typeEquals: "SYSTEM_DEFINED",
+            ...includeWhen(!(nextToken === undefined), { nextToken }),
+          }),
+        ),
+      );
+      const summaries = Array.isArray(response.inferenceProfileSummaries)
+        ? response.inferenceProfileSummaries
+        : [];
+      for (const entry of summaries) {
+        if (isObject(entry) && !Array.isArray(entry)) profiles.push(parseJsonObject(entry));
+      }
+      nextToken = isString(response.nextToken) ? response.nextToken : undefined;
+    } while (nextToken !== undefined);
+  } catch (error) {
+    if (!(error instanceof Error) || !isAccessDenied(error)) throw error;
+    console.warn(
+      "Listing Bedrock inference profiles was denied, so models that can only be invoked through an inference profile are left out. Grant bedrock:ListInferenceProfiles to include them.",
+    );
+    return [];
+  }
+  return profiles;
 }
 
 function dataImage(value: string) {
@@ -795,6 +880,7 @@ export class BedrockProvider extends BaseProvider {
   private readonly s3: BedrockS3ClientLike;
 
   constructor(options: ProviderOptions = {}, clients: BedrockProviderClients = {}) {
+    if (options.maxRetries !== undefined) rejectMaxRetries("bedrock");
     super(options);
     const resolved = createClients(options, clients);
     this.control = resolved.control;
@@ -900,20 +986,17 @@ export class BedrockProvider extends BaseProvider {
         await this.control.send(new ListFoundationModelsCommand(providerOptions)),
       );
       const summaries = Array.isArray(response.modelSummaries) ? response.modelSummaries : [];
-      return summaries.flatMap((entry): Model[] => {
-        const model = parseJsonObject(entry);
-        return isString(model.modelId)
-          ? [
-              {
-                created: 0,
-                id: model.modelId,
-                object: "model",
-                ownedBy: "aws",
-                raw: entry,
-              },
-            ]
-          : [];
-      });
+      let profiles = await listSystemInferenceProfiles(this.control);
+      if (Object.keys(providerOptions).length > 0) {
+        const matchingIds = new Set(
+          summaries.flatMap((entry) => {
+            const model = parseJsonObject(entry);
+            return isString(model.modelId) ? [model.modelId] : [];
+          }),
+        );
+        profiles = profiles.filter((profile) => routesOnlyTo(profile, matchingIds));
+      }
+      return convertBedrockListModels(summaries, profiles);
     });
   }
 

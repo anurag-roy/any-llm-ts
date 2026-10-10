@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { AnyLLM, AzureProvider, MissingApiKeyError } from "../src/index.js";
+import {
+  AnyLLM,
+  AzureProvider,
+  MissingApiKeyError,
+  UnsupportedParameterError,
+} from "../src/index.js";
 import type { AzureInferenceClientLike } from "../src/providers/azure.js";
 import type { ChatCompletion, ChatCompletionChunk } from "../src/types.js";
 
@@ -300,6 +305,20 @@ describe("Azure AI inference provider", () => {
       { created: 0, id: "model-a", ownedBy: "provider-a" },
     ]);
     expect(modelInfo).toHaveBeenCalledWith({ trace: true });
+  });
+
+  it("rejects maxRetries because the Azure inference SDK has no client retry count", () => {
+    expect(
+      () =>
+        new AzureProvider(
+          {
+            apiBase: "https://deployment.models.ai.azure.com",
+            apiKey: "key",
+            maxRetries: 0,
+          },
+          fakeAzure(),
+        ),
+    ).toThrow(UnsupportedParameterError);
   });
 
   it("is registered separately from Azure OpenAI", () => {

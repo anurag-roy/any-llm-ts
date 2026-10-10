@@ -1,5 +1,10 @@
-import { AnyLLMError, normalizeProviderError } from "./errors.js";
-import type { CompletionOperationOptions, JsonObject, JsonValue } from "./types.js";
+import { AnyLLMError, UnsupportedParameterError, normalizeProviderError } from "./errors.js";
+import type {
+  CompletionOperationOptions,
+  JsonObject,
+  JsonValue,
+  ProviderOptions,
+} from "./types.js";
 
 type OptionalKeys<Value extends object> = {
   [Key in keyof Value]-?: undefined extends Value[Key] ? Key : never;
@@ -332,4 +337,24 @@ export function timeoutAbortOptions(
 
 export function unixTimestamp(): number {
   return Math.floor(Date.now() / 1_000);
+}
+
+/** Validate `maxRetries` the same way Python any-llm does: a non-negative integer. */
+export function validateMaxRetries(value: number): number {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new TypeError("maxRetries must be a non-negative integer");
+  }
+  return value;
+}
+
+export function rejectMaxRetries(provider: string): never {
+  throw new UnsupportedParameterError(
+    "maxRetries",
+    provider,
+    "Configure retries with the SDK's own client options in clientOptions instead.",
+  );
+}
+
+export function resolvedMaxRetries(options: ProviderOptions): number | undefined {
+  return options.maxRetries === undefined ? undefined : validateMaxRetries(options.maxRetries);
 }

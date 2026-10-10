@@ -67,6 +67,7 @@ function normalizeTogetherRerank<Value>(value: Value): RerankResponse {
   const totalTokens = usage.total_tokens ?? usage.totalTokens;
   const normalized: RerankResponse = { results, raw: value };
   if (isString(response.id)) normalized.id = response.id;
+  if (isString(response.model)) normalized.model = response.model;
   if (isNumber(totalTokens)) normalized.usage = { totalTokens };
   return normalized;
 }

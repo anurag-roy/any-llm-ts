@@ -113,6 +113,9 @@ export class AnyLLM {
         ...includeWhen(!(options.clientOptions === undefined), {
           clientOptions: options.clientOptions,
         }),
+        ...includeWhen(!(options.maxRetries === undefined), {
+          maxRetries: options.maxRetries,
+        }),
         ...includeWhen(!(options.unifiedExceptions === undefined), {
           unifiedExceptions: options.unifiedExceptions,
         }),
@@ -292,8 +295,12 @@ export class AnyLLM {
     return this.adapter.retrieveBatchResults(batchId, providerOptions);
   }
 
-  rerank(params: RerankParams): Promise<RerankResponse> {
-    return this.adapter.rerank(params);
+  async rerank(params: RerankParams): Promise<RerankResponse> {
+    const response = await this.adapter.rerank(params);
+    if (response.model === undefined || response.model.length === 0) {
+      return { ...response, model: params.model };
+    }
+    return response;
   }
 
   uploadFile(params: UploadFileParams): Promise<FileMetadata> {

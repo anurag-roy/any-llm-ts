@@ -1,12 +1,19 @@
 import { GoogleGenAI } from "@google/genai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import OpenAI from "openai";
 import {
   AnyLLM,
   MissingApiKeyError,
   UnsupportedOperationError,
   VertexAIProvider,
 } from "../src/index.js";
+import {
+  isVertexMistralModel,
+  isVertexPartnerModel,
+  vertexMistralBaseUrl,
+  vertexPartnerBaseUrl,
+} from "../src/providers/vertexai.js";
 import type { ChatCompletion } from "../src/types.js";
 
 function fakeVertexAI() {
@@ -125,7 +132,8 @@ describe("Vertex AI provider", () => {
   it("is registered as a supported provider", () => {
     expect(AnyLLM.getSupportedProviders()).toContain("vertexai");
     expect(AnyLLM.getProviderMetadata("vertexai")).toMatchObject({
-      capabilities: { responses: false },
+      capabilities: { files: false, responses: false },
+      fileOperations: [],
       name: "vertexai",
       requiresApiKey: false,
     });
@@ -137,5 +145,105 @@ describe("Vertex AI provider", () => {
     await expect(
       provider.responses({ input: "Hello", model: "gemini-2.5-flash" }),
     ).rejects.toBeInstanceOf(UnsupportedOperationError);
+  });
+
+  it("classifies Vertex Mistral and partner model IDs", () => {
+    expect(isVertexMistralModel("mistral-small-2503")).toBe(true);
+    expect(isVertexMistralModel("codestral-2501")).toBe(true);
+    expect(isVertexMistralModel("gemini-2.5-flash")).toBe(false);
+    expect(isVertexPartnerModel("qwen/qwen3-235b-a22b-instruct-2507-maas")).toBe(true);
+    expect(isVertexPartnerModel("openai/gpt-oss-120b-maas")).toBe(true);
+    expect(isVertexPartnerModel("meta/llama-4-maverick-17b-128e-instruct-maas")).toBe(true);
+    expect(isVertexPartnerModel("gemini-2.5-flash")).toBe(false);
+    expect(vertexMistralBaseUrl("proj", "us-central1")).toBe(
+      "https://us-central1-aiplatform.googleapis.com/v1/projects/proj/locations/us-central1/publishers/mistralai/models",
+    );
+    expect(vertexPartnerBaseUrl("proj", "global")).toBe(
+      "https://aiplatform.googleapis.com/v1/projects/proj/locations/global/endpoints/openapi",
+    );
+  });
+
+  it("routes partner models to Vertex's OpenAI-compatible endpoint", async () => {
+    process.env.GOOGLE_CLOUD_PROJECT = "test-project";
+    process.env.GOOGLE_CLOUD_LOCATION = "us-south1";
+    const create = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          finish_reason: "stop",
+          index: 0,
+          message: { content: "from partner", role: "assistant" },
+        },
+      ],
+      created: 1,
+      id: "partner-1",
+      model: "qwen/qwen3",
+    });
+    const partner = Object.assign(new OpenAI({ apiKey: "unused" }), {
+      chat: { completions: { create } },
+    });
+    const sdk = fakeVertexAI();
+    const provider = new VertexAIProvider({ apiKey: "vertex-token" }, sdk.client, { partner });
+
+    // SAFETY: The non-streaming request makes this completion result concrete in the test.
+    const result = (await provider.completion({
+      maxCompletionTokens: 32,
+      messages: [{ content: "Hello", role: "user" }],
+      model: "qwen/qwen3-235b-a22b-instruct-2507-maas",
+    })) as ChatCompletion;
+
+    expect(sdk.models.generateContent).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        max_tokens: 32,
+        model: "qwen/qwen3-235b-a22b-instruct-2507-maas",
+      }),
+    );
+    expect(result).toMatchObject({
+      provider: "vertexai",
+      choices: [{ message: { content: "from partner" } }],
+    });
+  });
+
+  it("routes Mistral models to the mistralai publisher rawPredict path", async () => {
+    process.env.GOOGLE_CLOUD_PROJECT = "test-project";
+    process.env.GOOGLE_CLOUD_LOCATION = "us-central1";
+    const post = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          finish_reason: "stop",
+          index: 0,
+          message: { content: "from mistral", role: "assistant" },
+        },
+      ],
+      created: 1,
+      id: "mistral-1",
+      model: "mistral-small-2503",
+    });
+    const mistral = Object.assign(new OpenAI({ apiKey: "unused" }), { post });
+    const sdk = fakeVertexAI();
+    const provider = new VertexAIProvider({ apiKey: "vertex-token" }, sdk.client, { mistral });
+
+    // SAFETY: The non-streaming request makes this completion result concrete in the test.
+    const result = (await provider.completion({
+      messages: [{ content: "Hello", role: "user" }],
+      model: "mistral-small-2503@001",
+      reasoningEffort: "high",
+    })) as ChatCompletion;
+
+    expect(sdk.models.generateContent).not.toHaveBeenCalled();
+    expect(post).toHaveBeenCalledWith(
+      "/mistral-small-2503@001:rawPredict",
+      expect.objectContaining({
+        body: expect.objectContaining({
+          model: "mistral-small-2503",
+          reasoning_effort: "high",
+        }),
+        headers: { Authorization: "Bearer vertex-token" },
+      }),
+    );
+    expect(result).toMatchObject({
+      provider: "vertexai",
+      choices: [{ message: { content: "from mistral" } }],
+    });
   });
 });

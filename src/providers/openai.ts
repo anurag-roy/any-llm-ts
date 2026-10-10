@@ -58,6 +58,7 @@ import type {
   UploadFileParams,
 } from "../types.js";
 import { completeProviderMetadata } from "../provider-metadata.js";
+import { resolveTranscriptionFile } from "../audio.js";
 import {
   compactObject,
   completionRequestOptions,
@@ -69,6 +70,7 @@ import {
   mapAsyncIterable,
   notifyCompletionDispatch,
   produceClosingAsyncIterable,
+  resolvedMaxRetries,
   timeoutRequestOptions,
 } from "../utils.js";
 import { BaseProvider } from "./base.js";
@@ -888,6 +890,7 @@ export class OpenAIProvider extends BaseProvider {
     this.config = config;
     const apiBase = options.apiBase ?? getEnvironmentVariable(config.envApiBase) ?? config.apiBase;
     const clientOptions = options.clientOptions ?? {};
+    const maxRetries = resolvedMaxRetries(options);
     // SAFETY: The provider contract establishes the asserted representation at this boundary.
     this.client =
       client ??
@@ -895,6 +898,7 @@ export class OpenAIProvider extends BaseProvider {
         ...(clientOptions as Omit<ClientOptions, "apiKey" | "baseURL">),
         apiKey: resolveApiKey(config, options.apiKey),
         ...includeWhen(!(apiBase === undefined), { baseURL: apiBase }),
+        ...includeWhen(maxRetries !== undefined, { maxRetries }),
       });
     this.metadata = completeProviderMetadata(
       {
@@ -1145,7 +1149,12 @@ export class OpenAIProvider extends BaseProvider {
       const requestOptions = this.mediaRequestOptions(params.providerOptions);
       // SAFETY: The provider contract establishes the asserted representation at this boundary.
       const body = {
-        file: params.file,
+        file: await resolveTranscriptionFile(
+          params.file,
+          params.filename,
+          params.mimeType,
+          this.metadata.name,
+        ),
         language: params.language,
         model: params.model,
         prompt: params.prompt,
