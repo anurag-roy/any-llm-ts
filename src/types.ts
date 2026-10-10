@@ -406,9 +406,13 @@ export interface ImageGenerationResponse {
 }
 
 export interface TranscriptionParams {
-  file: Blob | File;
+  file: FileInput;
   model: string;
+  /** Name to upload the audio under. Defaults to the path or file object's name. */
+  filename?: string;
   language?: string;
+  /** Content type to upload the audio under. Defaults to one guessed from `filename` or the bytes. */
+  mimeType?: string;
   prompt?: string;
   providerOptions?: JsonObject;
   responseFormat?: "json" | "srt" | "text" | "verbose_json" | "vtt";
@@ -985,6 +989,12 @@ export interface ProviderOptions {
   apiBase?: string;
   apiKey?: string;
   clientOptions?: object;
+  /**
+   * How many times the provider's SDK client retries a failed request
+   * (`0` disables retries). `undefined` keeps the SDK's own default.
+   * Providers whose SDK has no client-level retry count reject this option.
+   */
+  maxRetries?: number;
   /**
    * Convert provider SDK errors to the unified any-llm-ts hierarchy.
    * Defaults to true. An explicit false keeps the original error for this

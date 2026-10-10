@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 
 import { AnyLLM, BatchNotCompleteError, MistralProvider } from "../src/index.js";
+import { dropEmptyAssistantMessages } from "../src/providers/mistral.js";
 import { createProvider } from "../src/providers/registry.js";
 
 function batch(overrides: JsonObject = {}) {
@@ -253,5 +254,38 @@ describe("Mistral provider batches", () => {
         inputFilePath: noModel,
       }),
     ).rejects.toThrow(/require a model/u);
+  });
+});
+
+describe("Mistral empty assistant messages", () => {
+  it("drops assistant turns that carry no content, tools, or reasoning", () => {
+    expect(
+      dropEmptyAssistantMessages([
+        { content: "hi", role: "user" },
+        { content: "", role: "assistant" },
+        { content: null, role: "assistant" },
+        { content: [{ text: "", type: "text" }], role: "assistant" },
+        { content: "kept", role: "assistant" },
+        {
+          content: "",
+          role: "assistant",
+          toolCalls: [
+            { function: { arguments: "{}", name: "fn" }, id: "call-1", type: "function" },
+          ],
+        },
+        { content: "", reasoning: "think", role: "assistant" },
+        { content: "next", role: "user" },
+      ]),
+    ).toEqual([
+      { content: "hi", role: "user" },
+      { content: "kept", role: "assistant" },
+      {
+        content: "",
+        role: "assistant",
+        toolCalls: [{ function: { arguments: "{}", name: "fn" }, id: "call-1", type: "function" }],
+      },
+      { content: "", reasoning: "think", role: "assistant" },
+      { content: "next", role: "user" },
+    ]);
   });
 });

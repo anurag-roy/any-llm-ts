@@ -20,7 +20,7 @@ import type {
   RerankParams,
   RerankResponse,
 } from "../types.js";
-import { getEnvironmentVariable } from "../utils.js";
+import { getEnvironmentVariable, resolvedMaxRetries } from "../utils.js";
 import { BaseProvider } from "./base.js";
 import { completeProviderMetadata } from "../provider-metadata.js";
 
@@ -60,10 +60,12 @@ function createVoyageClient(options: ProviderOptions): VoyageAIClient {
   }
   const baseUrl = options.apiBase ?? getEnvironmentVariable("VOYAGE_API_BASE");
   // SAFETY: The provider contract establishes the asserted representation at this boundary.
+  const maxRetries = resolvedMaxRetries(options);
   return new VoyageAIClient({
     ...options.clientOptions,
     apiKey,
     ...includeWhen(!(baseUrl === undefined), { baseUrl }),
+    ...includeWhen(maxRetries !== undefined, { maxRetries }),
   });
 }
 

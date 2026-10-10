@@ -222,4 +222,7 @@ See the [Files](/docs/operations/files) page for Gemini upload, list, retrieve, 
 
 `messages()` is available through the common Messages compatibility layer. Image generation,
 moderation, speech, and transcription remain outside this adapter's current public surface. Vertex
-AI does not inherit Files or Responses.
+AI does not inherit Files or Responses. Vertex completions for Model Garden partner IDs
+(`qwen`, `openai/gpt-oss-`, `deepseek-ai`, `llama`, `meta/llama`, `minimaxai/`, `moonshotai/`,
+`zai-org/`) go to Vertex's OpenAI-compatible endpoint. IDs starting with `mistral` or `codestral`
+go to the `mistralai` publisher's `rawPredict` endpoints. Gemini models stay on `generateContent`.

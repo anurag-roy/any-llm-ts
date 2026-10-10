@@ -28,6 +28,7 @@ import {
   BatchNotCompleteError,
   InvalidRequestError,
   MissingApiKeyError,
+  ProviderError,
   UnsupportedParameterError,
 } from "../errors.js";
 import type {
@@ -78,6 +79,7 @@ import {
   isJsonValue,
   iterateClosing,
   parseJsonValue as validateJsonValue,
+  resolvedMaxRetries,
 } from "../utils.js";
 import { BaseProvider } from "./base.js";
 import {
@@ -236,6 +238,26 @@ function resolveApiKey(options: ProviderOptions): string {
   return apiKey;
 }
 
+/** Map `maxRetries` onto genai `httpOptions.retryOptions` unless the caller already set one. */
+export function geminiHttpOptionsWithRetries(
+  httpOptions: GoogleGenAIOptions["httpOptions"] | undefined,
+  maxRetries: number | undefined,
+): GoogleGenAIOptions["httpOptions"] | undefined {
+  if (maxRetries === undefined) return httpOptions;
+  const attempts = maxRetries + 1;
+  if (httpOptions === undefined) return { retryOptions: { attempts } };
+  if (isJsonObject(httpOptions)) {
+    if (httpOptions.retryOptions !== undefined || httpOptions.retry_options !== undefined) {
+      return httpOptions;
+    }
+    return { retryOptions: { attempts }, ...httpOptions };
+  }
+  if (httpOptions.retryOptions === undefined) {
+    return { ...httpOptions, retryOptions: { attempts } };
+  }
+  return httpOptions;
+}
+
 function mergeClientOptions(
   options: ProviderOptions,
   apiBase: string | undefined,
@@ -246,8 +268,10 @@ function mergeClientOptions(
     ...options.clientOptions,
   } as GoogleGenAIOptions;
   const existingHttpOptions = clientOptions.httpOptions;
-  const httpOptions =
-    apiBase === undefined ? existingHttpOptions : { baseUrl: apiBase, ...existingHttpOptions };
+  const httpOptions = geminiHttpOptionsWithRetries(
+    apiBase === undefined ? existingHttpOptions : { baseUrl: apiBase, ...existingHttpOptions },
+    resolvedMaxRetries(options),
+  );
 
   return {
     ...clientOptions,
@@ -799,8 +823,17 @@ function normalizeFinishReason(value: JsonValue | undefined, hasToolCalls: boole
   ) {
     normalized = "content_filter";
   }
-  if (hasToolCalls && normalized !== "length" && normalized !== "content_filter")
+  // Only a terminal chunk (one that already mapped a Gemini finish reason) reports tool_calls.
+  // Gemini can send the function call and STOP in separate chunks; a client that runs tools on
+  // every "tool_calls" chunk would otherwise run them twice.
+  if (
+    hasToolCalls &&
+    normalized !== null &&
+    normalized !== "length" &&
+    normalized !== "content_filter"
+  ) {
     return "tool_calls";
+  }
   return normalized;
 }
 
@@ -1470,16 +1503,23 @@ export class GeminiProvider extends BaseProvider {
         };
       },
     );
-    if (choices.length === 0 && promptWasBlocked(response)) {
-      choices.push({
-        finishReason: "content_filter",
-        index: 0,
-        message: {
-          content: null,
-          refusal: GEMINI_CONTENT_FILTER_REFUSAL,
-          role: "assistant",
-        },
-      });
+    if (choices.length === 0) {
+      if (promptWasBlocked(response)) {
+        choices.push({
+          finishReason: "content_filter",
+          index: 0,
+          message: {
+            content: null,
+            refusal: GEMINI_CONTENT_FILTER_REFUSAL,
+            role: "assistant",
+          },
+        });
+      } else {
+        throw new ProviderError(
+          "generateContent returned no candidates and the prompt was not blocked",
+          { provider: this.providerName },
+        );
+      }
     }
 
     const usage = normalizeUsage(response.usageMetadata);
@@ -1582,9 +1622,10 @@ export class GeminiProvider extends BaseProvider {
           const audio = inlineDataAudio(audioBlobs, content, false);
           if (audio !== undefined) delta.audio = streamAudioDelta(audio);
           if (toolCalls.length > 0) delta.toolCalls = toolCalls;
+          const streamHasToolCalls = (state.nextToolIndices.get(choiceIndex) ?? 0) > 0;
           const mappedFinishReason = promptBlocked
             ? "content_filter"
-            : normalizeFinishReason(candidate.finishReason, toolCalls.length > 0);
+            : normalizeFinishReason(candidate.finishReason, streamHasToolCalls);
           if (mappedFinishReason === "content_filter") {
             delta.refusal = GEMINI_CONTENT_FILTER_REFUSAL;
           }

@@ -30,6 +30,7 @@ import {
   iterateClosing,
   mapAsyncIterable,
   produceClosingAsyncIterable,
+  rejectMaxRetries,
   unixTimestamp,
 } from "../utils.js";
 import { BaseProvider } from "./base.js";
@@ -390,6 +391,7 @@ export class AzureProvider extends BaseProvider {
   private readonly client: AzureInferenceClientLike;
 
   constructor(options: ProviderOptions = {}, client?: AzureInferenceClientLike) {
+    if (options.maxRetries !== undefined) rejectMaxRetries("azure");
     super(options);
     const apiBase = options.apiBase ?? getEnvironmentVariable("AZURE_AI_CHAT_ENDPOINT");
     this.client = client ?? createAzureClient(options);

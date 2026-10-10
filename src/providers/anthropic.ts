@@ -56,6 +56,7 @@ import {
   iterateClosing,
   mapAsyncIterable,
   notifyCompletionDispatch,
+  resolvedMaxRetries,
   timeoutRequestOptions,
   unixTimestamp,
 } from "../utils.js";
@@ -787,12 +788,14 @@ export class AnthropicProvider extends BaseProvider {
     const apiBase =
       options.apiBase ?? getEnvironmentVariable(config.envApiBase ?? "ANTHROPIC_BASE_URL");
     // SAFETY: The provider contract establishes the asserted representation at this boundary.
+    const maxRetries = resolvedMaxRetries(options);
     this.client =
       client ??
       new Anthropic({
         ...options.clientOptions,
         apiKey: resolveApiKey(options),
         ...includeWhen(!(apiBase === undefined), { baseURL: apiBase }),
+        ...includeWhen(maxRetries !== undefined, { maxRetries }),
       });
     this.metadata = completeProviderMetadata(
       {

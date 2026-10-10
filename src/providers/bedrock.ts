@@ -54,6 +54,7 @@ import {
   getEnvironmentVariable,
   isAsyncIterable,
   iterateClosing,
+  rejectMaxRetries,
   timeoutAbortOptions,
   unixTimestamp,
 } from "../utils.js";
@@ -879,6 +880,7 @@ export class BedrockProvider extends BaseProvider {
   private readonly s3: BedrockS3ClientLike;
 
   constructor(options: ProviderOptions = {}, clients: BedrockProviderClients = {}) {
+    if (options.maxRetries !== undefined) rejectMaxRetries("bedrock");
     super(options);
     const resolved = createClients(options, clients);
     this.control = resolved.control;

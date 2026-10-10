@@ -18,9 +18,11 @@ import {
   GeminiProvider,
   InvalidRequestError,
   MissingApiKeyError,
+  ProviderError,
   RateLimitError,
   UnsupportedParameterError,
 } from "../src/index.js";
+import { geminiHttpOptionsWithRetries } from "../src/providers/gemini.js";
 import type {
   ChatCompletion,
   ChatCompletionChunk,
@@ -1397,7 +1399,7 @@ describe("Gemini provider", () => {
     await expect(provider.completion(structuredParams)).rejects.toBeInstanceOf(ContentFilterError);
   });
 
-  it("preserves Gemini content-filter refusals and ignores unspecified prompt feedback", async () => {
+  it("preserves Gemini content-filter refusals and rejects unblocked empty candidates", async () => {
     const generateContent = vi
       .fn()
       .mockResolvedValueOnce(
@@ -1432,19 +1434,19 @@ describe("Gemini provider", () => {
       },
     });
 
-    // SAFETY: The non-streaming request makes this completion result concrete in the test.
-    const unspecified = (await provider.completion({
-      messages: [{ content: "Hi", role: "user" }],
-      model: "gemini-test",
-    })) as ChatCompletion;
-    expect(unspecified.choices).toEqual([]);
+    await expect(
+      provider.completion({
+        messages: [{ content: "Hi", role: "user" }],
+        model: "gemini-test",
+      }),
+    ).rejects.toBeInstanceOf(ProviderError);
 
-    // SAFETY: The non-streaming request makes this completion result concrete in the test.
-    const empty = (await provider.completion({
-      messages: [{ content: "Hi", role: "user" }],
-      model: "gemini-test",
-    })) as ChatCompletion;
-    expect(empty.choices).toEqual([]);
+    await expect(
+      provider.completion({
+        messages: [{ content: "Hi", role: "user" }],
+        model: "gemini-test",
+      }),
+    ).rejects.toBeInstanceOf(ProviderError);
   });
 
   it("maps streaming prompt blocks to a single typed refusal", async () => {
@@ -1972,5 +1974,105 @@ describe("Gemini provider", () => {
       capabilities: { batch: true, embedding: true, responses: true, vision: true },
       name: "gemini",
     });
+  });
+
+  it("maps maxRetries onto Gemini httpOptions unless retryOptions are already set", () => {
+    expect(geminiHttpOptionsWithRetries(undefined, 0)).toEqual({
+      retryOptions: { attempts: 1 },
+    });
+    expect(geminiHttpOptionsWithRetries({ timeout: 5_000 }, 2)).toEqual({
+      retryOptions: { attempts: 3 },
+      timeout: 5_000,
+    });
+    expect(geminiHttpOptionsWithRetries({ retryOptions: { attempts: 9 } }, 0)).toEqual({
+      retryOptions: { attempts: 9 },
+    });
+  });
+
+  it("rejects an unblocked generateContent response that has no candidates", async () => {
+    const sdk = fakeGemini({
+      generateContent: vi.fn().mockResolvedValue(response({ candidates: [] })),
+    });
+    const provider = new GeminiProvider({}, sdk.client);
+    await expect(
+      provider.completion({
+        messages: [{ content: "Hello", role: "user" }],
+        model: "gemini-test",
+      }),
+    ).rejects.toBeInstanceOf(ProviderError);
+  });
+
+  it("reports tool_calls when STOP arrives after a streamed tool call", async () => {
+    const stream = responses(
+      response({
+        candidates: [
+          {
+            content: {
+              parts: [{ functionCall: { args: { q: "news" }, name: "search" } }],
+              role: "model",
+            },
+            index: 0,
+          },
+        ],
+      }),
+      response({
+        candidates: [
+          {
+            content: { parts: [{ text: "" }], role: "model" },
+            finishReason: GeminiFinishReason.STOP,
+            index: 0,
+          },
+        ],
+      }),
+    );
+    const sdk = fakeGemini({
+      generateContentStream: vi.fn().mockResolvedValue(stream),
+    });
+    const provider = new GeminiProvider({}, sdk.client);
+    const result = await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "gemini-test",
+      stream: true,
+    });
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    const chunks = await collect(result as AsyncIterable<ChatCompletionChunk>);
+    expect(chunks.map((chunk) => chunk.choices[0]?.finishReason)).toEqual([null, "tool_calls"]);
+  });
+
+  it("keeps length and content_filter ahead of a later streamed tool-call STOP", async () => {
+    const stream = responses(
+      response({
+        candidates: [
+          {
+            content: {
+              parts: [{ functionCall: { args: {}, name: "search" } }],
+              role: "model",
+            },
+            index: 0,
+          },
+        ],
+      }),
+      response({
+        candidates: [
+          {
+            content: { parts: [], role: "model" },
+            finishReason: GeminiFinishReason.MAX_TOKENS,
+            index: 0,
+          },
+        ],
+      }),
+    );
+    const sdk = fakeGemini({
+      generateContentStream: vi.fn().mockResolvedValue(stream),
+    });
+    const provider = new GeminiProvider({}, sdk.client);
+    const result = await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "gemini-test",
+      stream: true,
+    });
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    const chunks = await collect(result as AsyncIterable<ChatCompletionChunk>);
+    expect(chunks.map((chunk) => chunk.choices[0]?.finishReason)).toEqual([null, "length"]);
   });
 });
