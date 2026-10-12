@@ -22,6 +22,7 @@ import {
   type Tool as GeminiTool,
 } from "@google/genai";
 
+import { applyEncodingFormat, resolveEncodingFormat } from "../embedding.js";
 import {
   ContentFilterError,
   ContextLengthExceededError,
@@ -1197,18 +1198,18 @@ export class GeminiProvider extends BaseProvider {
     });
   }
 
-  override embedding(params: EmbeddingParams): Promise<EmbeddingResponse> {
-    if (params.encodingFormat === "base64") {
-      return Promise.reject(new TypeError("Gemini embeddings do not support base64 encoding."));
-    }
+  override async embedding(params: EmbeddingParams): Promise<EmbeddingResponse> {
     if (
       !isString(params.input) &&
       !(Array.isArray(params.input) && params.input.every((value) => isString(value)))
     ) {
-      return Promise.reject(
-        new TypeError("Gemini embeddings require a string or an array of strings."),
-      );
+      throw new TypeError("Gemini embeddings require a string or an array of strings.");
     }
+    const { encodingFormat, providerOptions } = resolveEncodingFormat(
+      params.encodingFormat,
+      params.providerOptions,
+      this.providerName,
+    );
     return this.execute(async () => {
       // SAFETY: The provider contract establishes the asserted representation at this boundary.
       const response = await this.client.models.embedContent({
@@ -1218,27 +1219,30 @@ export class GeminiProvider extends BaseProvider {
           ...includeWhen(!(params.dimensions === undefined), {
             outputDimensionality: params.dimensions,
           }),
-          ...params.providerOptions,
+          ...providerOptions,
         },
       });
-      return {
-        data: (response.embeddings ?? []).flatMap((embedding, index) =>
-          embedding.values === undefined
-            ? []
-            : [
-                {
-                  embedding: embedding.values,
-                  index,
-                  object: "embedding" as const,
-                },
-              ],
-        ),
-        model: params.model,
-        object: "list",
-        provider: this.providerName,
-        raw: response,
-        usage: { promptTokens: 0, totalTokens: 0 },
-      };
+      return applyEncodingFormat(
+        {
+          data: (response.embeddings ?? []).flatMap((embedding, index) =>
+            embedding.values === undefined
+              ? []
+              : [
+                  {
+                    embedding: embedding.values,
+                    index,
+                    object: "embedding" as const,
+                  },
+                ],
+          ),
+          model: params.model,
+          object: "list",
+          provider: this.providerName,
+          raw: response,
+          usage: { promptTokens: 0, totalTokens: 0 },
+        },
+        encodingFormat,
+      );
     });
   }
 

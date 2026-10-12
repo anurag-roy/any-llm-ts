@@ -297,7 +297,7 @@ export interface ChatCompletionChunk {
 }
 
 export interface Embedding {
-  embedding: number[];
+  embedding: number[] | string;
   index: number;
   object: "embedding";
 }

@@ -1,4 +1,4 @@
-import { parseJsonObject } from "../src/utils.js";
+import { isString, parseJsonObject } from "../src/utils.js";
 import type { JsonObject } from "../src/types.js";
 import {
   BlockedReason,
@@ -1723,6 +1723,32 @@ describe("Gemini provider", () => {
     ]);
   });
 
+  it("encodes float embeddings as base64 without sending encoding_format", async () => {
+    const sdk = fakeGemini({
+      embedContent: vi.fn().mockResolvedValue({
+        embeddings: [{ values: [0.1, 0.2, 0.3] }],
+      }),
+    });
+    const provider = new GeminiProvider({}, sdk.client);
+    const result = await provider.embedding({
+      encodingFormat: "base64",
+      input: "hello",
+      model: "embedding",
+      providerOptions: { encoding_format: "base64", taskType: "RETRIEVAL_DOCUMENT" },
+    });
+    expect(sdk.models.embedContent).toHaveBeenCalledWith({
+      config: { taskType: "RETRIEVAL_DOCUMENT" },
+      contents: "hello",
+      model: "embedding",
+    });
+    const encoded = result.data[0]?.embedding;
+    expect(isString(encoded)).toBe(true);
+    const decoded = Buffer.from(isString(encoded) ? encoded : "", "base64");
+    expect(decoded.readFloatLE(0)).toBeCloseTo(0.1);
+    expect(decoded.readFloatLE(4)).toBeCloseTo(0.2);
+    expect(decoded.readFloatLE(8)).toBeCloseTo(0.3);
+  });
+
   it("rejects unsupported embedding inputs and normalizes SDK errors", async () => {
     const sdk = fakeGemini({
       generateContent: vi.fn().mockRejectedValue({
@@ -1734,11 +1760,11 @@ describe("Gemini provider", () => {
     const provider = new GeminiProvider({}, sdk.client);
     await expect(
       provider.embedding({
-        encodingFormat: "base64",
         input: "hello",
         model: "embedding",
+        providerOptions: { encoding_format: "int8" },
       }),
-    ).rejects.toThrow(/base64/u);
+    ).rejects.toBeInstanceOf(UnsupportedParameterError);
     await expect(provider.embedding({ input: [1, 2], model: "embedding" })).rejects.toThrow(
       /string or an array of strings/u,
     );

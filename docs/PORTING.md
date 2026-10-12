@@ -46,7 +46,7 @@ Composition keeps the public client stable even when a provider adapter has a co
 
 ## Current scope
 
-The port now tracks the Python source at commit `99f2d1cff52f99a312e57498510951b76e1d61b8` with:
+The port now tracks the Python source at commit `37b69490bebf97f14a9bd63d1e46f7b437faaf52` with:
 
 - the same 53 registered provider names and the same stateless operation set;
 - native adapters for Anthropic, Google Gen AI, Bedrock, SageMaker, Azure AI Inference, Cohere,

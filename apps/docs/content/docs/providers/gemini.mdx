@@ -186,8 +186,9 @@ const embeddings = await gemini.embedding({
 const models = await gemini.listModels({ pageSize: 20 });
 ```
 
-Gemini embeddings accept a string or an array of strings and return float vectors. Base64
-embedding output is not supported. Model listing consumes all pages returned by the SDK.
+Gemini embeddings accept a string or an array of strings and return float vectors. Request
+`encodingFormat: "base64"` to encode those floats locally as little-endian float32 bytes.
+Model listing consumes all pages returned by the SDK.
 
 ## Responses
 

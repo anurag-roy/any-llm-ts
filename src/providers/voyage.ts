@@ -3,6 +3,7 @@ import { parseJsonObject, parseJsonObjectArray } from "../utils.js";
 import { isNumber, isObject, isString } from "../utils.js";
 import { VoyageAIClient } from "voyageai";
 
+import { applyEncodingFormat, resolveEncodingFormat } from "../embedding.js";
 import {
   MissingApiKeyError,
   UnsupportedOperationError,
@@ -146,20 +147,16 @@ export class VoyageProvider extends BaseProvider {
     });
   }
 
-  override embedding(params: EmbeddingParams): Promise<EmbeddingResponse> {
+  override async embedding(params: EmbeddingParams): Promise<EmbeddingResponse> {
     const input = params.input;
     if (!isStringInput(input)) {
-      return Promise.reject(
-        new TypeError("Voyage embeddings require a string or an array of strings."),
-      );
+      throw new TypeError("Voyage embeddings require a string or an array of strings.");
     }
-    if (params.encodingFormat === "base64") {
-      return Promise.reject(
-        new TypeError(
-          "The normalized embedding response cannot represent Voyage base64 embeddings.",
-        ),
-      );
-    }
+    const { encodingFormat, providerOptions } = resolveEncodingFormat(
+      params.encodingFormat,
+      params.providerOptions,
+      "voyage",
+    );
     const texts = isString(input) ? [input] : input;
 
     return this.execute(async () => {
@@ -167,7 +164,7 @@ export class VoyageProvider extends BaseProvider {
         input: texts,
         model: params.model,
         ...includeWhen(!(params.dimensions === undefined), { outputDimension: params.dimensions }),
-        ...params.providerOptions,
+        ...providerOptions,
       });
       const data = (response.data ?? []).map((item, index) => {
         if (!Array.isArray(item.embedding)) {
@@ -180,14 +177,17 @@ export class VoyageProvider extends BaseProvider {
         };
       });
       const totalTokens = response.usage?.totalTokens ?? 0;
-      return {
-        data,
-        model: response.model ?? params.model,
-        object: "list",
-        provider: "voyage",
-        raw: response,
-        usage: { promptTokens: totalTokens, totalTokens },
-      };
+      return applyEncodingFormat(
+        {
+          data,
+          model: response.model ?? params.model,
+          object: "list",
+          provider: "voyage",
+          raw: response,
+          usage: { promptTokens: totalTokens, totalTokens },
+        },
+        encodingFormat,
+      );
     });
   }
 }
