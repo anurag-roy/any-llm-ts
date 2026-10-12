@@ -23,12 +23,12 @@ const llm = AnyLLM.create("openai", {
 });
 ```
 
-| Option          | Purpose                                                               |
-| --------------- | --------------------------------------------------------------------- |
-| `apiKey`        | Overrides the provider's conventional API-key environment variable.   |
-| `apiBase`       | Overrides the configured API base URL or endpoint.                    |
+| Option          | Purpose                                                                             |
+| --------------- | ----------------------------------------------------------------------------------- |
+| `apiKey`        | Overrides the provider's conventional API-key environment variable.                 |
+| `apiBase`       | Overrides the configured API base URL or endpoint.                                  |
 | `maxRetries`    | Sets the SDK retry count (`0` disables retries). `undefined` keeps the SDK default. |
-| `clientOptions` | Passes additional constructor options to the underlying provider SDK. |
+| `clientOptions` | Passes additional constructor options to the underlying provider SDK.               |
 
 `maxRetries` counts retries after the first request. OpenAI-compatible and Anthropic-based
 providers pass it through as `maxRetries`. Gemini and Vertex AI set
