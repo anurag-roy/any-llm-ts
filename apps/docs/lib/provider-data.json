@@ -82,7 +82,7 @@
       "adapterId": "any-llm-ts/anthropic",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "supportsCompletionN": false,
     "tier": "verified"
@@ -142,7 +142,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "community"
   },
@@ -200,7 +200,7 @@
       "adapterId": "any-llm-ts/azure",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "community"
   },
@@ -257,7 +257,7 @@
       "adapterId": "any-llm-ts/anthropic",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "supportsCompletionN": false,
     "tier": "community"
@@ -316,7 +316,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "verified"
   },
@@ -373,7 +373,7 @@
       "adapterId": "any-llm-ts/bedrock",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "supportsCompletionN": false,
     "tier": "verified"
@@ -433,7 +433,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "community"
   },
@@ -492,7 +492,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "verified"
   },
@@ -551,7 +551,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "community"
   },
@@ -610,7 +610,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "community"
   },
@@ -668,7 +668,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "community"
   },
@@ -727,7 +727,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "community"
   },
@@ -786,7 +786,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "verified"
   },
@@ -845,7 +845,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "community"
   },
@@ -904,7 +904,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "verified"
   },
@@ -962,7 +962,7 @@
       "adapterId": "any-llm-ts/gemini",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "verified"
   },
@@ -1021,7 +1021,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "community"
   },
@@ -1080,7 +1080,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "community"
   },
@@ -1139,7 +1139,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "verified"
   },
@@ -1197,7 +1197,7 @@
       "adapterId": "any-llm-ts/huggingface",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "community"
   },
@@ -1256,7 +1256,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "verified"
   },
@@ -1315,7 +1315,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "community"
   },
@@ -1374,7 +1374,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "community"
   },
@@ -1433,7 +1433,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "verified"
   },
@@ -1491,7 +1491,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "verified"
   },
@@ -1550,7 +1550,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "verified"
   },
@@ -1609,7 +1609,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "community"
   },
@@ -1668,7 +1668,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "verified"
   },
@@ -1727,7 +1727,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "verified"
   },
@@ -1786,7 +1786,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "verified"
   },
@@ -1845,7 +1845,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "community"
   },
@@ -1904,7 +1904,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "verified"
   },
@@ -1963,7 +1963,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "community"
   },
@@ -2021,7 +2021,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "verified"
   },
@@ -2111,7 +2111,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "verified"
   },
@@ -2170,7 +2170,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "verified"
   },
@@ -2228,7 +2228,7 @@
       "adapterId": "any-llm-ts/otari",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "verified"
   },
@@ -2287,7 +2287,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "community"
   },
@@ -2346,7 +2346,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "community"
   },
@@ -2405,7 +2405,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "verified"
   },
@@ -2464,7 +2464,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "community"
   },
@@ -2523,7 +2523,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "community"
   },
@@ -2580,7 +2580,7 @@
       "adapterId": "any-llm-ts/sagemaker",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "supportsCompletionN": false,
     "tier": "community"
@@ -2640,7 +2640,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "verified"
   },
@@ -2699,7 +2699,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "community"
   },
@@ -2758,7 +2758,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "verified"
   },
@@ -2816,7 +2816,7 @@
       "adapterId": "any-llm-ts/vertexai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "community"
   },
@@ -2873,7 +2873,7 @@
       "adapterId": "any-llm-ts/anthropic",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "supportsCompletionN": false,
     "tier": "community"
@@ -2933,7 +2933,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "community"
   },
@@ -2990,7 +2990,7 @@
       "adapterId": "any-llm-ts/voyage",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "supportsCompletionN": false,
     "tier": "verified"
@@ -3048,7 +3048,7 @@
       "adapterId": "any-llm-ts/watsonx",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "supportsCompletionN": false,
     "tier": "community"
@@ -3108,7 +3108,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "verified"
   },
@@ -3167,7 +3167,7 @@
       "adapterId": "any-llm-ts/openai",
       "adapterVersion": "1",
       "libraryName": "any-llm-ts",
-      "libraryVersion": "0.7.0"
+      "libraryVersion": "0.8.0"
     },
     "tier": "verified"
   }

@@ -1,5 +1,17 @@
 # any-llm-ts
 
+## 0.8.0
+
+### Minor Changes
+
+- a891d04: Sync with Python any-llm through `99f2d1c`: reject empty Gemini candidates, report streamed Gemini tool calls on the STOP chunk, drop empty Mistral assistant turns, raise Otari Messages stream errors, name in-memory transcription uploads, add `maxRetries`, and route Vertex Mistral and partner models off `generateContent`.
+- a891d04: Sync with Python any-llm through `c527b1f`: add Gemini Developer API Files, merge Gemini parallel tool results, send system-only Gemini requests as the user turn, list invocable Bedrock model IDs, enable Nebius Responses, and add `model` to `RerankResponse`.
+
+### Patch Changes
+
+- a891d04: Sync with Python any-llm through `18ed82b`: drop default `n=1` for every provider and refuse other values unless `supportsCompletionN` is true.
+- a891d04: Sync with Python any-llm through `37b6949`: page every Cohere model catalog response, reject Cohere `n` other than `1`, and encode Gemini/Voyage embeddings as little-endian float32 base64 when requested.
+
 ## 0.7.0
 
 ### Minor Changes
