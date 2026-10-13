@@ -165,6 +165,7 @@ describe("OpenAI-compatible provider", () => {
     );
     const request = parseJsonObject(create.mock.calls[0]?.[0]);
     expect(request.model).toBe("model-a");
+    expect(request.n).toBeUndefined();
     expect(request.stream).toBe(false);
     expect(request.messages[0].content).toBe("system");
     expect(request.messages[1].tool_calls[0].function.name).toBe("old_call");
@@ -192,6 +193,58 @@ describe("OpenAI-compatible provider", () => {
         totalTokens: 12,
       },
     });
+  });
+
+  it("does not send an unset n to chat completions", async () => {
+    const create = vi.fn().mockResolvedValue(completionResponse());
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+
+    await provider.completion({
+      messages: [{ content: "Hello", role: "user" }],
+      model: "model-a",
+    });
+
+    expect(create).toHaveBeenCalled();
+    expect(parseJsonObject(create.mock.calls[0]?.[0]).n).toBeUndefined();
+  });
+
+  it("does not send n=1 to chat completions", async () => {
+    const create = vi.fn().mockResolvedValue(completionResponse());
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+
+    await provider.completion({
+      messages: [{ content: "Hello", role: "user" }],
+      model: "model-a",
+      n: 1,
+    });
+
+    expect(create).toHaveBeenCalled();
+    expect(parseJsonObject(create.mock.calls[0]?.[0]).n).toBeUndefined();
+  });
+
+  it("forwards n greater than 1 to chat completions", async () => {
+    const create = vi.fn().mockResolvedValue(completionResponse());
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+
+    await provider.completion({
+      messages: [{ content: "Hello", role: "user" }],
+      model: "model-a",
+      n: 2,
+    });
+
+    expect(parseJsonObject(create.mock.calls[0]?.[0]).n).toBe(2);
   });
 
   it("keeps google extraContent, drops other side-channels, and does not send is_error", async () => {

@@ -403,6 +403,7 @@ export class AzureProvider extends BaseProvider {
       envApiKey: "AZURE_API_KEY",
       name: "azure",
       requiresApiKey: true,
+      supportsCompletionN: true,
       ...includeWhen(!(apiBase === undefined), { apiBase }),
     });
   }

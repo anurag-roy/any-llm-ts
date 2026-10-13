@@ -166,6 +166,7 @@ describe("AnyLLM registry and facade", () => {
     expect(llm.provider).toBe("my-gateway");
     expect(llm.metadata.apiBase).toBe("https://gateway.example/v1");
     expect(llm.metadata.promptCacheKeySupport).toBe("passthrough");
+    expect(llm.metadata.supportsCompletionN).toBe(true);
     expect(llm.metadata.requiresApiKey).toBe(false);
     expect(() =>
       AnyLLM.createOpenAICompatible({
@@ -253,6 +254,43 @@ describe("AnyLLM registry and facade", () => {
   it("constructs a facade from a provider instance", () => {
     const provider = new FakeProvider();
     expect(AnyLLM.fromProvider(provider).provider).toBe("fake");
+  });
+
+  it("drops default n and refuses extra choices when the provider cannot return them", async () => {
+    const provider = new FakeProvider();
+    const llm = AnyLLM.fromProvider(provider);
+
+    await llm.completion({ messages: [{ content: "Hi", role: "user" }], model: "model-a" });
+    await llm.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "model-a",
+      n: 1,
+    });
+    expect(provider.requests.map((request) => request.n)).toEqual([undefined, undefined]);
+
+    for (const n of [2, 0, -1]) {
+      await expect(
+        llm.completion({ messages: [{ content: "Hi", role: "user" }], model: "model-a", n }),
+      ).rejects.toMatchObject({ parameterName: "n" });
+    }
+    expect(provider.requests).toHaveLength(2);
+  });
+
+  it("refuses extra choices for groq and ollama before a request is sent", async () => {
+    await expect(
+      AnyLLM.create("groq", { apiKey: "test" }).completion({
+        messages: [{ content: "Hi", role: "user" }],
+        model: "llama",
+        n: 2,
+      }),
+    ).rejects.toBeInstanceOf(UnsupportedParameterError);
+    await expect(
+      AnyLLM.create("ollama").completion({
+        messages: [{ content: "Hi", role: "user" }],
+        model: "llama",
+        n: 2,
+      }),
+    ).rejects.toBeInstanceOf(UnsupportedParameterError);
   });
 
   it("rejects prompt cache keys for providers that do not support them", async () => {

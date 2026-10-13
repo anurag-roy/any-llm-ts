@@ -2,18 +2,8 @@ import { includeWhen } from "../utils.js";
 import type { JsonObject, JsonValue } from "../types.js";
 import { parseJsonObject, parseJsonObjectArray, parseOptionalJsonObject } from "../utils.js";
 import { compactObject, isBoolean, isNumber, isObject, isString } from "../utils.js";
-import { MissingApiKeyError, ProviderError, UnsupportedParameterError } from "../errors.js";
-import type {
-  ChatCompletion,
-  ChatCompletionChunk,
-  CompletionOperationOptions,
-  CompletionParams,
-  Model,
-  ProviderOptions,
-  RerankMeta,
-  RerankParams,
-  RerankResponse,
-} from "../types.js";
+import { MissingApiKeyError, ProviderError } from "../errors.js";
+import type { Model, ProviderOptions, RerankMeta, RerankParams, RerankResponse } from "../types.js";
 import { getEnvironmentVariable } from "../utils.js";
 import { OpenAIProvider } from "./openai.js";
 
@@ -149,27 +139,13 @@ export class CohereProvider extends OpenAIProvider {
         envApiBase: "COHERE_BASE_URL",
         envApiKey: "COHERE_API_KEY",
         name: "cohere",
+        supportsCompletionN: false,
       },
       { ...options, apiBase: `${root}/compatibility/v1`, apiKey },
     );
     this.apiKey = apiKey;
     this.fetch = fetchImplementation;
     this.rootApiBase = root;
-  }
-
-  override completion(
-    params: CompletionParams,
-    operation: CompletionOperationOptions = {},
-  ): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion> {
-    // OpenAI clients send n=1 by default; Cohere has no `n` and always returns one completion.
-    if (params.n !== undefined && params.n !== 1) {
-      return Promise.reject(
-        new UnsupportedParameterError("n", "cohere", "Cohere returns one completion per request."),
-      );
-    }
-    const request = { ...params };
-    delete request.n;
-    return super.completion(request, operation);
   }
 
   override listModels(providerOptions: JsonObject = {}): Promise<Model[]> {

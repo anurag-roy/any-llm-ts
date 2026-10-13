@@ -980,6 +980,12 @@ export interface ProviderMetadata {
   promptCacheKeySupport: PromptCacheKeySupport;
   provenance: ProviderAdapterProvenance;
   requiresApiKey: boolean;
+  /**
+   * Whether the provider can return more than one choice per completion (`n`).
+   * `n=1` is OpenAI's default, so it is dropped for every provider before the
+   * request. Any other value is forwarded only when this flag is true.
+   */
+  supportsCompletionN: boolean;
   tier: ProviderTier;
 }
 

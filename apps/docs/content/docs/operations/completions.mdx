@@ -37,6 +37,18 @@ const response = await llm.completion({
 Adapters that cannot preserve per-request timeout semantics reject `timeout` instead of silently
 ignoring it.
 
+## Multiple choices
+
+`n` asks for more than one choice in a single completion. `n=1` is OpenAI's default, so any-llm-ts
+drops it before the request reaches any provider. Clients that always send it still work everywhere.
+Any other value is forwarded only to providers that can return several choices: OpenAI-compatible
+providers (including registry gateways and `AnyLLM.createOpenAICompatible` endpoints), Azure AI
+Inference, Gemini, Vertex AI, Hugging Face, Mistral, and Together. Groq, Cohere, Ollama, Anthropic,
+Bedrock, SageMaker, and watsonx raise `UnsupportedParameterError` naming `n` instead of silently
+returning one choice.
+
+Inspect `metadata.supportsCompletionN` to see which path a provider takes.
+
 ## Reusable client
 
 ```ts

@@ -1146,6 +1146,7 @@ export class GeminiProvider extends BaseProvider {
       fileOperations: this.providerName === "gemini" ? geminiFileOperations : [],
       name: this.providerName,
       requiresApiKey: config.requiresApiKey ?? true,
+      supportsCompletionN: true,
       ...includeWhen(!(apiBase === undefined), { apiBase }),
     });
   }

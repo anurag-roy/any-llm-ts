@@ -57,7 +57,7 @@ import type {
   TranscriptionParams,
   UploadFileParams,
 } from "../types.js";
-import { completeProviderMetadata } from "../provider-metadata.js";
+import { completeProviderMetadata, completionParamsWithValidatedN } from "../provider-metadata.js";
 import { resolveTranscriptionFile } from "../audio.js";
 import {
   compactObject,
@@ -123,6 +123,7 @@ interface OpenAIProviderConfig {
   promptCacheKeySupport?: ProviderMetadata["promptCacheKeySupport"];
   quirks?: OpenAIProviderQuirks;
   requiresApiKey?: boolean;
+  supportsCompletionN?: boolean;
 }
 
 interface OpenAIProviderQuirks {
@@ -915,6 +916,7 @@ export class OpenAIProvider extends BaseProvider {
         ...includeWhen(!(config.promptCacheKeySupport === undefined), {
           promptCacheKeySupport: config.promptCacheKeySupport,
         }),
+        supportsCompletionN: config.supportsCompletionN ?? true,
         fileOperations: config.fileOperations ?? [],
         ...includeWhen(config.messagesNative === true, { messagesNative: true }),
       },
@@ -935,6 +937,16 @@ export class OpenAIProvider extends BaseProvider {
     if (params.messages.length === 0) {
       return Promise.reject(new TypeError("The messages array cannot be empty."));
     }
+    if (params.n !== undefined && params.n !== 1 && !this.metadata.supportsCompletionN) {
+      return Promise.reject(
+        new UnsupportedParameterError(
+          "n",
+          this.metadata.name,
+          `${this.metadata.name} returns one choice per request; omit n or set it to 1.`,
+        ),
+      );
+    }
+    params = completionParamsWithValidatedN(params, this.metadata);
     if (params.responseFormat !== undefined && this.config.quirks?.rejectResponseFormat === true) {
       return Promise.reject(new UnsupportedParameterError("responseFormat", this.metadata.name));
     }

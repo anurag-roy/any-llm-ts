@@ -1,5 +1,6 @@
 import packageMetadata from "../package.json" with { type: "json" };
 
+import { UnsupportedParameterError } from "./errors.js";
 import type {
   FileOperation,
   PromptCacheKeySupport,
@@ -197,6 +198,7 @@ type GeneratedProviderMetadataKeys =
   | "messagesNative"
   | "promptCacheKeySupport"
   | "provenance"
+  | "supportsCompletionN"
   | "tier";
 
 type IncompleteProviderMetadata = Omit<
@@ -248,6 +250,7 @@ export function completeProviderMetadata(
       libraryName: "any-llm-ts",
       libraryVersion: packageMetadata.version,
     },
+    supportsCompletionN: metadata.supportsCompletionN === true,
     tier: metadata.tier ?? providerTier(name),
   };
   validateProviderMetadata(completed, name);
@@ -427,6 +430,9 @@ export function validateProviderMetadata(metadata: ProviderMetadata, expectedId?
   if (!["passthrough", "supported", "unsupported"].includes(metadata.promptCacheKeySupport)) {
     throw new TypeError(`Provider "${metadata.id}" has invalid prompt-cache metadata.`);
   }
+  if (!isBoolean(metadata.supportsCompletionN)) {
+    throw new TypeError(`Provider "${metadata.id}" supportsCompletionN must be boolean.`);
+  }
   if (!["community", "verified"].includes(metadata.tier)) {
     throw new TypeError(`Provider "${metadata.id}" has invalid tier metadata.`);
   }
@@ -481,4 +487,35 @@ export function validateProviderMetadata(metadata: ProviderMetadata, expectedId?
 
   // Descriptors are immutable data contracts; this also rejects functions and other non-cloneables.
   structuredClone(metadata);
+}
+
+/** Drop OpenAI's default `n=1` and refuse any other value unless the provider returns multiple choices. */
+export function validatedCompletionN(
+  n: number | undefined,
+  metadata: Pick<ProviderMetadata, "name" | "supportsCompletionN">,
+): number | undefined {
+  if (n === undefined || n === 1) return undefined;
+  if (!metadata.supportsCompletionN) {
+    throw new UnsupportedParameterError(
+      "n",
+      metadata.name,
+      `${metadata.name} returns one choice per request; omit n or set it to 1.`,
+    );
+  }
+  return n;
+}
+
+export function completionParamsWithValidatedN<T extends { n?: number }>(
+  params: T,
+  metadata: Pick<ProviderMetadata, "name" | "supportsCompletionN">,
+): T {
+  const n = validatedCompletionN(params.n, metadata);
+  if (n === params.n) return params;
+  const next = { ...params };
+  if (n === undefined) {
+    delete next.n;
+  } else {
+    next.n = n;
+  }
+  return next;
 }
