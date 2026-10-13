@@ -75,6 +75,7 @@ describe("Together provider", () => {
   it("reranks documents and sorts by descending relevance", async () => {
     const post = vi.fn().mockResolvedValue({
       id: "rerank-together-1",
+      model: "Salesforce/Llama-Rank-v1",
       results: [
         { index: 0, relevance_score: 0.3 },
         { index: 1, relevance_score: 0.9 },
@@ -93,6 +94,7 @@ describe("Together provider", () => {
       }),
     ).resolves.toMatchObject({
       id: "rerank-together-1",
+      model: "Salesforce/Llama-Rank-v1",
       results: [
         { index: 1, relevanceScore: 0.9 },
         { index: 0, relevanceScore: 0.3 },

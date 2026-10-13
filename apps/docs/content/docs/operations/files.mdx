@@ -3,15 +3,17 @@ title: Files
 description: Upload, list, retrieve, download, and delete provider-hosted files.
 ---
 
-The Files API is available on an `AnyLLM` instance. Anthropic, OpenAI, and Azure OpenAI support
-all five operations. Other providers, including custom OpenAI-compatible endpoints, do not inherit
-Files support automatically.
+The Files API is available on an `AnyLLM` instance. Anthropic, OpenAI, Azure OpenAI, and Gemini
+(Developer API only) support Files. Vertex AI and custom OpenAI-compatible endpoints do not
+inherit Files support automatically.
 
 | Provider     | Upload                  | List | Retrieve | Download                | Delete |
 | ------------ | ----------------------- | ---- | -------- | ----------------------- | ------ |
 | Anthropic    | Yes                     | Yes  | Yes      | Generated files         | Yes    |
 | OpenAI       | Yes, requires `purpose` | Yes  | Yes      | Depends on file purpose | Yes    |
 | Azure OpenAI | Yes, requires `purpose` | Yes  | Yes      | Depends on file purpose | Yes    |
+| Gemini       | Yes                     | Yes  | Yes      | No                      | Yes    |
+| Vertex AI    | No                      | No   | No       | No                      | No     |
 
 ```ts
 import { AnyLLM } from "any-llm-ts";
@@ -92,6 +94,52 @@ rejected by Azure with HTTP 400.
 File IDs remain scoped to their originating provider account; do not pass OpenAI file IDs to Azure
 or vice versa.
 
+## Gemini uploads
+
+Gemini Developer API files expire after 48 hours. `purpose` and `expiresIn` are rejected. File IDs
+are resource names (`files/{id}`); a bare suffix is accepted and canonicalized. `filename` maps to
+Gemini's `displayName`. Listing maps `limit`/`cursor` to `pageSize`/`pageToken` and returns one SDK
+page without auto-pagination. User-uploaded files are not downloadable; `download` is omitted from
+Gemini `fileOperations` until a live generated-file download has been checked. `downloadFile` on an
+upload raises `InvalidRequestError` before opening a content stream.
+
+```ts
+const gemini = AnyLLM.create("gemini");
+const uploaded = await gemini.uploadFile({
+  file: "./report.pdf",
+  mimeType: "application/pdf",
+});
+
+let file = uploaded;
+try {
+  while (file.status === "PROCESSING") {
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    file = await gemini.retrieveFile({ fileId: file.id });
+  }
+  const response = await gemini.completion({
+    model: "gemini-3-flash-preview",
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "file",
+            file: { file_data: file.uri, filename: file.filename },
+          },
+          { type: "text", text: "Summarize this report." },
+        ],
+      },
+    ],
+  });
+  console.log(response.choices[0]?.message.content);
+} finally {
+  await gemini.deleteFile({ fileId: file.id });
+}
+```
+
+Native fields such as `uri`, `downloadUri`, `source`, `sha256Hash`, and `error` are preserved on
+`FileMetadata`. Vertex AI does not inherit this Files implementation.
+
 ## Methods
 
 | Method                                                                               | Result         |
@@ -127,6 +175,10 @@ Anthropic maps `cursor` / `nextCursor` to `page` / `next_page`. Listing rejects 
 `files-api-2025-04-14` beta because it changes the page shape. For a known set of IDs, Anthropic
 accepts `providerOptions.ids`.
 
+Gemini maps `limit`/`cursor` to `pageSize`/`pageToken` and reads `nextCursor` from the current
+pager page. Listing does not iterate the SDK pager, so subsequent pages are never fetched
+automatically.
+
 ## Downloads and provider restrictions
 
 OpenAI download eligibility depends on the file's purpose. Batch input files can be downloaded
@@ -137,6 +189,10 @@ file can be downloaded.
 
 Azure downloads use `/openai/v1/files/{fileId}/content`. Download eligibility is determined by
 Azure, not by OpenAI's purpose restrictions.
+
+Gemini user uploads are not downloadable (`source="UPLOADED"`, no `downloadUri`). `downloadFile` on
+an upload raises `InvalidRequestError`. Retrieve and delete of an unknown Gemini file can surface as
+`ProviderFileNotFoundError` when the provider answers 403 with a "may not exist" message.
 
 Anthropic marks user uploads as non-downloadable. Download files returned by native code execution
 or supported skills. `FileDownload` exposes `statusCode` and `headers` before body reads begin.
@@ -165,6 +221,10 @@ Anthropic Files methods accept `timeout` (seconds), `maxRetries`, `betas`, and `
 through `providerOptions`. Upload also accepts `expiresIn`, a positive integer duration in seconds.
 Anthropic rejects a non-omitted shared `purpose` parameter. Uploads default to zero automatic
 retries.
+
+Gemini Files methods accept `timeout` (seconds), `maxRetries`, and `extraHeaders` through
+`providerOptions`. Uploads default to zero automatic retries. `purpose` and `expiresIn` are
+rejected.
 
 Unsupported options raise `UnsupportedParameterError`. Invalid IDs, limits, expiry, chunk sizes, and
 unreadable upload paths raise `InvalidRequestError`. A retrieve, download, or delete HTTP 404 becomes

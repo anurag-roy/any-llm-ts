@@ -99,6 +99,23 @@ describe("Python source parity contract", () => {
     expect(AnyLLM.getProviderMetadata("anthropic").promptCacheKeySupport).toBe("unsupported");
   });
 
+  it("exposes completion-n support for providers that can return multiple choices", () => {
+    expect(AnyLLM.getProviderMetadata("openai").supportsCompletionN).toBe(true);
+    expect(AnyLLM.getProviderMetadata("mistral").supportsCompletionN).toBe(true);
+    expect(AnyLLM.getProviderMetadata("together").supportsCompletionN).toBe(true);
+    expect(AnyLLM.getProviderMetadata("huggingface").supportsCompletionN).toBe(true);
+    expect(AnyLLM.getProviderMetadata("cerebras").supportsCompletionN).toBe(true);
+    expect(AnyLLM.getProviderMetadata("gemini").supportsCompletionN).toBe(true);
+    expect(AnyLLM.getProviderMetadata("vertexai").supportsCompletionN).toBe(true);
+    expect(AnyLLM.getProviderMetadata("azure").supportsCompletionN).toBe(true);
+    expect(AnyLLM.getProviderMetadata("anthropic").supportsCompletionN).toBe(false);
+    expect(AnyLLM.getProviderMetadata("cohere").supportsCompletionN).toBe(false);
+    expect(AnyLLM.getProviderMetadata("groq").supportsCompletionN).toBe(false);
+    expect(AnyLLM.getProviderMetadata("ollama").supportsCompletionN).toBe(false);
+    expect(AnyLLM.getProviderMetadata("watsonx").supportsCompletionN).toBe(false);
+    expect(AnyLLM.getProviderMetadata("bedrock").supportsCompletionN).toBe(false);
+  });
+
   it("matches Python native Messages providers", () => {
     const expected = new Set(sourceParity.messagesNative);
     for (const metadata of AnyLLM.getAllProviderMetadata()) {

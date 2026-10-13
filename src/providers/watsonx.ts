@@ -23,7 +23,12 @@ import type {
   ToolCall,
   ToolCallDelta,
 } from "../types.js";
-import { compactObject, getEnvironmentVariable, iterateClosing } from "../utils.js";
+import {
+  compactObject,
+  getEnvironmentVariable,
+  iterateClosing,
+  rejectMaxRetries,
+} from "../utils.js";
 import { BaseProvider } from "./base.js";
 import { completeProviderMetadata } from "../provider-metadata.js";
 
@@ -348,6 +353,7 @@ export class WatsonxProvider extends BaseProvider {
   private readonly configuration: WatsonxConfiguration;
 
   constructor(options: ProviderOptions = {}, client?: WatsonxClientLike) {
+    if (options.maxRetries !== undefined) rejectMaxRetries("watsonx");
     super(options);
     const apiBase = options.apiBase ?? getEnvironmentVariable("WATSONX_URL");
     this.configuration = createWatsonxConfiguration(options, client);

@@ -14,9 +14,11 @@ import type {
 } from "../types.js";
 import {
   getEnvironmentVariable,
+  includeWhen,
   isAsyncIterable,
   mapAsyncIterable,
   parseJsonObject,
+  resolvedMaxRetries,
 } from "../utils.js";
 import { nativeMessage, nativeMessageEvent, nativeMessagesRequest } from "./anthropic.js";
 import { OpenAIProvider } from "./openai.js";
@@ -38,6 +40,7 @@ export class MetaProvider extends OpenAIProvider {
       options.apiBase ?? getEnvironmentVariable("META_API_BASE") ?? "https://api.meta.ai/v1";
     const apiKey = options.apiKey ?? getEnvironmentVariable("MODEL_API_KEY");
     if (apiKey === undefined) throw new MissingApiKeyError("meta", "MODEL_API_KEY");
+    const maxRetries = resolvedMaxRetries(options);
     super(
       {
         apiBase,
@@ -75,6 +78,7 @@ export class MetaProvider extends OpenAIProvider {
         apiKey: null,
         authToken: apiKey,
         baseURL: anthropicBase(apiBase),
+        ...includeWhen(maxRetries !== undefined, { maxRetries }),
       });
   }
 

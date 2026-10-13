@@ -25,7 +25,13 @@ import type {
   ProviderOptions,
   ToolCall,
 } from "../types.js";
-import { compactObject, getEnvironmentVariable, iterateClosing, unixTimestamp } from "../utils.js";
+import {
+  compactObject,
+  getEnvironmentVariable,
+  iterateClosing,
+  rejectMaxRetries,
+  unixTimestamp,
+} from "../utils.js";
 import { BaseProvider } from "./base.js";
 import { completeProviderMetadata } from "../provider-metadata.js";
 
@@ -259,6 +265,7 @@ export class SageMakerProvider extends BaseProvider {
   private readonly client: SageMakerRuntimeClientLike;
 
   constructor(options: ProviderOptions = {}, client?: SageMakerRuntimeClientLike) {
+    if (options.maxRetries !== undefined) rejectMaxRetries("sagemaker");
     super(options);
     const apiBase = options.apiBase ?? getEnvironmentVariable("SAGEMAKER_ENDPOINT_URL");
     this.client = client ?? createSageMakerClient(options);

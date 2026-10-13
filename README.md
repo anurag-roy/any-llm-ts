@@ -214,7 +214,7 @@ await llm.downloadFile({ fileId });
 await llm.deleteFile({ fileId });
 ```
 
-Stateless camel-cased helpers with the same names are exported from the package. An unsupported operation rejects with `UnsupportedOperationError`. Provider-specific request fields can be added through `providerOptions` and SDK constructor fields through `clientOptions`.
+Stateless camel-cased helpers with the same names are exported from the package. An unsupported operation rejects with `UnsupportedOperationError`. Provider-specific request fields can be added through `providerOptions` and SDK constructor fields through `clientOptions`. Use `maxRetries` on `AnyLLM.create()` to set the SDK retry count uniformly (`0` disables retries).
 
 `messages()` uses native Messages support where available and a normalized completion compatibility layer elsewhere.
 

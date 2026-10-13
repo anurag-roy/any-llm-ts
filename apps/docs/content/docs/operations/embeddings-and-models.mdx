@@ -39,6 +39,11 @@ await llm.embedding({
 });
 ```
 
+OpenAI-compatible providers send `encodingFormat` to the SDK. Gemini and Voyage return
+floats only, so `encodingFormat: "base64"` is encoded locally as little-endian float32
+bytes (the same layout OpenAI clients decode). `float` and an unset format keep numeric
+vectors. Any other value raises `UnsupportedParameterError`.
+
 Together embeddings use the same normalized result and usage fields.
 
 ## List models
@@ -61,5 +66,7 @@ const models = await llm.listModels();
 
 Some providers expose compatible inference endpoints but no model-list endpoint. Check
 `metadata.capabilities.listModels` before relying on discovery. Azure AI Inference exposes its
-configured model through the Foundry `/info` endpoint. See [batches and
-reranking](./batches-and-reranking.mdx) for relevance scoring APIs.
+configured model through the Foundry `/info` endpoint. Bedrock lists only foundation models that
+support on-demand invocation, plus system-defined inference profile IDs. Cohere follows
+`next_page_token` on the native catalog so later pages, including rerank models, are not dropped.
+See [batches and reranking](./batches-and-reranking.mdx) for relevance scoring APIs.

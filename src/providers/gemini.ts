@@ -22,12 +22,14 @@ import {
   type Tool as GeminiTool,
 } from "@google/genai";
 
+import { applyEncodingFormat, resolveEncodingFormat } from "../embedding.js";
 import {
   ContentFilterError,
   ContextLengthExceededError,
   BatchNotCompleteError,
   InvalidRequestError,
   MissingApiKeyError,
+  ProviderError,
   UnsupportedParameterError,
 } from "../errors.js";
 import type {
@@ -42,12 +44,20 @@ import type {
   CompletionParams,
   CompletionUsage,
   CreateBatchParams,
+  DownloadFileParams,
   EmbeddingParams,
   EmbeddingResponse,
+  FileDeleted,
+  FileDownload,
+  FileMetadata,
+  FileOperation,
+  FilePage,
+  FileResourceParams,
   FinishReason,
   FunctionTool,
   ImageContent,
   ListBatchesParams,
+  ListFilesParams,
   Model,
   ProviderCapabilities,
   ProviderMetadata,
@@ -58,6 +68,7 @@ import type {
   Tool,
   ToolCall,
   ToolCallDelta,
+  UploadFileParams,
 } from "../types.js";
 import {
   compactObject,
@@ -69,6 +80,7 @@ import {
   isJsonValue,
   iterateClosing,
   parseJsonValue as validateJsonValue,
+  resolvedMaxRetries,
 } from "../utils.js";
 import { BaseProvider } from "./base.js";
 import {
@@ -80,6 +92,14 @@ import {
   type GeminiInteractionCreateParams,
 } from "./gemini-interactions.js";
 import { convertInteractionStream } from "./gemini-interactions-stream.js";
+import {
+  deleteGeminiFile,
+  downloadGeminiFile,
+  listGeminiFiles,
+  retrieveGeminiFile,
+  uploadGeminiFile,
+  type GeminiFileAuth,
+} from "./gemini-files.js";
 import { completeProviderMetadata } from "../provider-metadata.js";
 
 const INLINE_DATA_LIMIT_BYTES = 20 * 1024 * 1024;
@@ -144,6 +164,8 @@ const geminiCapabilities: ProviderCapabilities = {
   streaming: true,
   vision: true,
 };
+
+const geminiFileOperations: FileOperation[] = ["delete", "list", "retrieve", "upload"];
 
 export interface GeminiProviderConfig {
   documentationUrl?: string;
@@ -217,6 +239,26 @@ function resolveApiKey(options: ProviderOptions): string {
   return apiKey;
 }
 
+/** Map `maxRetries` onto genai `httpOptions.retryOptions` unless the caller already set one. */
+export function geminiHttpOptionsWithRetries(
+  httpOptions: GoogleGenAIOptions["httpOptions"] | undefined,
+  maxRetries: number | undefined,
+): GoogleGenAIOptions["httpOptions"] | undefined {
+  if (maxRetries === undefined) return httpOptions;
+  const attempts = maxRetries + 1;
+  if (httpOptions === undefined) return { retryOptions: { attempts } };
+  if (isJsonObject(httpOptions)) {
+    if (httpOptions.retryOptions !== undefined || httpOptions.retry_options !== undefined) {
+      return httpOptions;
+    }
+    return { retryOptions: { attempts }, ...httpOptions };
+  }
+  if (httpOptions.retryOptions === undefined) {
+    return { ...httpOptions, retryOptions: { attempts } };
+  }
+  return httpOptions;
+}
+
 function mergeClientOptions(
   options: ProviderOptions,
   apiBase: string | undefined,
@@ -227,8 +269,10 @@ function mergeClientOptions(
     ...options.clientOptions,
   } as GoogleGenAIOptions;
   const existingHttpOptions = clientOptions.httpOptions;
-  const httpOptions =
-    apiBase === undefined ? existingHttpOptions : { baseUrl: apiBase, ...existingHttpOptions };
+  const httpOptions = geminiHttpOptionsWithRetries(
+    apiBase === undefined ? existingHttpOptions : { baseUrl: apiBase, ...existingHttpOptions },
+    resolvedMaxRetries(options),
+  );
 
   return {
     ...clientOptions,
@@ -473,6 +517,15 @@ function assistantParts(
   return parts;
 }
 
+function pendingFunctionResponseParts(contents: Content[]): Part[] | undefined {
+  const last = contents.at(-1);
+  if (last?.role !== "user" || last.parts === undefined || last.parts.length === 0) {
+    return undefined;
+  }
+  if (last.parts.some((part) => part.functionResponse === undefined)) return undefined;
+  return last.parts;
+}
+
 function convertMessages(messages: ChatMessage[], provider: string): ConvertedMessages {
   const systemInstruction = messages
     .filter((message) => message.role === "developer" || message.role === "system")
@@ -492,13 +545,17 @@ function convertMessages(messages: ChatMessage[], provider: string): ConvertedMe
       continue;
     }
     if (message.role === "tool") {
-      contents.push({
-        parts: [functionResponse(message, namesById)],
-        role: "user",
-      });
+      const part = functionResponse(message, namesById);
+      const pending = pendingFunctionResponseParts(contents);
+      if (pending !== undefined) pending.push(part);
+      else contents.push({ parts: [part], role: "user" });
       continue;
     }
     contents.push({ parts: contentParts(message.content, provider), role: "user" });
+  }
+
+  if (contents.length === 0 && systemInstruction.length > 0) {
+    return { contents: [{ parts: [{ text: systemInstruction }], role: "user" }] };
   }
 
   return systemInstruction.length === 0 ? { contents } : { contents, systemInstruction };
@@ -767,8 +824,17 @@ function normalizeFinishReason(value: JsonValue | undefined, hasToolCalls: boole
   ) {
     normalized = "content_filter";
   }
-  if (hasToolCalls && normalized !== "length" && normalized !== "content_filter")
+  // Only a terminal chunk (one that already mapped a Gemini finish reason) reports tool_calls.
+  // Gemini can send the function call and STOP in separate chunks; a client that runs tools on
+  // every "tool_calls" chunk would otherwise run them twice.
+  if (
+    hasToolCalls &&
+    normalized !== null &&
+    normalized !== "length" &&
+    normalized !== "content_filter"
+  ) {
     return "tool_calls";
+  }
   return normalized;
 }
 
@@ -1046,6 +1112,7 @@ function inlinedBatchRequest(entry: JsonObject, provider: string): InlinedReques
 export class GeminiProvider extends BaseProvider {
   readonly metadata: ProviderMetadata;
   private readonly client: GoogleGenAI;
+  private readonly fileAuth: GeminiFileAuth;
   private readonly interactionsVersion: string | undefined;
   private readonly providerName: string;
 
@@ -1058,7 +1125,15 @@ export class GeminiProvider extends BaseProvider {
     this.providerName = config.name ?? "gemini";
     const apiBase =
       options.apiBase ?? getEnvironmentVariable(config.envApiBase ?? "GOOGLE_GEMINI_BASE_URL");
+    const apiKey =
+      options.apiKey ??
+      getEnvironmentVariable("GEMINI_API_KEY") ??
+      getEnvironmentVariable("GOOGLE_API_KEY");
     this.client = client ?? new GoogleGenAI(mergeClientOptions(options, apiBase));
+    this.fileAuth = {
+      ...includeWhen(!(apiBase === undefined), { apiBase }),
+      ...includeWhen(!(apiKey === undefined), { apiKey }),
+    };
     this.interactionsVersion = interactionsApiVersion(geminiClientOptions(options.clientOptions));
     this.metadata = completeProviderMetadata({
       capabilities: {
@@ -1068,8 +1143,10 @@ export class GeminiProvider extends BaseProvider {
       documentationUrl: config.documentationUrl ?? "https://ai.google.dev/gemini-api/docs",
       envApiBase: config.envApiBase ?? "GOOGLE_GEMINI_BASE_URL",
       envApiKey: config.envApiKey ?? "GEMINI_API_KEY or GOOGLE_API_KEY",
+      fileOperations: this.providerName === "gemini" ? geminiFileOperations : [],
       name: this.providerName,
       requiresApiKey: config.requiresApiKey ?? true,
+      supportsCompletionN: true,
       ...includeWhen(!(apiBase === undefined), { apiBase }),
     });
   }
@@ -1122,18 +1199,18 @@ export class GeminiProvider extends BaseProvider {
     });
   }
 
-  override embedding(params: EmbeddingParams): Promise<EmbeddingResponse> {
-    if (params.encodingFormat === "base64") {
-      return Promise.reject(new TypeError("Gemini embeddings do not support base64 encoding."));
-    }
+  override async embedding(params: EmbeddingParams): Promise<EmbeddingResponse> {
     if (
       !isString(params.input) &&
       !(Array.isArray(params.input) && params.input.every((value) => isString(value)))
     ) {
-      return Promise.reject(
-        new TypeError("Gemini embeddings require a string or an array of strings."),
-      );
+      throw new TypeError("Gemini embeddings require a string or an array of strings.");
     }
+    const { encodingFormat, providerOptions } = resolveEncodingFormat(
+      params.encodingFormat,
+      params.providerOptions,
+      this.providerName,
+    );
     return this.execute(async () => {
       // SAFETY: The provider contract establishes the asserted representation at this boundary.
       const response = await this.client.models.embedContent({
@@ -1143,27 +1220,30 @@ export class GeminiProvider extends BaseProvider {
           ...includeWhen(!(params.dimensions === undefined), {
             outputDimensionality: params.dimensions,
           }),
-          ...params.providerOptions,
+          ...providerOptions,
         },
       });
-      return {
-        data: (response.embeddings ?? []).flatMap((embedding, index) =>
-          embedding.values === undefined
-            ? []
-            : [
-                {
-                  embedding: embedding.values,
-                  index,
-                  object: "embedding" as const,
-                },
-              ],
-        ),
-        model: params.model,
-        object: "list",
-        provider: this.providerName,
-        raw: response,
-        usage: { promptTokens: 0, totalTokens: 0 },
-      };
+      return applyEncodingFormat(
+        {
+          data: (response.embeddings ?? []).flatMap((embedding, index) =>
+            embedding.values === undefined
+              ? []
+              : [
+                  {
+                    embedding: embedding.values,
+                    index,
+                    object: "embedding" as const,
+                  },
+                ],
+          ),
+          model: params.model,
+          object: "list",
+          provider: this.providerName,
+          raw: response,
+          usage: { promptTokens: 0, totalTokens: 0 },
+        },
+        encodingFormat,
+      );
     });
   }
 
@@ -1256,6 +1336,37 @@ export class GeminiProvider extends BaseProvider {
       }
       return batches;
     });
+  }
+
+  override uploadFile(params: UploadFileParams): Promise<FileMetadata> {
+    if (!this.metadata.fileOperations.includes("upload")) return super.uploadFile(params);
+    return this.execute(() => uploadGeminiFile(this.client, params));
+  }
+
+  override listFiles(params: ListFilesParams = {}): Promise<FilePage> {
+    if (!this.metadata.fileOperations.includes("list")) return super.listFiles(params);
+    return this.execute(() => listGeminiFiles(this.client, params));
+  }
+
+  override retrieveFile(params: FileResourceParams): Promise<FileMetadata> {
+    if (!this.metadata.fileOperations.includes("retrieve")) return super.retrieveFile(params);
+    return this.execute(() => retrieveGeminiFile(this.client, params), { fileOperation: true });
+  }
+
+  override deleteFile(params: FileResourceParams): Promise<FileDeleted> {
+    if (!this.metadata.fileOperations.includes("delete")) return super.deleteFile(params);
+    return this.execute(() => deleteGeminiFile(this.client, params), { fileOperation: true });
+  }
+
+  override downloadFile(params: DownloadFileParams): Promise<FileDownload> {
+    if (this.providerName !== "gemini") return super.downloadFile(params);
+    return this.execute(
+      () =>
+        downloadGeminiFile(this.client, params, this.fileAuth, {
+          unifiedExceptions: this.unifiedExceptions,
+        }),
+      { fileOperation: true },
+    );
   }
 
   override retrieveBatchResults(
@@ -1397,16 +1508,23 @@ export class GeminiProvider extends BaseProvider {
         };
       },
     );
-    if (choices.length === 0 && promptWasBlocked(response)) {
-      choices.push({
-        finishReason: "content_filter",
-        index: 0,
-        message: {
-          content: null,
-          refusal: GEMINI_CONTENT_FILTER_REFUSAL,
-          role: "assistant",
-        },
-      });
+    if (choices.length === 0) {
+      if (promptWasBlocked(response)) {
+        choices.push({
+          finishReason: "content_filter",
+          index: 0,
+          message: {
+            content: null,
+            refusal: GEMINI_CONTENT_FILTER_REFUSAL,
+            role: "assistant",
+          },
+        });
+      } else {
+        throw new ProviderError(
+          "generateContent returned no candidates and the prompt was not blocked",
+          { provider: this.providerName },
+        );
+      }
     }
 
     const usage = normalizeUsage(response.usageMetadata);
@@ -1509,9 +1627,10 @@ export class GeminiProvider extends BaseProvider {
           const audio = inlineDataAudio(audioBlobs, content, false);
           if (audio !== undefined) delta.audio = streamAudioDelta(audio);
           if (toolCalls.length > 0) delta.toolCalls = toolCalls;
+          const streamHasToolCalls = (state.nextToolIndices.get(choiceIndex) ?? 0) > 0;
           const mappedFinishReason = promptBlocked
             ? "content_filter"
-            : normalizeFinishReason(candidate.finishReason, toolCalls.length > 0);
+            : normalizeFinishReason(candidate.finishReason, streamHasToolCalls);
           if (mappedFinishReason === "content_filter") {
             delta.refusal = GEMINI_CONTENT_FILTER_REFUSAL;
           }

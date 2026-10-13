@@ -8,6 +8,7 @@ import {
   VoyageProvider,
 } from "../src/index.js";
 import type { VoyageAIClientLike } from "../src/providers/voyage.js";
+import { isString } from "../src/utils.js";
 
 function fakeVoyage(
   embed: ReturnType<typeof vi.fn>,
@@ -82,7 +83,33 @@ describe("Voyage provider", () => {
     });
   });
 
-  it("rejects token IDs, base64 output, and unsupported operations", async () => {
+  it("encodes float embeddings as base64 without sending encoding_format", async () => {
+    const embed = vi.fn().mockResolvedValue({
+      data: [{ embedding: [0.1, 0.2, 0.3], index: 0 }],
+      model: "voyage-3",
+      usage: { totalTokens: 2 },
+    });
+    const provider = new VoyageProvider({}, fakeVoyage(embed));
+    const result = await provider.embedding({
+      encodingFormat: "base64",
+      input: "hello",
+      model: "voyage-3",
+      providerOptions: { encoding_format: "base64", inputType: "document" },
+    });
+    expect(embed).toHaveBeenCalledWith({
+      input: ["hello"],
+      inputType: "document",
+      model: "voyage-3",
+    });
+    const encoded = result.data[0]?.embedding;
+    expect(isString(encoded)).toBe(true);
+    const decoded = Buffer.from(isString(encoded) ? encoded : "", "base64");
+    expect(decoded.readFloatLE(0)).toBeCloseTo(0.1);
+    expect(decoded.readFloatLE(4)).toBeCloseTo(0.2);
+    expect(decoded.readFloatLE(8)).toBeCloseTo(0.3);
+  });
+
+  it("rejects token IDs, unknown encodings, and unsupported operations", async () => {
     const provider = new VoyageProvider({}, fakeVoyage(vi.fn()));
 
     await expect(provider.embedding({ input: [1, 2], model: "voyage-3" })).rejects.toThrow(
@@ -90,11 +117,11 @@ describe("Voyage provider", () => {
     );
     await expect(
       provider.embedding({
-        encodingFormat: "base64",
         input: "hello",
         model: "voyage-3",
+        providerOptions: { encoding_format: "int8" },
       }),
-    ).rejects.toThrow(/cannot represent Voyage base64/u);
+    ).rejects.toBeInstanceOf(UnsupportedParameterError);
     await expect(
       provider.completion({
         messages: [{ content: "hello", role: "user" }],

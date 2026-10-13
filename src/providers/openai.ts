@@ -57,7 +57,8 @@ import type {
   TranscriptionParams,
   UploadFileParams,
 } from "../types.js";
-import { completeProviderMetadata } from "../provider-metadata.js";
+import { completeProviderMetadata, completionParamsWithValidatedN } from "../provider-metadata.js";
+import { resolveTranscriptionFile } from "../audio.js";
 import {
   compactObject,
   completionRequestOptions,
@@ -69,6 +70,7 @@ import {
   mapAsyncIterable,
   notifyCompletionDispatch,
   produceClosingAsyncIterable,
+  resolvedMaxRetries,
   timeoutRequestOptions,
 } from "../utils.js";
 import { BaseProvider } from "./base.js";
@@ -121,6 +123,7 @@ interface OpenAIProviderConfig {
   promptCacheKeySupport?: ProviderMetadata["promptCacheKeySupport"];
   quirks?: OpenAIProviderQuirks;
   requiresApiKey?: boolean;
+  supportsCompletionN?: boolean;
 }
 
 interface OpenAIProviderQuirks {
@@ -888,6 +891,7 @@ export class OpenAIProvider extends BaseProvider {
     this.config = config;
     const apiBase = options.apiBase ?? getEnvironmentVariable(config.envApiBase) ?? config.apiBase;
     const clientOptions = options.clientOptions ?? {};
+    const maxRetries = resolvedMaxRetries(options);
     // SAFETY: The provider contract establishes the asserted representation at this boundary.
     this.client =
       client ??
@@ -895,6 +899,7 @@ export class OpenAIProvider extends BaseProvider {
         ...(clientOptions as Omit<ClientOptions, "apiKey" | "baseURL">),
         apiKey: resolveApiKey(config, options.apiKey),
         ...includeWhen(!(apiBase === undefined), { baseURL: apiBase }),
+        ...includeWhen(maxRetries !== undefined, { maxRetries }),
       });
     this.metadata = completeProviderMetadata(
       {
@@ -911,6 +916,7 @@ export class OpenAIProvider extends BaseProvider {
         ...includeWhen(!(config.promptCacheKeySupport === undefined), {
           promptCacheKeySupport: config.promptCacheKeySupport,
         }),
+        supportsCompletionN: config.supportsCompletionN ?? true,
         fileOperations: config.fileOperations ?? [],
         ...includeWhen(config.messagesNative === true, { messagesNative: true }),
       },
@@ -931,6 +937,16 @@ export class OpenAIProvider extends BaseProvider {
     if (params.messages.length === 0) {
       return Promise.reject(new TypeError("The messages array cannot be empty."));
     }
+    if (params.n !== undefined && params.n !== 1 && !this.metadata.supportsCompletionN) {
+      return Promise.reject(
+        new UnsupportedParameterError(
+          "n",
+          this.metadata.name,
+          `${this.metadata.name} returns one choice per request; omit n or set it to 1.`,
+        ),
+      );
+    }
+    params = completionParamsWithValidatedN(params, this.metadata);
     if (params.responseFormat !== undefined && this.config.quirks?.rejectResponseFormat === true) {
       return Promise.reject(new UnsupportedParameterError("responseFormat", this.metadata.name));
     }
@@ -1145,7 +1161,12 @@ export class OpenAIProvider extends BaseProvider {
       const requestOptions = this.mediaRequestOptions(params.providerOptions);
       // SAFETY: The provider contract establishes the asserted representation at this boundary.
       const body = {
-        file: params.file,
+        file: await resolveTranscriptionFile(
+          params.file,
+          params.filename,
+          params.mimeType,
+          this.metadata.name,
+        ),
         language: params.language,
         model: params.model,
         prompt: params.prompt,

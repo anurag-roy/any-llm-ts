@@ -315,6 +315,7 @@ describe("stateless operation helpers", () => {
         topN: 1,
       }),
     ).resolves.toEqual({
+      model: "rerank-model",
       results: [
         { index: 0, relevanceScore: 1 },
         { index: 1, relevanceScore: 0.9 },

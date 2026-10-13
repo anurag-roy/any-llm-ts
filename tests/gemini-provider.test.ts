@@ -1,4 +1,4 @@
-import { parseJsonObject } from "../src/utils.js";
+import { isString, parseJsonObject } from "../src/utils.js";
 import type { JsonObject } from "../src/types.js";
 import {
   BlockedReason,
@@ -18,9 +18,11 @@ import {
   GeminiProvider,
   InvalidRequestError,
   MissingApiKeyError,
+  ProviderError,
   RateLimitError,
   UnsupportedParameterError,
 } from "../src/index.js";
+import { geminiHttpOptionsWithRetries } from "../src/providers/gemini.js";
 import type {
   ChatCompletion,
   ChatCompletionChunk,
@@ -101,12 +103,19 @@ function okSdk() {
   });
 }
 
-async function convertedContents(messages: ChatMessage[]): Promise<any[]> {
+async function convertedRequest(messages: ChatMessage[]) {
   const sdk = okSdk();
   const provider = new GeminiProvider({}, sdk.client);
   await provider.completion({ messages, model: "gemini-test" });
   // SAFETY: This test double implements the provider surface exercised by this test.
-  return sdk.models.generateContent.mock.calls[0]?.[0].contents as any[];
+  return sdk.models.generateContent.mock.calls[0]?.[0] as {
+    config?: { systemInstruction?: string };
+    contents: any[];
+  };
+}
+
+async function convertedContents(messages: ChatMessage[]): Promise<any[]> {
+  return (await convertedRequest(messages)).contents;
 }
 
 afterEach(() => {
@@ -805,6 +814,65 @@ describe("Gemini provider", () => {
     });
   });
 
+  it("merges consecutive parallel tool results into one user turn", async () => {
+    const contents = await convertedContents([
+      { content: "What is the weather?", role: "user" },
+      {
+        content: null,
+        role: "assistant",
+        toolCalls: [
+          {
+            function: { arguments: "{}", name: "get_weather" },
+            id: "call_1",
+            type: "function",
+          },
+          {
+            function: { arguments: "{}", name: "get_time" },
+            id: "call_2",
+            type: "function",
+          },
+        ],
+      },
+      { content: '{"temp":1}', name: "get_weather", role: "tool", toolCallId: "call_1" },
+      { content: '{"now":2}', name: "get_time", role: "tool", toolCallId: "call_2" },
+      { content: "thanks", role: "user" },
+      { content: '{"again":3}', name: "get_weather", role: "tool", toolCallId: "call_1" },
+    ]);
+    expect(contents).toHaveLength(5);
+    expect(contents[1].role).toBe("model");
+    expect(contents[2].role).toBe("user");
+    expect(contents[2].parts).toEqual([
+      {
+        functionResponse: { id: "call_1", name: "get_weather", response: { temp: 1 } },
+      },
+      {
+        functionResponse: { id: "call_2", name: "get_time", response: { now: 2 } },
+      },
+    ]);
+    expect(contents[3]).toMatchObject({ parts: [{ text: "thanks" }], role: "user" });
+    expect(contents[4].parts).toHaveLength(1);
+  });
+
+  it("sends a request of system messages alone as the user turn", async () => {
+    const request = await convertedRequest([
+      { content: "Reply with the single word OK.", role: "system" },
+      { content: "Stay terse.", role: "developer" },
+    ]);
+    expect(request.config?.systemInstruction).toBeUndefined();
+    expect(request.contents).toEqual([
+      { parts: [{ text: "Reply with the single word OK.\n\nStay terse." }], role: "user" },
+    ]);
+  });
+
+  it("keeps system instruction when any other turn is present", async () => {
+    const request = await convertedRequest([
+      { content: "Be brief.", role: "system" },
+      { content: "Hello", role: "user" },
+    ]);
+    expect(request.config?.systemInstruction).toBe("Be brief.");
+    expect(request.contents).toEqual([{ parts: [{ text: "Hello" }], role: "user" }]);
+  });
+
   it.each([
     ['{"temp": "20C"}', { temp: "20C" }],
     [Buffer.from('{"temp": "20C"}'), { temp: "20C" }],
@@ -1331,7 +1399,7 @@ describe("Gemini provider", () => {
     await expect(provider.completion(structuredParams)).rejects.toBeInstanceOf(ContentFilterError);
   });
 
-  it("preserves Gemini content-filter refusals and ignores unspecified prompt feedback", async () => {
+  it("preserves Gemini content-filter refusals and rejects unblocked empty candidates", async () => {
     const generateContent = vi
       .fn()
       .mockResolvedValueOnce(
@@ -1366,19 +1434,19 @@ describe("Gemini provider", () => {
       },
     });
 
-    // SAFETY: The non-streaming request makes this completion result concrete in the test.
-    const unspecified = (await provider.completion({
-      messages: [{ content: "Hi", role: "user" }],
-      model: "gemini-test",
-    })) as ChatCompletion;
-    expect(unspecified.choices).toEqual([]);
+    await expect(
+      provider.completion({
+        messages: [{ content: "Hi", role: "user" }],
+        model: "gemini-test",
+      }),
+    ).rejects.toBeInstanceOf(ProviderError);
 
-    // SAFETY: The non-streaming request makes this completion result concrete in the test.
-    const empty = (await provider.completion({
-      messages: [{ content: "Hi", role: "user" }],
-      model: "gemini-test",
-    })) as ChatCompletion;
-    expect(empty.choices).toEqual([]);
+    await expect(
+      provider.completion({
+        messages: [{ content: "Hi", role: "user" }],
+        model: "gemini-test",
+      }),
+    ).rejects.toBeInstanceOf(ProviderError);
   });
 
   it("maps streaming prompt blocks to a single typed refusal", async () => {
@@ -1655,6 +1723,32 @@ describe("Gemini provider", () => {
     ]);
   });
 
+  it("encodes float embeddings as base64 without sending encoding_format", async () => {
+    const sdk = fakeGemini({
+      embedContent: vi.fn().mockResolvedValue({
+        embeddings: [{ values: [0.1, 0.2, 0.3] }],
+      }),
+    });
+    const provider = new GeminiProvider({}, sdk.client);
+    const result = await provider.embedding({
+      encodingFormat: "base64",
+      input: "hello",
+      model: "embedding",
+      providerOptions: { encoding_format: "base64", taskType: "RETRIEVAL_DOCUMENT" },
+    });
+    expect(sdk.models.embedContent).toHaveBeenCalledWith({
+      config: { taskType: "RETRIEVAL_DOCUMENT" },
+      contents: "hello",
+      model: "embedding",
+    });
+    const encoded = result.data[0]?.embedding;
+    expect(isString(encoded)).toBe(true);
+    const decoded = Buffer.from(isString(encoded) ? encoded : "", "base64");
+    expect(decoded.readFloatLE(0)).toBeCloseTo(0.1);
+    expect(decoded.readFloatLE(4)).toBeCloseTo(0.2);
+    expect(decoded.readFloatLE(8)).toBeCloseTo(0.3);
+  });
+
   it("rejects unsupported embedding inputs and normalizes SDK errors", async () => {
     const sdk = fakeGemini({
       generateContent: vi.fn().mockRejectedValue({
@@ -1666,11 +1760,11 @@ describe("Gemini provider", () => {
     const provider = new GeminiProvider({}, sdk.client);
     await expect(
       provider.embedding({
-        encodingFormat: "base64",
         input: "hello",
         model: "embedding",
+        providerOptions: { encoding_format: "int8" },
       }),
-    ).rejects.toThrow(/base64/u);
+    ).rejects.toBeInstanceOf(UnsupportedParameterError);
     await expect(provider.embedding({ input: [1, 2], model: "embedding" })).rejects.toThrow(
       /string or an array of strings/u,
     );
@@ -1906,5 +2000,105 @@ describe("Gemini provider", () => {
       capabilities: { batch: true, embedding: true, responses: true, vision: true },
       name: "gemini",
     });
+  });
+
+  it("maps maxRetries onto Gemini httpOptions unless retryOptions are already set", () => {
+    expect(geminiHttpOptionsWithRetries(undefined, 0)).toEqual({
+      retryOptions: { attempts: 1 },
+    });
+    expect(geminiHttpOptionsWithRetries({ timeout: 5_000 }, 2)).toEqual({
+      retryOptions: { attempts: 3 },
+      timeout: 5_000,
+    });
+    expect(geminiHttpOptionsWithRetries({ retryOptions: { attempts: 9 } }, 0)).toEqual({
+      retryOptions: { attempts: 9 },
+    });
+  });
+
+  it("rejects an unblocked generateContent response that has no candidates", async () => {
+    const sdk = fakeGemini({
+      generateContent: vi.fn().mockResolvedValue(response({ candidates: [] })),
+    });
+    const provider = new GeminiProvider({}, sdk.client);
+    await expect(
+      provider.completion({
+        messages: [{ content: "Hello", role: "user" }],
+        model: "gemini-test",
+      }),
+    ).rejects.toBeInstanceOf(ProviderError);
+  });
+
+  it("reports tool_calls when STOP arrives after a streamed tool call", async () => {
+    const stream = responses(
+      response({
+        candidates: [
+          {
+            content: {
+              parts: [{ functionCall: { args: { q: "news" }, name: "search" } }],
+              role: "model",
+            },
+            index: 0,
+          },
+        ],
+      }),
+      response({
+        candidates: [
+          {
+            content: { parts: [{ text: "" }], role: "model" },
+            finishReason: GeminiFinishReason.STOP,
+            index: 0,
+          },
+        ],
+      }),
+    );
+    const sdk = fakeGemini({
+      generateContentStream: vi.fn().mockResolvedValue(stream),
+    });
+    const provider = new GeminiProvider({}, sdk.client);
+    const result = await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "gemini-test",
+      stream: true,
+    });
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    const chunks = await collect(result as AsyncIterable<ChatCompletionChunk>);
+    expect(chunks.map((chunk) => chunk.choices[0]?.finishReason)).toEqual([null, "tool_calls"]);
+  });
+
+  it("keeps length and content_filter ahead of a later streamed tool-call STOP", async () => {
+    const stream = responses(
+      response({
+        candidates: [
+          {
+            content: {
+              parts: [{ functionCall: { args: {}, name: "search" } }],
+              role: "model",
+            },
+            index: 0,
+          },
+        ],
+      }),
+      response({
+        candidates: [
+          {
+            content: { parts: [], role: "model" },
+            finishReason: GeminiFinishReason.MAX_TOKENS,
+            index: 0,
+          },
+        ],
+      }),
+    );
+    const sdk = fakeGemini({
+      generateContentStream: vi.fn().mockResolvedValue(stream),
+    });
+    const provider = new GeminiProvider({}, sdk.client);
+    const result = await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "gemini-test",
+      stream: true,
+    });
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    const chunks = await collect(result as AsyncIterable<ChatCompletionChunk>);
+    expect(chunks.map((chunk) => chunk.choices[0]?.finishReason)).toEqual([null, "length"]);
   });
 });

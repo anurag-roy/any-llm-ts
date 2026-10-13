@@ -4,7 +4,7 @@ import { AnthropicFoundry, type FoundryClientOptions } from "@anthropic-ai/found
 
 import { MissingApiKeyError } from "../errors.js";
 import type { ProviderOptions } from "../types.js";
-import { getEnvironmentVariable } from "../utils.js";
+import { getEnvironmentVariable, resolvedMaxRetries } from "../utils.js";
 import { AnthropicProvider } from "./anthropic.js";
 
 function createFoundryClient(options: ProviderOptions): AnthropicFoundry {
@@ -30,11 +30,13 @@ function createFoundryClient(options: ProviderOptions): AnthropicFoundry {
       ? (clientOptions.resource ?? getEnvironmentVariable("AZURE_ANTHROPIC_RESOURCE"))
       : undefined;
 
+  const maxRetries = resolvedMaxRetries(options);
   return new AnthropicFoundry({
     ...clientOptions,
     ...includeWhen(!(apiKey === undefined), { apiKey }),
     ...includeWhen(!(baseURL === undefined), { baseURL }),
     ...includeWhen(!(resource === undefined), { resource }),
+    ...includeWhen(maxRetries !== undefined, { maxRetries }),
   });
 }
 

@@ -3,7 +3,13 @@ import Anthropic from "@anthropic-ai/sdk";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { BatchNotCompleteError, MissingApiKeyError, ProviderError } from "../src/index.js";
+import {
+  AnyLLM,
+  BatchNotCompleteError,
+  MissingApiKeyError,
+  ProviderError,
+  UnsupportedParameterError,
+} from "../src/index.js";
 import { AnthropicProvider, normalizeAnthropicTypeArrays } from "../src/providers/anthropic.js";
 import type {
   ChatCompletion,
@@ -1556,5 +1562,37 @@ describe("Anthropic provider", () => {
 
   it("requires an API key", () => {
     expect(() => new AnthropicProvider()).toThrow(MissingApiKeyError);
+  });
+
+  it("does not send n=1 to messages.create", async () => {
+    const create = vi.fn().mockResolvedValue(anthropicResponse());
+    const llm = AnyLLM.fromProvider(
+      new AnthropicProvider({}, fakeAnthropic({ messages: { create } })),
+    );
+
+    await llm.completion({
+      messages: [{ content: "Hello", role: "user" }],
+      model: "claude-test",
+      n: 1,
+    });
+
+    expect(create).toHaveBeenCalled();
+    expect(parseJsonObject(create.mock.calls[0]?.[0]).n).toBeUndefined();
+  });
+
+  it("refuses n greater than 1 before calling Anthropic", async () => {
+    const create = vi.fn();
+    const llm = AnyLLM.fromProvider(
+      new AnthropicProvider({}, fakeAnthropic({ messages: { create } })),
+    );
+
+    await expect(
+      llm.completion({
+        messages: [{ content: "Hello", role: "user" }],
+        model: "claude-test",
+        n: 2,
+      }),
+    ).rejects.toBeInstanceOf(UnsupportedParameterError);
+    expect(create).not.toHaveBeenCalled();
   });
 });

@@ -16,18 +16,26 @@ import { AnyLLM } from "any-llm-ts";
 const llm = AnyLLM.create("openai", {
   apiKey: process.env.OPENAI_API_KEY,
   apiBase: "https://api.openai.com/v1",
+  maxRetries: 0,
   clientOptions: {
-    maxRetries: 3,
     timeout: 30_000,
   },
 });
 ```
 
-| Option          | Purpose                                                               |
-| --------------- | --------------------------------------------------------------------- |
-| `apiKey`        | Overrides the provider's conventional API-key environment variable.   |
-| `apiBase`       | Overrides the configured API base URL or endpoint.                    |
-| `clientOptions` | Passes additional constructor options to the underlying provider SDK. |
+| Option          | Purpose                                                                             |
+| --------------- | ----------------------------------------------------------------------------------- |
+| `apiKey`        | Overrides the provider's conventional API-key environment variable.                 |
+| `apiBase`       | Overrides the configured API base URL or endpoint.                                  |
+| `maxRetries`    | Sets the SDK retry count (`0` disables retries). `undefined` keeps the SDK default. |
+| `clientOptions` | Passes additional constructor options to the underlying provider SDK.               |
+
+`maxRetries` counts retries after the first request. OpenAI-compatible and Anthropic-based
+providers pass it through as `maxRetries`. Gemini and Vertex AI set
+`httpOptions.retryOptions.attempts` to `maxRetries + 1` because the GenAI SDK counts the first
+request. Providers whose SDK has no client-level retry count (`azure`, `bedrock`, `otari`,
+`sagemaker`, `watsonx`) reject the option; configure those through `clientOptions` instead.
+For Gemini and Vertex, `retryOptions` already present in `clientOptions.httpOptions` win.
 
 The values in `clientOptions` are intentionally typed as `Record<string, unknown>` because the
 accepted keys differ between SDKs and versions.
@@ -82,6 +90,7 @@ console.log(metadata.apiBase);
 console.log(metadata.capabilities.streaming);
 console.log(metadata.capabilities.pdfInput);
 console.log(metadata.promptCacheKeySupport);
+console.log(metadata.supportsCompletionN);
 console.log(metadata.tier);
 ```
 
@@ -92,3 +101,6 @@ integration coverage, not whether every model and operation is available in your
 When `promptCacheKeySupport` is `unsupported`, passing `promptCacheKey` to completions, Responses,
 or Messages fails before a network request. `supported` means the provider handles the key
 directly; `passthrough` means a router or custom compatible endpoint receives it unchanged.
+
+`n=1` is dropped for every provider. Other values of `n` are forwarded only when
+`supportsCompletionN` is true; otherwise they raise `UnsupportedParameterError`.

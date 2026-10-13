@@ -84,6 +84,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.7.0"
     },
+    "supportsCompletionN": false,
     "tier": "verified"
   },
   {
@@ -111,6 +112,7 @@
     "apiBase": "https://api.atlascloud.ai/v1",
     "envApiBase": "ATLASCLOUD_API_BASE",
     "envApiKey": "ATLASCLOUD_API_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -168,6 +170,7 @@
     "envApiKey": "AZURE_API_KEY",
     "name": "azure",
     "requiresApiKey": true,
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -256,6 +259,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.7.0"
     },
+    "supportsCompletionN": false,
     "tier": "community"
   },
   {
@@ -283,6 +287,7 @@
     "fileOperations": ["delete", "download", "list", "retrieve", "upload"],
     "name": "azureopenai",
     "requiresApiKey": true,
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -370,6 +375,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.7.0"
     },
+    "supportsCompletionN": false,
     "tier": "verified"
   },
   {
@@ -397,6 +403,7 @@
     "apiBase": "http://localhost:9090/v1",
     "envApiBase": "CASCADIA_API_BASE",
     "envApiKey": "CASCADIA_API_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -455,6 +462,7 @@
     "apiBase": "https://api.cerebras.ai/v1",
     "envApiBase": "CEREBRAS_API_BASE",
     "envApiKey": "CEREBRAS_API_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -513,6 +521,7 @@
     "envApiKey": "COHERE_API_KEY",
     "name": "cohere",
     "requiresApiKey": true,
+    "supportsCompletionN": false,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -571,6 +580,7 @@
     "apiBase": "https://dashscope.aliyuncs.com/compatible-mode/v1",
     "envApiBase": "DASHSCOPE_API_BASE",
     "envApiKey": "DASHSCOPE_API_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -628,6 +638,7 @@
     "requiresApiKey": true,
     "envApiBase": "DATABRICKS_HOST",
     "envApiKey": "DATABRICKS_TOKEN",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -686,6 +697,7 @@
     "apiBase": "https://api.deepinfra.com/v1/openai",
     "envApiBase": "DEEPINFRA_API_BASE",
     "envApiKey": "DEEPINFRA_API_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -744,6 +756,7 @@
     "apiBase": "https://api.deepseek.com",
     "envApiBase": "DEEPSEEK_API_BASE",
     "envApiKey": "DEEPSEEK_API_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -802,6 +815,7 @@
     "apiBase": "https://api.edenai.run/v3",
     "envApiBase": "EDENAI_API_BASE",
     "envApiKey": "EDENAI_API_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -860,6 +874,7 @@
     "apiBase": "https://api.fireworks.ai/inference/v1",
     "envApiBase": "FIREWORKS_API_BASE",
     "envApiKey": "FIREWORKS_API_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -900,7 +915,7 @@
       "batch": true,
       "completion": true,
       "embedding": true,
-      "files": false,
+      "files": true,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -915,14 +930,15 @@
     "documentationUrl": "https://ai.google.dev/gemini-api/docs",
     "envApiBase": "GOOGLE_GEMINI_BASE_URL",
     "envApiKey": "GEMINI_API_KEY or GOOGLE_API_KEY",
+    "fileOperations": ["delete", "list", "retrieve", "upload"],
     "name": "gemini",
     "requiresApiKey": true,
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
     },
     "displayName": "Google Gemini",
-    "fileOperations": [],
     "gateway": {
       "completion": {
         "abortSignal": "unsupported",
@@ -975,6 +991,7 @@
     "envApiKey": "GITHUB_TOKEN",
     "name": "github",
     "requiresApiKey": true,
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1033,6 +1050,7 @@
     "apiBase": "https://api.gmi-serving.com/v1",
     "envApiBase": "GMI_API_BASE",
     "envApiKey": "GMI_API_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1091,6 +1109,7 @@
     "apiBase": "https://api.groq.com/openai/v1",
     "envApiBase": "GROQ_BASE_URL",
     "envApiKey": "GROQ_API_KEY",
+    "supportsCompletionN": false,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1148,6 +1167,7 @@
     "envApiKey": "HF_TOKEN",
     "name": "huggingface",
     "requiresApiKey": true,
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1206,6 +1226,7 @@
     "apiBase": "https://api.inceptionlabs.ai/v1",
     "envApiBase": "INCEPTION_API_BASE",
     "envApiKey": "INCEPTION_API_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1264,6 +1285,7 @@
     "apiBase": "https://kenari.id/v1",
     "envApiBase": "KENARI_API_BASE",
     "envApiKey": "KENARI_API_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1322,6 +1344,7 @@
     "apiBase": "https://api.llama.com/compat/v1",
     "envApiBase": "LLAMA_API_BASE",
     "envApiKey": "LLAMA_API_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1380,6 +1403,7 @@
     "apiBase": "http://127.0.0.1:8080/v1",
     "envApiBase": "LLAMACPP_API_BASE",
     "envApiKey": "LLAMACPP_API_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1437,6 +1461,7 @@
     "requiresApiKey": false,
     "apiBase": "http://127.0.0.1:8080/v1",
     "envApiBase": "LLAMAFILE_API_BASE",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1495,6 +1520,7 @@
     "apiBase": "http://localhost:1234/v1",
     "envApiBase": "LM_STUDIO_API_BASE",
     "envApiKey": "LM_STUDIO_API_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1554,6 +1580,7 @@
     "messagesNative": true,
     "name": "meta",
     "requiresApiKey": true,
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1611,6 +1638,7 @@
     "apiBase": "https://api.minimax.io/v1",
     "envApiBase": "MINIMAX_API_BASE",
     "envApiKey": "MINIMAX_API_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1669,6 +1697,7 @@
     "envApiKey": "MISTRAL_API_KEY",
     "name": "mistral",
     "requiresApiKey": true,
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1727,6 +1756,7 @@
     "apiBase": "https://api.moonshot.ai/v1",
     "envApiBase": "MOONSHOT_API_BASE",
     "envApiKey": "MOONSHOT_API_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1785,6 +1815,7 @@
     "apiBase": "https://platform-api.any-llm.ai/api/v1",
     "envApiBase": "ANY_LLM_PLATFORM_URL",
     "envApiKey": "ANY_LLM_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1833,7 +1864,7 @@
       "pdfInput": false,
       "reasoning": true,
       "rerank": false,
-      "responses": false,
+      "responses": true,
       "streaming": true,
       "vision": true
     },
@@ -1843,6 +1874,7 @@
     "apiBase": "https://api.studio.nebius.ai/v1",
     "envApiBase": "NEBIUS_API_BASE",
     "envApiKey": "NEBIUS_API_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1901,6 +1933,7 @@
     "apiBase": "https://api.neosantara.xyz/v1",
     "envApiBase": "NEOSANTARA_API_BASE",
     "envApiKey": "NEOSANTARA_API_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1958,6 +1991,7 @@
     "requiresApiKey": false,
     "apiBase": "http://localhost:11434/v1",
     "envApiBase": "OLLAMA_HOST",
+    "supportsCompletionN": false,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2017,6 +2051,7 @@
     "fileOperations": ["delete", "download", "list", "retrieve", "upload"],
     "name": "openai",
     "requiresApiKey": true,
+    "supportsCompletionN": true,
     "configuration": {
       "additionalProperties": false,
       "authenticationModes": [
@@ -2105,6 +2140,7 @@
     "apiBase": "https://openrouter.ai/api/v1",
     "envApiBase": "OPENROUTER_API_BASE",
     "envApiKey": "OPENROUTER_API_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2163,6 +2199,7 @@
     "messagesNative": true,
     "name": "otari",
     "requiresApiKey": false,
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2220,6 +2257,7 @@
     "apiBase": "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
     "envApiBase": "OVHCLOUD_API_BASE",
     "envApiKey": "OVHCLOUD_API_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2278,6 +2316,7 @@
     "apiBase": "https://api.perplexity.ai",
     "envApiBase": "PERPLEXITY_BASE_URL",
     "envApiKey": "PERPLEXITY_API_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2336,6 +2375,7 @@
     "apiBase": "https://api.portkey.ai/v1",
     "envApiBase": "PORTKEY_API_BASE",
     "envApiKey": "PORTKEY_API_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2394,6 +2434,7 @@
     "apiBase": "https://api.qnaigc.com/v1",
     "envApiBase": "QINIU_API_BASE",
     "envApiKey": "QINIU_API_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2452,6 +2493,7 @@
     "apiBase": "https://router.requesty.ai/v1",
     "envApiBase": "REQUESTY_API_BASE",
     "envApiKey": "REQUESTY_API_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2540,6 +2582,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.7.0"
     },
+    "supportsCompletionN": false,
     "tier": "community"
   },
   {
@@ -2567,6 +2610,7 @@
     "apiBase": "https://api.sambanova.ai/v1",
     "envApiBase": "SAMBANOVA_API_BASE",
     "envApiKey": "SAMBANOVA_API_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2625,6 +2669,7 @@
     "apiBase": "https://api.telnyx.com/v2/ai",
     "envApiBase": "TELNYX_API_BASE",
     "envApiKey": "TELNYX_API_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2683,6 +2728,7 @@
     "envApiKey": "TOGETHER_API_KEY",
     "name": "together",
     "requiresApiKey": true,
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2740,6 +2786,7 @@
     "envApiKey": "GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION",
     "name": "vertexai",
     "requiresApiKey": false,
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2828,6 +2875,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.7.0"
     },
+    "supportsCompletionN": false,
     "tier": "community"
   },
   {
@@ -2855,6 +2903,7 @@
     "apiBase": "http://localhost:8000/v1",
     "envApiBase": "VLLM_API_BASE",
     "envApiKey": "VLLM_API_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2943,6 +2992,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.7.0"
     },
+    "supportsCompletionN": false,
     "tier": "verified"
   },
   {
@@ -3000,6 +3050,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.7.0"
     },
+    "supportsCompletionN": false,
     "tier": "community"
   },
   {
@@ -3027,6 +3078,7 @@
     "apiBase": "https://api.x.ai/v1",
     "envApiBase": "XAI_API_BASE",
     "envApiKey": "XAI_API_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -3085,6 +3137,7 @@
     "apiBase": "https://api.z.ai/api/paas/v4",
     "envApiBase": "ZAI_BASE_URL",
     "envApiKey": "ZAI_API_KEY",
+    "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"

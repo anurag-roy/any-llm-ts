@@ -3,6 +3,7 @@ import { parseJsonObject, parseJsonObjectArray } from "../utils.js";
 import { isNumber, isObject, isString } from "../utils.js";
 import { VoyageAIClient } from "voyageai";
 
+import { applyEncodingFormat, resolveEncodingFormat } from "../embedding.js";
 import {
   MissingApiKeyError,
   UnsupportedOperationError,
@@ -20,7 +21,7 @@ import type {
   RerankParams,
   RerankResponse,
 } from "../types.js";
-import { getEnvironmentVariable } from "../utils.js";
+import { getEnvironmentVariable, resolvedMaxRetries } from "../utils.js";
 import { BaseProvider } from "./base.js";
 import { completeProviderMetadata } from "../provider-metadata.js";
 
@@ -60,10 +61,12 @@ function createVoyageClient(options: ProviderOptions): VoyageAIClient {
   }
   const baseUrl = options.apiBase ?? getEnvironmentVariable("VOYAGE_API_BASE");
   // SAFETY: The provider contract establishes the asserted representation at this boundary.
+  const maxRetries = resolvedMaxRetries(options);
   return new VoyageAIClient({
     ...options.clientOptions,
     apiKey,
     ...includeWhen(!(baseUrl === undefined), { baseUrl }),
+    ...includeWhen(maxRetries !== undefined, { maxRetries }),
   });
 }
 
@@ -144,20 +147,16 @@ export class VoyageProvider extends BaseProvider {
     });
   }
 
-  override embedding(params: EmbeddingParams): Promise<EmbeddingResponse> {
+  override async embedding(params: EmbeddingParams): Promise<EmbeddingResponse> {
     const input = params.input;
     if (!isStringInput(input)) {
-      return Promise.reject(
-        new TypeError("Voyage embeddings require a string or an array of strings."),
-      );
+      throw new TypeError("Voyage embeddings require a string or an array of strings.");
     }
-    if (params.encodingFormat === "base64") {
-      return Promise.reject(
-        new TypeError(
-          "The normalized embedding response cannot represent Voyage base64 embeddings.",
-        ),
-      );
-    }
+    const { encodingFormat, providerOptions } = resolveEncodingFormat(
+      params.encodingFormat,
+      params.providerOptions,
+      "voyage",
+    );
     const texts = isString(input) ? [input] : input;
 
     return this.execute(async () => {
@@ -165,7 +164,7 @@ export class VoyageProvider extends BaseProvider {
         input: texts,
         model: params.model,
         ...includeWhen(!(params.dimensions === undefined), { outputDimension: params.dimensions }),
-        ...params.providerOptions,
+        ...providerOptions,
       });
       const data = (response.data ?? []).map((item, index) => {
         if (!Array.isArray(item.embedding)) {
@@ -178,14 +177,17 @@ export class VoyageProvider extends BaseProvider {
         };
       });
       const totalTokens = response.usage?.totalTokens ?? 0;
-      return {
-        data,
-        model: response.model ?? params.model,
-        object: "list",
-        provider: "voyage",
-        raw: response,
-        usage: { promptTokens: totalTokens, totalTokens },
-      };
+      return applyEncodingFormat(
+        {
+          data,
+          model: response.model ?? params.model,
+          object: "list",
+          provider: "voyage",
+          raw: response,
+          usage: { promptTokens: totalTokens, totalTokens },
+        },
+        encodingFormat,
+      );
     });
   }
 }

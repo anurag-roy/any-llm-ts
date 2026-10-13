@@ -5,6 +5,7 @@ import {
   CreateModelInvocationJobCommand,
   GetModelInvocationJobCommand,
   ListFoundationModelsCommand,
+  ListInferenceProfilesCommand,
   ListModelInvocationJobsCommand,
   StopModelInvocationJobCommand,
 } from "@aws-sdk/client-bedrock";
@@ -41,6 +42,7 @@ type BedrockTestCommand =
   | GetObjectCommand
   | InvokeModelCommand
   | ListFoundationModelsCommand
+  | ListInferenceProfilesCommand
   | ListModelInvocationJobsCommand
   | StopModelInvocationJobCommand;
 
@@ -765,19 +767,147 @@ describe("Bedrock provider", () => {
     ).rejects.toThrow(/base64/u);
   });
 
-  it("lists foundation models", async () => {
+  it("lists only on-demand foundation models and system inference profiles", async () => {
     const send = vi.fn(async (command: BedrockTestCommand) => {
-      expect(command).toBeInstanceOf(ListFoundationModelsCommand);
-      return {
-        modelSummaries: [
-          { modelId: "anthropic.claude-test", modelName: "Claude" },
-          { modelName: "missing-id" },
-        ],
-      };
+      if (command instanceof ListFoundationModelsCommand) {
+        expect(command.input).toEqual({ byOutputModality: "TEXT" });
+        return {
+          modelSummaries: [
+            {
+              inferenceTypesSupported: ["ON_DEMAND"],
+              modelId: "anthropic.claude-test",
+              modelName: "Claude",
+            },
+            {
+              inferenceTypesSupported: ["INFERENCE_PROFILE"],
+              modelId: "moonshotai.kimi-k3",
+            },
+            { modelId: "missing-types" },
+            { modelName: "missing-id" },
+          ],
+        };
+      }
+      if (command instanceof ListInferenceProfilesCommand) {
+        expect(command.input).toEqual({ typeEquals: "SYSTEM_DEFINED" });
+        return {
+          inferenceProfileSummaries: [
+            { inferenceProfileId: "us.anthropic.claude-test" },
+            { inferenceProfileId: "global.moonshotai.kimi-k3" },
+          ],
+        };
+      }
+      throw new Error("Unexpected command");
     });
     await expect(
       provider(undefined, send).listModels({ byOutputModality: "TEXT" }),
-    ).resolves.toMatchObject([{ created: 0, id: "anthropic.claude-test", ownedBy: "aws" }]);
+    ).resolves.toMatchObject([
+      { created: 0, id: "anthropic.claude-test", ownedBy: "aws" },
+      { created: 0, id: "us.anthropic.claude-test", ownedBy: "aws" },
+      { created: 0, id: "global.moonshotai.kimi-k3", ownedBy: "aws" },
+    ]);
+  });
+
+  it("paginates inference profiles and falls back when listing them is denied", async () => {
+    const send = vi.fn(async (command: BedrockTestCommand) => {
+      if (command instanceof ListFoundationModelsCommand) {
+        return {
+          modelSummaries: [
+            { inferenceTypesSupported: ["ON_DEMAND"], modelId: "amazon.titan-text" },
+          ],
+        };
+      }
+      if (command instanceof ListInferenceProfilesCommand) {
+        if (command.input.nextToken === undefined) {
+          return {
+            inferenceProfileSummaries: [{ inferenceProfileId: "us.amazon.titan-text" }],
+            nextToken: "page-2",
+          };
+        }
+        return {
+          inferenceProfileSummaries: [{ inferenceProfileId: "global.amazon.titan-text" }],
+        };
+      }
+      throw new Error("Unexpected command");
+    });
+    await expect(provider(undefined, send).listModels()).resolves.toMatchObject([
+      { id: "amazon.titan-text" },
+      { id: "us.amazon.titan-text" },
+      { id: "global.amazon.titan-text" },
+    ]);
+
+    const denied = vi.fn(async (command: BedrockTestCommand) => {
+      if (command instanceof ListFoundationModelsCommand) {
+        return {
+          modelSummaries: [
+            { inferenceTypesSupported: ["ON_DEMAND"], modelId: "amazon.titan-text" },
+          ],
+        };
+      }
+      throw Object.assign(new Error("not allowed"), { name: "AccessDeniedException" });
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    await expect(provider(undefined, denied).listModels()).resolves.toMatchObject([
+      { id: "amazon.titan-text" },
+    ]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("bedrock:ListInferenceProfiles"));
+    warn.mockRestore();
+
+    const failed = vi.fn(async (command: BedrockTestCommand) => {
+      if (command instanceof ListFoundationModelsCommand) {
+        return { modelSummaries: [] };
+      }
+      throw Object.assign(new Error("throttled"), { name: "ThrottlingException" });
+    });
+    await expect(
+      new BedrockProvider(
+        { unifiedExceptions: false },
+        {
+          // SAFETY: Each mock implements the AWS send surface exercised by this test suite.
+          control: { send: failed as BedrockControlClientLike["send"] },
+        },
+      ).listModels(),
+    ).rejects.toMatchObject({ name: "ThrottlingException" });
+  });
+
+  it("keeps an inference profile only when every routed model matches the filter", async () => {
+    const send = vi.fn(async (command: BedrockTestCommand) => {
+      if (command instanceof ListFoundationModelsCommand) {
+        return {
+          modelSummaries: [
+            { inferenceTypesSupported: ["ON_DEMAND"], modelId: "anthropic.claude-test" },
+          ],
+        };
+      }
+      if (command instanceof ListInferenceProfilesCommand) {
+        return {
+          inferenceProfileSummaries: [
+            {
+              inferenceProfileId: "us.anthropic.claude-test",
+              models: [
+                {
+                  modelArn: "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-test",
+                },
+              ],
+            },
+            {
+              inferenceProfileId: "us.mixed",
+              models: [
+                {
+                  modelArn: "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-test",
+                },
+                {
+                  modelArn: "arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-text",
+                },
+              ],
+            },
+          ],
+        };
+      }
+      throw new Error("Unexpected command");
+    });
+    await expect(
+      provider(undefined, send).listModels({ byProvider: "anthropic" }),
+    ).resolves.toMatchObject([{ id: "anthropic.claude-test" }, { id: "us.anthropic.claude-test" }]);
   });
 
   it("creates, retrieves, cancels, and lists batch jobs", async () => {

@@ -28,12 +28,12 @@ import { readFile } from "node:fs/promises";
 import { transcription } from "any-llm-ts";
 
 const bytes = await readFile("meeting.mp3");
-const file = new File([bytes], "meeting.mp3", { type: "audio/mpeg" });
 
 const result = await transcription({
   provider: "openai",
   model: "whisper-1",
-  file,
+  file: bytes,
+  filename: "meeting.mp3",
 });
 
 console.log(result.text);

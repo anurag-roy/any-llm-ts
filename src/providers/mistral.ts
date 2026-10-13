@@ -13,6 +13,8 @@ import type {
   Batch,
   BatchResult,
   BatchStatus,
+  ChatMessage,
+  CompletionParams,
   CreateBatchParams,
   ListBatchesParams,
   ProviderOptions,
@@ -104,6 +106,26 @@ function resolveApiKey(options: ProviderOptions): string {
   return apiKey;
 }
 
+function isEmptyAssistantContent(content: ChatMessage["content"]): boolean {
+  if (content === null || content === "") return true;
+  if (!Array.isArray(content)) return false;
+  return content.every((part) => part.type === "text" && !part.text);
+}
+
+function isEmptyAssistantMessage(message: ChatMessage): boolean {
+  return (
+    message.role === "assistant" &&
+    isEmptyAssistantContent(message.content) &&
+    (message.toolCalls === undefined || message.toolCalls.length === 0) &&
+    (message.reasoning === undefined || message.reasoning === null || message.reasoning === "")
+  );
+}
+
+/** Drop assistant turns that carry nothing. Mistral rejects empty assistant content. */
+export function dropEmptyAssistantMessages(messages: ChatMessage[]): ChatMessage[] {
+  return messages.filter((message) => !isEmptyAssistantMessage(message));
+}
+
 export class MistralProvider extends OpenAIProvider {
   private readonly mistral: Mistral;
 
@@ -135,6 +157,13 @@ export class MistralProvider extends OpenAIProvider {
         apiKey: resolveApiKey(options),
         ...includeWhen(!(serverURL === undefined), { serverURL }),
       });
+  }
+
+  protected override completionRequest(params: CompletionParams) {
+    return super.completionRequest({
+      ...params,
+      messages: dropEmptyAssistantMessages(params.messages),
+    });
   }
 
   override createBatch(params: CreateBatchParams): Promise<Batch> {

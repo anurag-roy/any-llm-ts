@@ -199,6 +199,7 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
       rejectResponsesMaxToolCalls: true,
       rejectStreamingResponseFormat: true,
     },
+    supportsCompletionN: false,
   },
   {
     apiBase: "https://api.inceptionlabs.ai/v1",
@@ -302,6 +303,7 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
       embedding: true,
       moderation: true,
       reasoning: true,
+      responses: true,
       vision: true,
     }),
     documentationUrl: "https://studio.nebius.com/api-reference/",
@@ -338,6 +340,7 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
     envApiBase: "OLLAMA_HOST",
     name: "ollama",
     requiresApiKey: false,
+    supportsCompletionN: false,
   },
   {
     apiBase: "https://openrouter.ai/api/v1",
@@ -501,6 +504,7 @@ function metadataFromConfig(config: OpenAIProviderConfig): ProviderMetadata {
       ...includeWhen(!(config.promptCacheKeySupport === undefined), {
         promptCacheKeySupport: config.promptCacheKeySupport,
       }),
+      supportsCompletionN: config.supportsCompletionN ?? true,
     },
     "openai",
   );
@@ -540,6 +544,7 @@ addBuiltIn("openai", {
     fileOperations: ["delete", "download", "list", "retrieve", "upload"],
     name: "openai",
     requiresApiKey: true,
+    supportsCompletionN: true,
   },
 });
 
@@ -668,8 +673,10 @@ addBuiltIn("gemini", {
     documentationUrl: "https://ai.google.dev/gemini-api/docs",
     envApiBase: "GOOGLE_GEMINI_BASE_URL",
     envApiKey: "GEMINI_API_KEY or GOOGLE_API_KEY",
+    fileOperations: ["delete", "list", "retrieve", "upload"],
     name: "gemini",
     requiresApiKey: true,
+    supportsCompletionN: true,
   },
 });
 
@@ -688,6 +695,7 @@ addBuiltIn("vertexai", {
     envApiKey: "GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION",
     name: "vertexai",
     requiresApiKey: false,
+    supportsCompletionN: true,
   },
 });
 
@@ -707,6 +715,7 @@ addBuiltIn("mistral", {
     envApiKey: "MISTRAL_API_KEY",
     name: "mistral",
     requiresApiKey: true,
+    supportsCompletionN: true,
   },
 });
 
@@ -727,6 +736,7 @@ addBuiltIn("together", {
     envApiKey: "TOGETHER_API_KEY",
     name: "together",
     requiresApiKey: true,
+    supportsCompletionN: true,
   },
 });
 
@@ -746,6 +756,7 @@ addBuiltIn("cohere", {
     envApiKey: "COHERE_API_KEY",
     name: "cohere",
     requiresApiKey: true,
+    supportsCompletionN: false,
   },
 });
 
@@ -790,6 +801,7 @@ addBuiltIn("otari", {
     messagesNative: true,
     name: "otari",
     requiresApiKey: false,
+    supportsCompletionN: true,
   },
 });
 
@@ -808,6 +820,7 @@ addBuiltIn("github", {
     envApiKey: "GITHUB_TOKEN",
     name: "github",
     requiresApiKey: true,
+    supportsCompletionN: true,
   },
 });
 
@@ -829,6 +842,7 @@ addBuiltIn("meta", {
     messagesNative: true,
     name: "meta",
     requiresApiKey: true,
+    supportsCompletionN: true,
   },
 });
 
@@ -846,6 +860,7 @@ addBuiltIn("huggingface", {
     envApiKey: "HF_TOKEN",
     name: "huggingface",
     requiresApiKey: true,
+    supportsCompletionN: true,
   },
 });
 
@@ -868,6 +883,7 @@ addBuiltIn("azureopenai", {
     fileOperations: ["delete", "download", "list", "retrieve", "upload"],
     name: "azureopenai",
     requiresApiKey: true,
+    supportsCompletionN: true,
   },
 });
 
@@ -885,6 +901,7 @@ addBuiltIn("azure", {
     envApiKey: "AZURE_API_KEY",
     name: "azure",
     requiresApiKey: true,
+    supportsCompletionN: true,
   },
 });
 

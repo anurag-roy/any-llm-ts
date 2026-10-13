@@ -60,7 +60,7 @@ import {
   responsesTextFormat,
 } from "./structured-output.js";
 import { isAsyncIterable } from "./utils.js";
-import { validateProviderMetadata } from "./provider-metadata.js";
+import { completionParamsWithValidatedN, validateProviderMetadata } from "./provider-metadata.js";
 import type { BaseProvider } from "./providers/base.js";
 import { OpenAIProvider } from "./providers/openai.js";
 import {
@@ -97,6 +97,7 @@ export class AnyLLM {
         options.metadata?.documentationUrl ?? "https://platform.openai.com/docs/api-reference",
       name: options.name.trim().toLowerCase(),
       promptCacheKeySupport: "passthrough" as const,
+      supportsCompletionN: options.metadata?.supportsCompletionN ?? true,
       ...includeWhen(!(capabilities === undefined), {
         capabilities,
       }),
@@ -112,6 +113,9 @@ export class AnyLLM {
         ...includeWhen(!(options.apiKey === undefined), { apiKey: options.apiKey }),
         ...includeWhen(!(options.clientOptions === undefined), {
           clientOptions: options.clientOptions,
+        }),
+        ...includeWhen(!(options.maxRetries === undefined), {
+          maxRetries: options.maxRetries,
         }),
         ...includeWhen(!(options.unifiedExceptions === undefined), {
           unifiedExceptions: options.unifiedExceptions,
@@ -197,14 +201,15 @@ export class AnyLLM {
     AsyncIterable<ChatCompletionChunk> | ChatCompletion | ParsedChatCompletion<JsonValue>
   > {
     this.validatePromptCacheKey(params.promptCacheKey);
-    if (isStructuredOutputFormat(params.responseFormat)) {
-      if (params.stream === true)
+    const request = completionParamsWithValidatedN(params, this.metadata);
+    if (isStructuredOutputFormat(request.responseFormat)) {
+      if (request.stream === true)
         throw new TypeError("stream is not supported with structured responseFormat.");
-      const format = params.responseFormat;
-      const { stream, ...request } = params;
+      const format = request.responseFormat;
+      const { stream, ...rest } = request;
       const response = await this.adapter.completion(
         {
-          ...request,
+          ...rest,
           responseFormat: completionResponseFormat(format),
           ...includeWhen(!(stream === undefined), { stream }),
         },
@@ -215,7 +220,7 @@ export class AnyLLM {
       return parseCompletion(response, format);
     }
     // SAFETY: The provider contract establishes the asserted representation at this boundary.
-    return this.adapter.completion(params as CompletionParams, operation);
+    return this.adapter.completion(request as CompletionParams, operation);
   }
 
   responses<T>(params: StructuredResponsesParams<T>): Promise<ParsedResponse<T>>;
@@ -292,8 +297,12 @@ export class AnyLLM {
     return this.adapter.retrieveBatchResults(batchId, providerOptions);
   }
 
-  rerank(params: RerankParams): Promise<RerankResponse> {
-    return this.adapter.rerank(params);
+  async rerank(params: RerankParams): Promise<RerankResponse> {
+    const response = await this.adapter.rerank(params);
+    if (response.model === undefined || response.model.length === 0) {
+      return { ...response, model: params.model };
+    }
+    return response;
   }
 
   uploadFile(params: UploadFileParams): Promise<FileMetadata> {

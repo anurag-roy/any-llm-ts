@@ -165,6 +165,7 @@ describe("OpenAI-compatible provider", () => {
     );
     const request = parseJsonObject(create.mock.calls[0]?.[0]);
     expect(request.model).toBe("model-a");
+    expect(request.n).toBeUndefined();
     expect(request.stream).toBe(false);
     expect(request.messages[0].content).toBe("system");
     expect(request.messages[1].tool_calls[0].function.name).toBe("old_call");
@@ -192,6 +193,58 @@ describe("OpenAI-compatible provider", () => {
         totalTokens: 12,
       },
     });
+  });
+
+  it("does not send an unset n to chat completions", async () => {
+    const create = vi.fn().mockResolvedValue(completionResponse());
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+
+    await provider.completion({
+      messages: [{ content: "Hello", role: "user" }],
+      model: "model-a",
+    });
+
+    expect(create).toHaveBeenCalled();
+    expect(parseJsonObject(create.mock.calls[0]?.[0]).n).toBeUndefined();
+  });
+
+  it("does not send n=1 to chat completions", async () => {
+    const create = vi.fn().mockResolvedValue(completionResponse());
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+
+    await provider.completion({
+      messages: [{ content: "Hello", role: "user" }],
+      model: "model-a",
+      n: 1,
+    });
+
+    expect(create).toHaveBeenCalled();
+    expect(parseJsonObject(create.mock.calls[0]?.[0]).n).toBeUndefined();
+  });
+
+  it("forwards n greater than 1 to chat completions", async () => {
+    const create = vi.fn().mockResolvedValue(completionResponse());
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+
+    await provider.completion({
+      messages: [{ content: "Hello", role: "user" }],
+      model: "model-a",
+      n: 2,
+    });
+
+    expect(parseJsonObject(create.mock.calls[0]?.[0]).n).toBe(2);
   });
 
   it("keeps google extraContent, drops other side-channels, and does not send is_error", async () => {
@@ -673,6 +726,45 @@ describe("OpenAI-compatible provider", () => {
         },
       ],
     });
+  });
+
+  it("names in-memory transcription uploads from filename or sniffed bytes", async () => {
+    const transcription = vi.fn().mockResolvedValue({ text: "ok" });
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({
+        audio: {
+          speech: { create: vi.fn() },
+          transcriptions: { create: transcription },
+        },
+      }),
+    );
+    const flac = new Uint8Array([0x66, 0x4c, 0x61, 0x43, 0x00]);
+    await provider.transcription({ file: flac, model: "whisper" });
+    const uploaded = transcription.mock.calls[0]?.[0]?.file;
+    expect(uploaded).toBeInstanceOf(File);
+    expect(uploaded).toMatchObject({ name: "audio.flac", type: "audio/flac" });
+
+    await provider.transcription({
+      file: new Blob([flac]),
+      filename: "voice.bin",
+      mimeType: "audio/flac",
+      model: "whisper",
+    });
+    const named = transcription.mock.calls[1]?.[0]?.file;
+    expect(named).toBeInstanceOf(File);
+    expect(named).toMatchObject({ name: "voice.bin.flac" });
+  });
+
+  it("honors maxRetries on the OpenAI SDK client", () => {
+    class InspectableOpenAIProvider extends OpenAIProvider {
+      clientMaxRetries(): number {
+        return this.client.maxRetries;
+      }
+    }
+    const provider = new InspectableOpenAIProvider(config, { apiKey: "secret", maxRetries: 0 });
+    expect(provider.clientMaxRetries()).toBe(0);
   });
 
   it("accepts plain-text transcription responses", async () => {

@@ -5,7 +5,18 @@ import type { JsonObject } from "../types.js";
 import { isFunction, isJsonValue, isNumber, isObject, isString } from "../utils.js";
 import { readFile } from "node:fs/promises";
 
-import { BatchNotCompleteError } from "../errors.js";
+import { resolveTranscriptionFile } from "../audio.js";
+import {
+  AuthenticationError,
+  BatchNotCompleteError,
+  GatewayTimeoutError,
+  InsufficientFundsError,
+  InvalidRequestError,
+  ModelNotFoundError,
+  ProviderError,
+  RateLimitError,
+} from "../errors.js";
+import type { AnyLLMError } from "../errors.js";
 import { normalizeMessagesContainer } from "../messages-compat.js";
 import { normalizeOutputConfig } from "../structured-output.js";
 import type {
@@ -42,6 +53,7 @@ import {
   flattenResponsesTools,
   isAsyncIterable,
   mapAsyncIterable,
+  rejectMaxRetries,
   timeoutMilliseconds,
 } from "../utils.js";
 import { OpenAIProvider } from "./openai.js";
@@ -442,6 +454,46 @@ function normalizeBatch(value: JsonValue | undefined): Batch {
   return normalized;
 }
 
+const MESSAGE_STREAM_ERROR_CLASSES = {
+  api_error: ProviderError,
+  authentication_error: AuthenticationError,
+  billing_error: InsufficientFundsError,
+  invalid_request_error: InvalidRequestError,
+  not_found_error: ModelNotFoundError,
+  overloaded_error: ProviderError,
+  permission_error: AuthenticationError,
+  rate_limit_error: RateLimitError,
+  request_too_large: InvalidRequestError,
+  timeout_error: GatewayTimeoutError,
+} as const;
+
+function errorClassForStreamType(errorType: string | undefined) {
+  if (errorType === undefined) return ProviderError;
+  for (const [key, errorClass] of Object.entries(MESSAGE_STREAM_ERROR_CLASSES)) {
+    if (key === errorType) return errorClass;
+  }
+  return ProviderError;
+}
+
+function messageStreamError(
+  event: JsonObject,
+  requestId: string | undefined,
+  providerName: string,
+): AnyLLMError {
+  const error = isObject(event.error) ? parseJsonObject(event.error) : {};
+  const errorType = isString(error.type) ? error.type : undefined;
+  const errorMessage =
+    isString(error.message) && error.message.length > 0 ? error.message : undefined;
+  const details = [`error type: ${errorType ?? "unknown"}`];
+  if (requestId !== undefined) details.push(`request_id: ${requestId}`);
+  const message = `${errorMessage ?? "Stream failed with an error event"} (${details.join(", ")})`;
+  const ErrorClass = errorClassForStreamType(errorType);
+  return new ErrorClass(message, {
+    provider: providerName,
+    ...includeWhen(errorType !== undefined, { errorType }),
+  });
+}
+
 function batchProvider(options: JsonObject | undefined): string {
   const provider = options?.provider;
   if (!isString(provider) || provider.length === 0) {
@@ -477,6 +529,7 @@ export class OtariProvider extends OpenAIProvider {
   private readonly otari: OtariClientLike;
 
   constructor(options: ProviderOptions = {}, client?: OtariClientLike) {
+    if (options.maxRetries !== undefined) rejectMaxRetries("otari");
     const clientOptions = options.clientOptions;
     const apiBase = options.apiBase ?? process.env.OTARI_API_BASE ?? process.env.GATEWAY_API_BASE;
     const transportOptions: OtariTransportOptions = {};
@@ -623,14 +676,21 @@ export class OtariProvider extends OpenAIProvider {
         ...providerOptions,
       });
       if (isAsyncIterable(response)) {
+        const streamRequestId =
+          isObject(response) && "requestId" in response && isString(response.requestId)
+            ? response.requestId
+            : undefined;
         // SAFETY: The provider contract establishes the asserted representation at this boundary.
         return this.protectStream(
-          mapAsyncIterable(
-            response,
-            (event) =>
-              parseJsonObject(camelize(event), "Otari message event") as MessageStreamEvent &
-                JsonObject,
-          ),
+          mapAsyncIterable(response, (event) => {
+            const raw = isObject(event) ? parseJsonObject(event) : {};
+            if (raw.type === "error") {
+              throw messageStreamError(raw, streamRequestId, "otari");
+            }
+            // SAFETY: The provider contract establishes the asserted representation at this boundary.
+            return parseJsonObject(camelize(event), "Otari message event") as MessageStreamEvent &
+              JsonObject;
+          }),
         );
       }
       // SAFETY: The provider contract establishes the asserted representation at this boundary.
@@ -746,8 +806,16 @@ export class OtariProvider extends OpenAIProvider {
   override transcription(params: TranscriptionParams): Promise<Transcription> {
     return this.execute(async () => {
       // SAFETY: The provider contract establishes the asserted representation at this boundary.
+      const file = await resolveTranscriptionFile(
+        params.file,
+        params.filename,
+        params.mimeType,
+        "otari",
+      );
+      // SAFETY: The provider contract establishes the asserted representation at this boundary.
       const response = (await this.otari.transcription({
-        file: params.file,
+        file,
+        filename: file.name,
         language: params.language,
         model: params.model,
         prompt: params.prompt,
