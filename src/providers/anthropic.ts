@@ -482,6 +482,56 @@ function nativeInputBlock(block: MessagesInputContentBlock) {
   return { ...block };
 }
 
+const COMPACTION_BETA = "compact-2026-01-12";
+const COMPACTION_MIN_TRIGGER_TOKENS = 50_000;
+const CONTEXT_MANAGEMENT_BETA = "context-management-2025-06-27";
+
+function contextEditType(edit: JsonValue): string | undefined {
+  if (!isObject(edit) || Array.isArray(edit)) return undefined;
+  const type = parseJsonObject(edit).type;
+  return isString(type) ? type : undefined;
+}
+
+function validateCompactionTrigger(edit: JsonObject): void {
+  const trigger = parseOptionalJsonObject(edit.trigger);
+  if (trigger === undefined || trigger.type !== "input_tokens") return;
+  const value = trigger.value;
+  if (!isNumber(value) || !Number.isInteger(value) || value < COMPACTION_MIN_TRIGGER_TOKENS) {
+    throw new TypeError(
+      "compact_20260112 input_tokens trigger value must be an integer greater than or equal to 50000",
+    );
+  }
+}
+
+/** Infer Anthropic beta headers from Messages context-management edits. */
+export function messagesBetas(params: MessagesParams): string[] {
+  const betas = [...(params.betas ?? [])];
+  const hasExplicitBetas = (params.betas?.length ?? 0) > 0;
+  if (params.contextManagement === undefined) return betas;
+  const edits = params.contextManagement.edits;
+  if (edits === undefined) return betas;
+  if (!Array.isArray(edits)) {
+    throw new TypeError("context_management.edits must be a list");
+  }
+  for (const edit of edits) {
+    const editType = contextEditType(parseJsonValue(edit, "context-management edit"));
+    let inferred: string | undefined;
+    if (editType === "compact_20260112") {
+      validateCompactionTrigger(parseJsonObject(edit));
+      inferred = COMPACTION_BETA;
+    } else if (editType === "clear_tool_uses_20250919" || editType === "clear_thinking_20251015") {
+      inferred = CONTEXT_MANAGEMENT_BETA;
+    }
+    if (inferred !== undefined && !betas.includes(inferred)) betas.push(inferred);
+    else if (inferred === undefined && editType !== undefined && !hasExplicitBetas) {
+      console.warn(
+        `Cannot infer an Anthropic beta for context-management edit type ${JSON.stringify(editType)}; pass betas explicitly.`,
+      );
+    }
+  }
+  return betas;
+}
+
 export function nativeMessagesRequest(params: MessagesParams) {
   return {
     betas: params.betas,

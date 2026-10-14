@@ -18,6 +18,7 @@ import {
   ConverseCommand,
   ConverseStreamCommand,
   InvokeModelCommand,
+  InvokeModelWithResponseStreamCommand,
   type BedrockRuntimeClientConfig,
 } from "@aws-sdk/client-bedrock-runtime";
 import { GetObjectCommand, S3Client, type S3ClientConfig } from "@aws-sdk/client-s3";
@@ -34,6 +35,7 @@ import type {
   ChatCompletion,
   ChatCompletionChunk,
   ChatMessage,
+  CompletionOperationOptions,
   CompletionParams,
   CompletionUsage,
   CreateBatchParams,
@@ -42,6 +44,9 @@ import type {
   FinishReason,
   FunctionTool,
   ListBatchesParams,
+  MessageResponse,
+  MessageStreamEvent,
+  MessagesParams,
   Model,
   ProviderCapabilities,
   ProviderMetadata,
@@ -60,6 +65,12 @@ import {
 } from "../utils.js";
 import { BaseProvider } from "./base.js";
 import { completeProviderMetadata } from "../provider-metadata.js";
+import {
+  messagesBetas,
+  nativeMessage,
+  nativeMessageEvent,
+  nativeMessagesRequest,
+} from "./anthropic.js";
 
 export type BedrockClientLike = Pick<BedrockRuntimeClient, "send">;
 export type BedrockControlClientLike = Pick<BedrockClient, "send">;
@@ -180,6 +191,80 @@ function routesOnlyTo(profile: JsonObject, modelIds: Set<string>): boolean {
 
 function isAccessDenied(error: Error): boolean {
   return error.name === "AccessDeniedException";
+}
+
+const ANTHROPIC_BEDROCK_VERSION = "bedrock-2023-05-31";
+
+const nativeMessageStreamTypes = new Set([
+  "content_block_delta",
+  "content_block_start",
+  "content_block_stop",
+  "message_delta",
+  "message_start",
+  "message_stop",
+]);
+
+/** Claude model ids, including cross-region and inference-profile forms that name Anthropic. */
+export function isAnthropicBedrockModel(model: string): boolean {
+  return model.includes("anthropic.");
+}
+
+interface BedrockNativeStreamEvent {
+  chunk?: {
+    bytes?: Uint8Array | string | undefined;
+  };
+}
+
+function messagesParamsWithoutProviderOptions(params: MessagesParams): MessagesParams {
+  const request = { ...params };
+  delete request.providerOptions;
+  return request;
+}
+
+function omitInvokeModelMessageFields(request: ReturnType<typeof nativeMessagesRequest>) {
+  return Object.fromEntries(
+    Object.entries(request).filter(
+      ([key]) =>
+        key !== "betas" &&
+        key !== "model" &&
+        key !== "output_config" &&
+        key !== "service_tier" &&
+        key !== "stream",
+    ),
+  );
+}
+
+function bedrockNativeMessagesBody(params: MessagesParams) {
+  const betas = messagesBetas(params);
+  return compactObject({
+    ...omitInvokeModelMessageFields(
+      nativeMessagesRequest(messagesParamsWithoutProviderOptions(params)),
+    ),
+    anthropic_version: ANTHROPIC_BEDROCK_VERSION,
+    ...includeWhen(betas.length > 0, { anthropic_beta: betas }),
+  });
+}
+
+function bedrockStreamPayload(event: BedrockNativeStreamEvent): JsonObject | undefined {
+  const bytes = event.chunk?.bytes;
+  if (bytes instanceof Uint8Array) {
+    return parseJsonObject(JSON.parse(new TextDecoder().decode(bytes)));
+  }
+  if (isString(bytes)) {
+    return parseJsonObject(JSON.parse(bytes));
+  }
+  return undefined;
+}
+
+async function* nativeMessagesStream(
+  stream: AsyncIterable<BedrockNativeStreamEvent>,
+): AsyncIterable<MessageStreamEvent> {
+  for await (const event of iterateClosing(stream)) {
+    const payload = bedrockStreamPayload(event);
+    if (payload === undefined || !isString(payload.type)) continue;
+    if (!nativeMessageStreamTypes.has(payload.type)) continue;
+    yield nativeMessageEvent(payload);
+  }
 }
 
 function asModel(id: string, raw: JsonValue): Model {
@@ -892,9 +977,52 @@ export class BedrockProvider extends BaseProvider {
       documentationUrl: "https://aws.amazon.com/bedrock/",
       envApiBase: "AWS_ENDPOINT_URL_BEDROCK_RUNTIME",
       envApiKey: "AWS_BEARER_TOKEN_BEDROCK",
+      messagesNative: true,
       name: "bedrock",
       requiresApiKey: false,
       ...includeWhen(!(apiBase === undefined), { apiBase }),
+    });
+  }
+
+  override servesMessagesNatively(model: string): boolean {
+    return isAnthropicBedrockModel(model);
+  }
+
+  override messages(
+    params: MessagesParams,
+    options?: CompletionOperationOptions,
+  ): Promise<AsyncIterable<MessageStreamEvent> | MessageResponse> {
+    if (params.outputFormat !== undefined || !this.servesMessagesNatively(params.model)) {
+      return super.messages(params, options);
+    }
+    return this.execute(async () => {
+      // SAFETY: Provider options are extra InvokeModel fields such as guardrailIdentifier.
+      const request = {
+        accept: "application/json",
+        body: JSON.stringify(bedrockNativeMessagesBody(params)),
+        contentType: "application/json",
+        modelId: params.model,
+        ...params.providerOptions,
+      } as never;
+      const requestOptions = timeoutAbortOptions(params.timeout);
+      if (params.stream === true) {
+        const command = new InvokeModelWithResponseStreamCommand(request);
+        const response = await (requestOptions === undefined
+          ? this.runtime.send(command)
+          : this.runtime.send(command, requestOptions));
+        if (!isAsyncIterable(response.body)) {
+          throw new TypeError("Bedrock returned an empty Messages stream.");
+        }
+        return this.protectStream(nativeMessagesStream(response.body));
+      }
+      const command = new InvokeModelCommand(request);
+      const response =
+        requestOptions === undefined
+          ? await this.runtime.send(command)
+          : await this.runtime.send(command, requestOptions);
+      return nativeMessage(
+        parseJsonValue(JSON.parse(await bodyText(response.body)), "Bedrock Messages response"),
+      );
     });
   }
 

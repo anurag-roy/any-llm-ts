@@ -138,6 +138,14 @@ export abstract class BaseProvider {
     return Promise.reject(new UnsupportedOperationError("file downloads", this.metadata.name));
   }
 
+  /**
+   * Whether `messages()` for this model talks to a real Anthropic Messages
+   * endpoint instead of the Completions compatibility bridge.
+   */
+  servesMessagesNatively(_model: string): boolean {
+    return this.metadata.messagesNative;
+  }
+
   async messages(
     params: MessagesParams,
     options?: CompletionOperationOptions,

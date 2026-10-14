@@ -68,6 +68,7 @@ import {
   getAllProviderMetadata,
   getProviderMetadata,
   getSupportedProviders,
+  servesMessagesNatively,
 } from "./providers/registry.js";
 
 export class AnyLLM {
@@ -142,6 +143,19 @@ export class AnyLLM {
 
   static getAllProviderDescriptors(): ProviderMetadata[] {
     return getAllProviderMetadata();
+  }
+
+  /**
+   * Whether this provider serves `model` through a real Anthropic Messages
+   * endpoint. Only those requests keep fields the Completions bridge cannot
+   * carry, such as `betas` and `contextManagement`.
+   */
+  static servesMessagesNatively(provider: string, model: string): boolean {
+    return servesMessagesNatively(provider, model);
+  }
+
+  servesMessagesNatively(model: string): boolean {
+    return this.adapter.servesMessagesNatively(model);
   }
 
   static splitModelProvider(model: string) {

@@ -9,9 +9,10 @@ import {
 import { AnthropicProvider } from "./anthropic.js";
 import { AzureProvider } from "./azure.js";
 import { AzureAnthropicProvider } from "./azureanthropic.js";
-import { BedrockProvider } from "./bedrock.js";
+import { BedrockProvider, isAnthropicBedrockModel } from "./bedrock.js";
 import type { BaseProvider } from "./base.js";
 import { CohereProvider } from "./cohere.js";
+import { FireworksProvider } from "./fireworks.js";
 import { GeminiProvider } from "./gemini.js";
 import { GitHubProvider } from "./github.js";
 import { HuggingFaceProvider } from "./huggingface.js";
@@ -164,19 +165,6 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
     envApiKey: "EDENAI_API_KEY",
     name: "edenai",
     quirks: { defaultModelOwner: "edenai" },
-  },
-  {
-    apiBase: "https://api.fireworks.ai/inference/v1",
-    capabilities: capabilities({
-      moderation: true,
-      reasoning: true,
-      responses: true,
-      vision: true,
-    }),
-    documentationUrl: "https://docs.fireworks.ai/api-reference/introduction",
-    envApiBase: "FIREWORKS_API_BASE",
-    envApiKey: "FIREWORKS_API_KEY",
-    name: "fireworks",
   },
   {
     apiBase: "https://api.gmi-serving.com/v1",
@@ -620,6 +608,7 @@ addBuiltIn("bedrock", {
     documentationUrl: "https://aws.amazon.com/bedrock/",
     envApiBase: "AWS_ENDPOINT_URL_BEDROCK_RUNTIME",
     envApiKey: "AWS_BEARER_TOKEN_BEDROCK",
+    messagesNative: true,
     name: "bedrock",
     requiresApiKey: false,
   },
@@ -735,6 +724,27 @@ addBuiltIn("together", {
     envApiBase: "TOGETHER_API_BASE",
     envApiKey: "TOGETHER_API_KEY",
     name: "together",
+    requiresApiKey: true,
+    supportsCompletionN: true,
+  },
+});
+
+addBuiltIn("fireworks", {
+  adapterFamily: "openai",
+  create: (options) => new FireworksProvider(options),
+  metadata: {
+    apiBase: "https://api.fireworks.ai/inference/v1",
+    capabilities: capabilities({
+      moderation: true,
+      reasoning: true,
+      rerank: true,
+      responses: true,
+      vision: true,
+    }),
+    documentationUrl: "https://docs.fireworks.ai/api-reference/introduction",
+    envApiBase: "FIREWORKS_API_BASE",
+    envApiKey: "FIREWORKS_API_KEY",
+    name: "fireworks",
     requiresApiKey: true,
     supportsCompletionN: true,
   },
@@ -954,6 +964,12 @@ export function getProviderMetadata(name: string): ProviderMetadata {
 
 export function getAllProviderMetadata(): ProviderMetadata[] {
   return getSupportedProviders().map(getProviderMetadata);
+}
+
+export function servesMessagesNatively(provider: string, model: string): boolean {
+  const name = normalizeName(provider);
+  if (name === "bedrock") return isAnthropicBedrockModel(model);
+  return getProviderMetadata(name).messagesNative;
 }
 
 export function getProviderDescriptor(name: string): ProviderMetadata {

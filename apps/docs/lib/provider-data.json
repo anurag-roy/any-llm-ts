@@ -342,6 +342,7 @@
     "documentationUrl": "https://aws.amazon.com/bedrock/",
     "envApiBase": "AWS_ENDPOINT_URL_BEDROCK_RUNTIME",
     "envApiKey": "AWS_BEARER_TOKEN_BEDROCK",
+    "messagesNative": true,
     "name": "bedrock",
     "requiresApiKey": false,
     "configuration": {
@@ -367,7 +368,6 @@
       "version": 1
     },
     "id": "bedrock",
-    "messagesNative": false,
     "promptCacheKeySupport": "unsupported",
     "provenance": {
       "adapterId": "any-llm-ts/bedrock",
@@ -850,6 +850,7 @@
     "tier": "community"
   },
   {
+    "apiBase": "https://api.fireworks.ai/inference/v1",
     "capabilities": {
       "audioSpeech": false,
       "audioTranscription": false,
@@ -863,17 +864,16 @@
       "moderation": true,
       "pdfInput": false,
       "reasoning": true,
-      "rerank": false,
+      "rerank": true,
       "responses": true,
       "streaming": true,
       "vision": true
     },
     "documentationUrl": "https://docs.fireworks.ai/api-reference/introduction",
-    "name": "fireworks",
-    "requiresApiKey": true,
-    "apiBase": "https://api.fireworks.ai/inference/v1",
     "envApiBase": "FIREWORKS_API_BASE",
     "envApiKey": "FIREWORKS_API_KEY",
+    "name": "fireworks",
+    "requiresApiKey": true,
     "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",

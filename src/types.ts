@@ -973,7 +973,8 @@ export interface ProviderMetadata {
   id: string;
   /**
    * Whether `messages()` talks to a real Anthropic Messages endpoint instead of
-   * the Completions compatibility bridge.
+   * the Completions compatibility bridge. Bedrock sets this for Claude models
+   * and answers per model in `AnyLLM.servesMessagesNatively`.
    */
   messagesNative: boolean;
   name: string;
