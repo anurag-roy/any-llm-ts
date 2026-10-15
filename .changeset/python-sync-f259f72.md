@@ -2,4 +2,4 @@
 "any-llm-ts": minor
 ---
 
-Sync with Python any-llm through `f259f72`: add Fireworks rerank, and send Claude Messages on Bedrock as native Anthropic bodies so cache, thinking, and betas are preserved.
+Sync with Python any-llm through `4d3250c`: add Fireworks rerank and Liner answer agents, keep Gemini empty text answers as a choice, and send only Bedrock-supported Claude Messages fields (including the thinking display-updates beta).

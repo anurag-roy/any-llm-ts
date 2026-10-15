@@ -2,7 +2,7 @@ import { includeWhen } from "../utils.js";
 import type { JsonValue } from "../types.js";
 import { parseJsonObject, parseJsonValue, parseOptionalJsonObject } from "../utils.js";
 import type { JsonObject } from "../types.js";
-import { isJsonValue, isNumber, isObject, isString } from "../utils.js";
+import { isJsonObject, isJsonValue, isNumber, isObject, isString } from "../utils.js";
 import {
   BedrockClient,
   CreateModelInvocationJobCommand,
@@ -221,11 +221,43 @@ function messagesParamsWithoutProviderOptions(params: MessagesParams): MessagesP
   return request;
 }
 
+const BEDROCK_BETAS = new Set([
+  "compact-2026-01-12",
+  "compact-2026-09-04",
+  "computer-use-2024-10-22",
+  "computer-use-2025-01-24",
+  "computer-use-2025-11-24",
+  "context-1m-2025-08-07",
+  "context-management-2025-06-27",
+  "dev-full-thinking-2025-05-14",
+  "effort-2025-11-24",
+  "fallback-credit-2026-06-01",
+  "fine-grained-tool-streaming-2025-05-14",
+  "inline-tools-2026-09-15",
+  "interleaved-thinking-2025-05-14",
+  "mid-conversation-effort-2026-08-01",
+  "mid-conversation-output-config-2026-07-01",
+  "mid-conversation-tool-changes-2026-07-01",
+  "output-128k-2025-02-19",
+  "per-message-effort-2026-07-01",
+  "per-turn-control-2026-07-01",
+  "thinking-binding-controls-2026-08-01",
+  "thinking-display-updates-2026-08-18",
+  "token-efficient-tools-2025-02-19",
+  "tool-examples-2025-10-29",
+  "tool-search-tool-2025-10-19",
+]);
+
+const THINKING_DISPLAY_UPDATES_BETA = "thinking-display-updates-2026-08-18";
+const BEDROCK_THINKING_DISPLAYS = new Set(["summarized", "omitted", "updates"]);
+
 function omitInvokeModelMessageFields(request: ReturnType<typeof nativeMessagesRequest>) {
   return Object.fromEntries(
     Object.entries(request).filter(
       ([key]) =>
         key !== "betas" &&
+        key !== "cache_control" &&
+        key !== "container" &&
         key !== "model" &&
         key !== "output_config" &&
         key !== "service_tier" &&
@@ -234,15 +266,86 @@ function omitInvokeModelMessageFields(request: ReturnType<typeof nativeMessagesR
   );
 }
 
+function isCacheableBlock(block: JsonValue): block is JsonObject {
+  if (!isJsonObject(block)) return false;
+  if (block.type === "thinking" || block.type === "redacted_thinking") return false;
+  if (block.type === "text" && (block.text === undefined || block.text === "")) return false;
+  return block.defer_loading !== true;
+}
+
+function markLastCacheable(holder: JsonObject, key: string, cacheControl: JsonObject): boolean {
+  const content = holder[key];
+  if (isString(content)) {
+    if (content.length === 0) return false;
+    holder[key] = [{ cache_control: cacheControl, text: content, type: "text" }];
+    return true;
+  }
+  if (!Array.isArray(content)) return false;
+  for (let index = content.length - 1; index >= 0; index -= 1) {
+    const block = content[index];
+    if (isJsonValue(block) && isCacheableBlock(block)) {
+      if (block.cache_control === undefined) block.cache_control = cacheControl;
+      return true;
+    }
+  }
+  return false;
+}
+
+function placeCacheBreakpoint(body: JsonObject, cacheControl: JsonObject): void {
+  const messages = Array.isArray(body.messages) ? body.messages : [];
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (isJsonObject(message) && markLastCacheable(message, "content", cacheControl)) return;
+  }
+  if (markLastCacheable(body, "system", cacheControl)) return;
+  markLastCacheable(body, "tools", cacheControl);
+}
+
+function thinkingDisplay(thinking: JsonValue | undefined): string | undefined {
+  if (!isJsonObject(thinking) || !isString(thinking.display)) return undefined;
+  return thinking.display;
+}
+
 function bedrockNativeMessagesBody(params: MessagesParams) {
-  const betas = messagesBetas(params);
-  return compactObject({
+  if (params.container !== undefined) {
+    throw new UnsupportedParameterError(
+      "container",
+      "bedrock",
+      "Bedrock does not support code execution or Agent Skills.",
+    );
+  }
+
+  const body: JsonObject = compactObject({
     ...omitInvokeModelMessageFields(
       nativeMessagesRequest(messagesParamsWithoutProviderOptions(params)),
     ),
     anthropic_version: ANTHROPIC_BEDROCK_VERSION,
-    ...includeWhen(betas.length > 0, { anthropic_beta: betas }),
   });
+  if (params.cacheControl !== undefined) {
+    placeCacheBreakpoint(body, params.cacheControl);
+  }
+
+  const requestedBetas = messagesBetas(params);
+  const display = thinkingDisplay(params.thinking);
+  if (display === "updates" && !requestedBetas.includes(THINKING_DISPLAY_UPDATES_BETA)) {
+    requestedBetas.push(THINKING_DISPLAY_UPDATES_BETA);
+  } else if (display !== undefined && !BEDROCK_THINKING_DISPLAYS.has(display)) {
+    console.debug(
+      `Sending thinking display ${JSON.stringify(display)} as 'summarized', which Bedrock accepts`,
+    );
+    const thinking: JsonObject = parseJsonObject(body.thinking ?? {}, "Bedrock thinking");
+    body.thinking = { ...thinking, display: "summarized" };
+  }
+
+  const betas = requestedBetas.filter((beta) => {
+    if (BEDROCK_BETAS.has(beta)) return true;
+    console.debug(
+      `Dropping Anthropic beta ${JSON.stringify(beta)}, which Bedrock does not support`,
+    );
+    return false;
+  });
+  if (betas.length > 0) body.anthropic_beta = betas;
+  return body;
 }
 
 function bedrockStreamPayload(event: BedrockNativeStreamEvent): JsonObject | undefined {

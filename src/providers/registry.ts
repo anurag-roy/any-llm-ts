@@ -16,6 +16,7 @@ import { FireworksProvider } from "./fireworks.js";
 import { GeminiProvider } from "./gemini.js";
 import { GitHubProvider } from "./github.js";
 import { HuggingFaceProvider } from "./huggingface.js";
+import { LinerProvider } from "./liner.js";
 import { MistralProvider } from "./mistral.js";
 import { TogetherProvider } from "./together.js";
 import { MetaProvider } from "./meta.js";
@@ -871,6 +872,22 @@ addBuiltIn("huggingface", {
     name: "huggingface",
     requiresApiKey: true,
     supportsCompletionN: true,
+  },
+});
+
+addBuiltIn("liner", {
+  create: (options) => new LinerProvider(options),
+  metadata: {
+    apiBase: "https://platform.liner.com/api/v1/agents",
+    capabilities: capabilities({
+      listModels: false,
+      reasoning: false,
+    }),
+    documentationUrl: "https://liner.com/developers/docs",
+    envApiBase: "LINER_API_BASE",
+    envApiKey: "LINER_API_KEY",
+    name: "liner",
+    requiresApiKey: true,
   },
 });
 

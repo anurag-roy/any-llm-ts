@@ -88,6 +88,7 @@ export type {
   HuggingFaceInferenceClientLike,
   HuggingFaceProviderClients,
 } from "./providers/huggingface.js";
+export { LinerProvider } from "./providers/liner.js";
 export { MistralProvider } from "./providers/mistral.js";
 export { TogetherProvider } from "./providers/together.js";
 export { MetaProvider } from "./providers/meta.js";

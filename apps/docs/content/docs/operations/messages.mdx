@@ -11,7 +11,10 @@ the request through chat completions and translate the result back into `Message
 serves only Claude model ids natively (`anthropic.` in the id, including cross-region and
 inference-profile forms). Use `AnyLLM.servesMessagesNatively(provider, model)` when the answer
 depends on the model. Other Bedrock models, and Claude requests with `outputFormat`, still use
-the Completions bridge.
+the Completions bridge. On the native Claude path, Bedrock keeps only the betas AWS documents,
+moves a top-level `cacheControl` onto the last cacheable block, adds
+`thinking-display-updates-2026-08-18` when `thinking.display` is `"updates"`, and refuses
+`container`.
 
 ```ts
 import { messages } from "any-llm-ts";

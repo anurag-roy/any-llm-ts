@@ -80,11 +80,22 @@ export interface ChatCompletionDeltaAudio {
   transcript?: string;
 }
 
+export interface MessageCitation {
+  url: string;
+  date?: string;
+  description?: string;
+  favicon?: string;
+  image?: string;
+  title?: string;
+}
+
 export interface ChatMessage {
   content: MessageContentPart[] | string | null;
   role: MessageRole;
   /** OpenAI-compatible audio object for inline media responses. */
   audio?: ChatCompletionAudio | null;
+  /** Web references, as Exa and Liner return them on an answer. */
+  citations?: MessageCitation[];
   extraContent?: JsonObject;
   /** OpenAI-compatible inline images, typically Gemini data URLs. */
   images?: ImageContent[] | null;
@@ -268,6 +279,7 @@ export interface ToolCallDelta {
 export interface ChatCompletionDelta {
   content?: string | null;
   audio?: ChatCompletionDeltaAudio | null;
+  citations?: MessageCitation[];
   extraContent?: JsonObject;
   images?: ImageContent[] | null;
   reasoning?: string | null;
@@ -701,6 +713,8 @@ export interface MessagesTool {
   name: string;
   description?: string;
   cacheControl?: JsonObject;
+  /** Anthropic tool-search: skip this tool until the model loads it. */
+  deferLoading?: boolean;
 }
 
 export interface MessageContainerSkill {

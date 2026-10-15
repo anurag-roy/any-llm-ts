@@ -1449,6 +1449,34 @@ describe("Gemini provider", () => {
     ).rejects.toBeInstanceOf(ProviderError);
   });
 
+  it("keeps an empty text answer as a choice", async () => {
+    const sdk = fakeGemini({
+      generateContent: vi.fn().mockResolvedValue(
+        response({
+          candidates: [
+            {
+              content: { parts: [{ text: "" }], role: "model" },
+              finishReason: GeminiFinishReason.STOP,
+            },
+          ],
+        }),
+      ),
+    });
+    const provider = new GeminiProvider({}, sdk.client);
+    const result = await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "gemini-test",
+    });
+    if (Symbol.asyncIterator in result) {
+      throw new TypeError("Expected a non-streaming Gemini completion.");
+    }
+    expect(result.choices).toHaveLength(1);
+    expect(result.choices[0]).toMatchObject({
+      finishReason: "stop",
+      message: { content: "", role: "assistant" },
+    });
+  });
+
   it("maps streaming prompt blocks to a single typed refusal", async () => {
     const stream = responses(
       response({ candidates: undefined }),

@@ -568,6 +568,7 @@ export function nativeMessagesRequest(params: MessagesParams) {
       description: tool.description,
       input_schema: tool.inputSchema,
       name: tool.name,
+      ...includeWhen(tool.deferLoading === true, { defer_loading: true }),
     })),
     top_k: params.topK,
     top_p: params.topP,

@@ -33,8 +33,8 @@ const llm = AnyLLM.create("openai", {
 `maxRetries` counts retries after the first request. OpenAI-compatible and Anthropic-based
 providers pass it through as `maxRetries`. Gemini and Vertex AI set
 `httpOptions.retryOptions.attempts` to `maxRetries + 1` because the GenAI SDK counts the first
-request. Providers whose SDK has no client-level retry count (`azure`, `bedrock`, `otari`,
-`sagemaker`, `watsonx`) reject the option; configure those through `clientOptions` instead.
+request. Providers whose SDK has no client-level retry count (`azure`, `bedrock`, `liner`,
+`otari`, `sagemaker`, `watsonx`) reject the option; configure those through `clientOptions` instead.
 For Gemini and Vertex, `retryOptions` already present in `clientOptions.httpOptions` win.
 
 The values in `clientOptions` are intentionally typed as `Record<string, unknown>` because the

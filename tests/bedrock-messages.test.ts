@@ -11,6 +11,7 @@ import {
   AnyLLM,
   BedrockProvider,
   UnsupportedOperationError,
+  UnsupportedParameterError,
   isAnthropicBedrockModel,
 } from "../src/index.js";
 import type {
@@ -208,6 +209,289 @@ describe("Bedrock native Messages", () => {
       signature: "sig-2",
       type: "thinking",
     });
+  });
+
+  it("drops Anthropic betas Bedrock does not support", async () => {
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => undefined);
+    const send = vi.fn(async (command: InvokeModelCommand) => {
+      expect(sentBody(command).anthropic_beta).toEqual(["interleaved-thinking-2025-05-14"]);
+      return { body: JSON.stringify(claudeMessage) };
+    });
+    await provider(send).messages({
+      betas: [
+        "code-execution-2025-08-25",
+        "interleaved-thinking-2025-05-14",
+        "files-api-2025-04-14",
+      ],
+      maxTokens: 64,
+      messages: thinkingHistory,
+      model: CLAUDE_MODEL,
+    });
+    expect(debug.mock.calls.flat().join(" ")).toContain("code-execution-2025-08-25");
+    expect(debug.mock.calls.flat().join(" ")).toContain("files-api-2025-04-14");
+    expect(debug.mock.calls.flat().join(" ")).not.toContain("interleaved-thinking-2025-05-14");
+    debug.mockRestore();
+  });
+
+  it("omits anthropic_beta when every requested beta is unsupported", async () => {
+    const send = vi.fn(async (command: InvokeModelCommand) => {
+      expect(sentBody(command).anthropic_beta).toBeUndefined();
+      return { body: JSON.stringify(claudeMessage) };
+    });
+    await provider(send).messages({
+      betas: ["skills-2025-10-02"],
+      maxTokens: 64,
+      messages: thinkingHistory,
+      model: CLAUDE_MODEL,
+    });
+  });
+
+  it.each([
+    { betas: undefined, label: "inferred" },
+    { betas: ["thinking-display-updates-2026-08-18"], label: "passed" },
+  ])("sends thinking display updates with its beta ($label)", async ({ betas }) => {
+    const send = vi.fn(async (command: InvokeModelCommand) => {
+      expect(sentBody(command).thinking).toEqual({ display: "updates", type: "adaptive" });
+      expect(sentBody(command).anthropic_beta).toEqual(["thinking-display-updates-2026-08-18"]);
+      return { body: JSON.stringify(claudeMessage) };
+    });
+    const request = {
+      maxTokens: 64,
+      messages: thinkingHistory,
+      model: CLAUDE_MODEL,
+      thinking: { display: "updates" as const, type: "adaptive" as const },
+    };
+    await provider(send).messages(betas === undefined ? request : { ...request, betas });
+  });
+
+  it("appends the display-updates beta on a stream without dropping others", async () => {
+    const send = vi.fn(async (command: InvokeModelWithResponseStreamCommand) => {
+      expect(command).toBeInstanceOf(InvokeModelWithResponseStreamCommand);
+      expect(sentBody(command).thinking).toEqual({ display: "updates", type: "adaptive" });
+      expect(sentBody(command).anthropic_beta).toEqual([
+        "interleaved-thinking-2025-05-14",
+        "thinking-display-updates-2026-08-18",
+      ]);
+      return { body: events(claudeStream.map(encodeEvent)) };
+    });
+    const stream = await provider(send).messages({
+      betas: ["interleaved-thinking-2025-05-14"],
+      maxTokens: 64,
+      messages: thinkingHistory,
+      model: CLAUDE_MODEL,
+      stream: true,
+      thinking: { display: "updates", type: "adaptive" },
+    });
+    if (!isAsyncIterable(stream)) {
+      throw new TypeError("Expected a Messages stream.");
+    }
+    const streamed: MessageStreamEvent[] = [];
+    for await (const event of stream) streamed.push(event);
+    expect(streamed[0]?.type).toBe("message_start");
+  });
+
+  it.each([
+    { display: "summarized", type: "adaptive" },
+    { display: "omitted", type: "adaptive" },
+    { type: "adaptive" },
+  ])("sends thinking Bedrock already accepts as-is %j", async (thinking) => {
+    const send = vi.fn(async (command: InvokeModelCommand) => {
+      expect(sentBody(command).thinking).toEqual(thinking);
+      expect(sentBody(command).anthropic_beta).toBeUndefined();
+      return { body: JSON.stringify(claudeMessage) };
+    });
+    await provider(send).messages({
+      maxTokens: 64,
+      messages: thinkingHistory,
+      model: CLAUDE_MODEL,
+      thinking,
+    });
+  });
+
+  it("sends an unknown thinking display as summarized", async () => {
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => undefined);
+    const send = vi.fn(async (command: InvokeModelCommand) => {
+      expect(sentBody(command).thinking).toEqual({ display: "summarized", type: "adaptive" });
+      return { body: JSON.stringify(claudeMessage) };
+    });
+    await provider(send).messages({
+      maxTokens: 64,
+      messages: thinkingHistory,
+      model: CLAUDE_MODEL,
+      thinking: { display: "verbose", type: "adaptive" },
+    });
+    expect(debug.mock.calls.flat().join(" ")).toContain('"verbose"');
+    debug.mockRestore();
+  });
+
+  it.each([
+    {
+      expected: {
+        messages: [
+          {
+            content: [
+              { cache_control: { ttl: "1h", type: "ephemeral" }, text: "Hi", type: "text" },
+            ],
+            role: "user",
+          },
+        ],
+      },
+      request: { messages: [{ content: "Hi", role: "user" as const }] },
+    },
+    {
+      expected: {
+        messages: [
+          { content: "Hi", role: "user" },
+          {
+            content: [
+              { cache_control: { ttl: "1h", type: "ephemeral" }, text: "Hello", type: "text" },
+              { signature: "sig", thinking: "Hm.", type: "thinking" },
+              { data: "opaque", type: "redacted_thinking" },
+              { text: "", type: "text" },
+            ],
+            role: "assistant",
+          },
+        ],
+      },
+      request: {
+        messages: [
+          { content: "Hi", role: "user" as const },
+          {
+            content: [
+              { text: "Hello", type: "text" as const },
+              { signature: "sig", thinking: "Hm.", type: "thinking" as const },
+              { data: "opaque", type: "redacted_thinking" as const },
+              { text: "", type: "text" as const },
+            ],
+            role: "assistant" as const,
+          },
+        ],
+      },
+    },
+    {
+      expected: {
+        messages: [
+          {
+            content: [{ cache_control: { type: "ephemeral" }, text: "Hi", type: "text" }],
+            role: "user",
+          },
+        ],
+      },
+      request: {
+        messages: [
+          {
+            content: [{ cacheControl: { type: "ephemeral" }, text: "Hi", type: "text" as const }],
+            role: "user" as const,
+          },
+        ],
+      },
+    },
+    {
+      expected: {
+        messages: [{ content: "", role: "user" }],
+        system: [
+          { cache_control: { ttl: "1h", type: "ephemeral" }, text: "Be terse.", type: "text" },
+        ],
+      },
+      request: { messages: [{ content: "", role: "user" as const }], system: "Be terse." },
+    },
+    {
+      expected: {
+        messages: [{ content: "", role: "user" }],
+        tools: [
+          {
+            cache_control: { ttl: "1h", type: "ephemeral" },
+            input_schema: { type: "object" },
+            name: "a",
+          },
+          { defer_loading: true, input_schema: { type: "object" }, name: "b" },
+        ],
+      },
+      request: {
+        messages: [{ content: "", role: "user" as const }],
+        tools: [
+          { inputSchema: { type: "object" }, name: "a" },
+          { deferLoading: true, inputSchema: { type: "object" }, name: "b" },
+        ],
+      },
+    },
+    {
+      expected: { messages: [{ content: "", role: "user" }] },
+      request: { messages: [{ content: "", role: "user" as const }] },
+    },
+  ])(
+    "moves top-level cacheControl onto the last cacheable block %#",
+    async ({ expected, request }) => {
+      const send = vi.fn(async (command: InvokeModelCommand) => {
+        expect(sentBody(command)).toEqual({
+          anthropic_version: "bedrock-2023-05-31",
+          max_tokens: 64,
+          ...expected,
+        });
+        return { body: JSON.stringify(claudeMessage) };
+      });
+      await provider(send).messages({
+        cacheControl: { ttl: "1h", type: "ephemeral" },
+        maxTokens: 64,
+        model: CLAUDE_MODEL,
+        ...request,
+      });
+    },
+  );
+
+  it.each([false, true])("refuses container on the native path (stream=%s)", async (stream) => {
+    const send = vi.fn();
+    await expect(
+      provider(send).messages({
+        container: "cntr_1",
+        maxTokens: 64,
+        messages: thinkingHistory,
+        model: CLAUDE_MODEL,
+        stream,
+      }),
+    ).rejects.toBeInstanceOf(UnsupportedParameterError);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("sends the same InvokeModel body for a stream as for a plain request", async () => {
+    const send = vi.fn(
+      async (command: InvokeModelCommand | InvokeModelWithResponseStreamCommand) => {
+        if (command instanceof InvokeModelWithResponseStreamCommand) {
+          return { body: events(claudeStream.map(encodeEvent)) };
+        }
+        return { body: JSON.stringify(claudeMessage) };
+      },
+    );
+    const request = {
+      betas: ["context-1m-2025-08-07", "web-fetch-2025-09-10"],
+      cacheControl: { type: "ephemeral" },
+      maxTokens: 64,
+      messages: [{ content: "Hi", role: "user" as const }],
+      metadata: { user_id: "user-1" },
+      model: CLAUDE_MODEL,
+    };
+    await provider(send).messages(request);
+    const stream = await provider(send).messages({ ...request, stream: true });
+    if (!isAsyncIterable(stream)) {
+      throw new TypeError("Expected a Messages stream.");
+    }
+    const streamedEvents: MessageStreamEvent[] = [];
+    for await (const event of stream) streamedEvents.push(event);
+    expect(streamedEvents[0]?.type).toBe("message_start");
+    const firstCommand = send.mock.calls[0]?.[0];
+    const secondCommand = send.mock.calls[1]?.[0];
+    if (
+      !(firstCommand instanceof InvokeModelCommand) ||
+      !(secondCommand instanceof InvokeModelWithResponseStreamCommand)
+    ) {
+      throw new TypeError("Expected InvokeModel then InvokeModelWithResponseStream.");
+    }
+    const plain = sentBody(firstCommand);
+    const streamed = sentBody(secondCommand);
+    expect(streamed).toEqual(plain);
+    expect(plain.anthropic_beta).toEqual(["context-1m-2025-08-07"]);
+    expect(plain.metadata).toEqual({ user_id: "user-1" });
+    expect(plain.cache_control).toBeUndefined();
   });
 
   it("omits anthropic_beta when no betas are set", async () => {

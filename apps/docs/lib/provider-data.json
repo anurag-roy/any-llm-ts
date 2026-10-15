@@ -1320,6 +1320,65 @@
     "tier": "community"
   },
   {
+    "apiBase": "https://platform.liner.com/api/v1/agents",
+    "capabilities": {
+      "audioSpeech": false,
+      "audioTranscription": false,
+      "batch": false,
+      "completion": true,
+      "embedding": false,
+      "files": false,
+      "imageGeneration": false,
+      "listModels": false,
+      "messages": true,
+      "moderation": false,
+      "pdfInput": false,
+      "reasoning": false,
+      "rerank": false,
+      "responses": false,
+      "streaming": true,
+      "vision": false
+    },
+    "documentationUrl": "https://liner.com/developers/docs",
+    "envApiBase": "LINER_API_BASE",
+    "envApiKey": "LINER_API_KEY",
+    "name": "liner",
+    "requiresApiKey": true,
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Liner",
+    "fileOperations": [],
+    "gateway": {
+      "completion": {
+        "abortSignal": "unsupported",
+        "dispatchEvidence": "unsupported",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": false,
+          "text": false,
+          "tools": false,
+          "usage": false
+        },
+        "providerOptions": "unbounded",
+        "retryControl": "unsupported"
+      },
+      "version": 1
+    },
+    "id": "liner",
+    "messagesNative": false,
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/liner",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.7.0"
+    },
+    "supportsCompletionN": false,
+    "tier": "community"
+  },
+  {
     "capabilities": {
       "audioSpeech": false,
       "audioTranscription": false,

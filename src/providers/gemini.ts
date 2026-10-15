@@ -960,7 +960,9 @@ function streamAudioDelta(audio: ChatCompletionAudio): ChatCompletionDeltaAudio 
 }
 
 function completionParts(parts: Part[] | undefined, candidateIndex: number) {
-  let content = "";
+  // An empty text part is still an answer: Gemini 3 answers a conversation
+  // that ends on an assistant turn with "" and STOP.
+  let content: string | null = null;
   let reasoning = "";
   let messageSignature: string | undefined;
   const audioBlobs: { data: Buffer; mimeType: string }[] = [];
@@ -993,13 +995,13 @@ function completionParts(parts: Part[] | undefined, candidateIndex: number) {
     if (image !== undefined) images.push(image);
     const audioBlob = inlineAudioBlob(part);
     if (audioBlob !== undefined) audioBlobs.push(audioBlob);
-    if (isString(part.text)) content += part.text;
+    if (isString(part.text)) content = (content ?? "") + part.text;
     messageSignature = part.thoughtSignature ?? messageSignature;
   }
 
   return {
-    audio: inlineDataAudio(audioBlobs, content, true),
-    content: content.length === 0 ? null : content,
+    audio: inlineDataAudio(audioBlobs, content ?? "", true),
+    content,
     ...includeWhen(images.length > 0, { images }),
     ...includeWhen(!(messageSignature === undefined), {
       messageExtraContent: {

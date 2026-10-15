@@ -1,7 +1,7 @@
 {
   "source": {
     "repository": "mozilla-ai/any-llm",
-    "commit": "f259f72d18d07156cbf738222308c786e1858333"
+    "commit": "4d3250c911c90f38759e355b545312e7b0f9a8f4"
   },
   "providers": [
     "anthropic",
@@ -26,6 +26,7 @@
     "huggingface",
     "inception",
     "kenari",
+    "liner",
     "llama",
     "llamacpp",
     "llamafile",
@@ -155,6 +156,7 @@
       "huggingface",
       "inception",
       "kenari",
+      "liner",
       "llama",
       "llamacpp",
       "llamafile",
@@ -289,6 +291,7 @@
       "huggingface",
       "inception",
       "kenari",
+      "liner",
       "llama",
       "llamacpp",
       "llamafile",
@@ -443,6 +446,7 @@
       "huggingface",
       "inception",
       "kenari",
+      "liner",
       "llama",
       "llamacpp",
       "lmstudio",
