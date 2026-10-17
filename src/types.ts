@@ -18,6 +18,7 @@ export type MessageRole = "assistant" | "developer" | "system" | "tool" | "user"
 export interface TextContentPart {
   type: "text";
   text: string;
+  cacheControl?: JsonObject;
 }
 
 export interface ImageUrlContentPart {
@@ -94,6 +95,8 @@ export interface ChatMessage {
   role: MessageRole;
   /** OpenAI-compatible audio object for inline media responses. */
   audio?: ChatCompletionAudio | null;
+  /** Anthropic-style cache breakpoint on a chat message, as LiteLLM and OpenRouter accept it. */
+  cacheControl?: JsonObject;
   /** Web references, as Exa and Liner return them on an answer. */
   citations?: MessageCitation[];
   extraContent?: JsonObject;
@@ -645,6 +648,7 @@ export interface MessagesTextBlock {
   text: string;
   type: "text";
   cacheControl?: JsonObject;
+  extraContent?: JsonObject;
 }
 
 export interface MessagesThinkingBlock {
@@ -658,6 +662,7 @@ export interface MessagesToolUseBlock {
   input: JsonValue;
   name: string;
   type: "tool_use";
+  extraContent?: JsonObject;
 }
 
 export interface MessagesToolResultBlock {
@@ -708,7 +713,7 @@ export interface MessagesInputMessage {
   role: "assistant" | "user";
 }
 
-export interface MessagesTool {
+export interface MessagesFunctionTool {
   inputSchema: JsonObject;
   name: string;
   description?: string;
@@ -716,6 +721,9 @@ export interface MessagesTool {
   /** Anthropic tool-search: skip this tool until the model loads it. */
   deferLoading?: boolean;
 }
+
+/** Anthropic tool, or a provider-native tool such as Gemini `{ google_search: {} }`. */
+export type MessagesTool = JsonObject | MessagesFunctionTool;
 
 export interface MessageContainerSkill {
   skillId: string;

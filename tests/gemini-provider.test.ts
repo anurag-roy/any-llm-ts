@@ -38,6 +38,10 @@ interface FakeModels {
   list: ReturnType<typeof vi.fn>;
 }
 
+interface FakeCaches {
+  create: ReturnType<typeof vi.fn>;
+}
+
 interface FakeBatches {
   cancel: ReturnType<typeof vi.fn>;
   create: ReturnType<typeof vi.fn>;
@@ -48,6 +52,7 @@ interface FakeBatches {
 function fakeGemini(
   overrides: Partial<FakeModels> = {},
   batchOverrides: Partial<FakeBatches> = {},
+  cacheOverrides: Partial<FakeCaches> = {},
 ) {
   const models: FakeModels = {
     embedContent: vi.fn(),
@@ -63,10 +68,15 @@ function fakeGemini(
     list: vi.fn(),
     ...batchOverrides,
   };
+  const caches: FakeCaches = {
+    create: vi.fn(),
+    ...cacheOverrides,
+  };
   // SAFETY: This test double implements the provider surface exercised by this test.
   return {
     batches,
-    client: Object.assign(new GoogleGenAI({ apiKey: "test" }), { batches, models }),
+    caches,
+    client: Object.assign(new GoogleGenAI({ apiKey: "test" }), { batches, caches, models }),
     models,
   };
 }
@@ -290,7 +300,7 @@ describe("Gemini provider", () => {
         seed: 42,
         serviceTier: "priority",
         stopSequences: ["END"],
-        systemInstruction: "You are concise.\n\nUse tools when useful.",
+        systemInstruction: "You are concise.\nUse tools when useful.",
         temperature: 0.3,
         httpOptions: { timeout: 1500 },
         thinkingConfig: { includeThoughts: true, thinkingBudget: 24576 },
@@ -299,6 +309,7 @@ describe("Gemini provider", () => {
             allowedFunctionNames: ["weather"],
             mode: FunctionCallingConfigMode.ANY,
           },
+          includeServerSideToolInvocations: true,
         },
         topK: 40,
         topP: 0.8,
@@ -860,7 +871,7 @@ describe("Gemini provider", () => {
     ]);
     expect(request.config?.systemInstruction).toBeUndefined();
     expect(request.contents).toEqual([
-      { parts: [{ text: "Reply with the single word OK.\n\nStay terse." }], role: "user" },
+      { parts: [{ text: "Reply with the single word OK.\nStay terse." }], role: "user" },
     ]);
   });
 
@@ -2128,5 +2139,154 @@ describe("Gemini provider", () => {
     // SAFETY: This test double implements the provider surface exercised by this test.
     const chunks = await collect(result as AsyncIterable<ChatCompletionChunk>);
     expect(chunks.map((chunk) => chunk.choices[0]?.finishReason)).toEqual([null, "length"]);
+  });
+
+  it("folds developer and list-form system messages into the instruction", async () => {
+    const request = await convertedRequest([
+      { content: "Be brief.", role: "system" },
+      {
+        content: [
+          { text: "Answer in ", type: "text" },
+          { text: "French.", type: "text" },
+        ],
+        role: "developer",
+      },
+      { content: "Hi", role: "user" },
+    ]);
+    expect(request.config?.systemInstruction).toBe("Be brief.\nAnswer in French.");
+    expect(request.contents).toEqual([{ parts: [{ text: "Hi" }], role: "user" }]);
+  });
+
+  it("enables server-side tool invocations when built-in tools sit beside functions", async () => {
+    const sdk = okSdk();
+    const provider = new GeminiProvider({}, sdk.client);
+    await provider.completion({
+      messages: [{ content: "Hello", role: "user" }],
+      model: "gemini-pro",
+      tools: [
+        {
+          function: { name: "get_weather", parameters: { properties: {}, type: "object" } },
+          type: "function",
+        },
+        { google_search: {} },
+      ],
+    });
+    const request = parseJsonObject(sdk.models.generateContent.mock.calls[0]?.[0]);
+    expect(parseJsonObject(request.config).toolConfig).toMatchObject({
+      includeServerSideToolInvocations: true,
+    });
+  });
+
+  it("leaves server-side tool invocations off when functions or built-ins are used alone", async () => {
+    const sdk = okSdk();
+    const provider = new GeminiProvider({}, sdk.client);
+    await provider.completion({
+      messages: [{ content: "Hello", role: "user" }],
+      model: "gemini-pro",
+      tools: [
+        {
+          function: { name: "get_weather", parameters: { properties: {}, type: "object" } },
+          type: "function",
+        },
+      ],
+    });
+    const request = parseJsonObject(sdk.models.generateContent.mock.calls[0]?.[0]);
+    expect(parseJsonObject(request.config).toolConfig).toBeUndefined();
+  });
+
+  it("maps code execution parts into extraContent and replays them without synthesized ids", async () => {
+    const sdk = fakeGemini({
+      generateContent: vi.fn().mockResolvedValue(
+        response({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  { text: "Let me compute. " },
+                  { executableCode: { code: "print(1 + 1)", language: "PYTHON" } },
+                  { codeExecutionResult: { outcome: "OUTCOME_OK", output: "2\n" } },
+                  { text: "The answer is 2.", thoughtSignature: "sig" },
+                ],
+                role: "model",
+              },
+              finishReason: GeminiFinishReason.STOP,
+            },
+          ],
+        }),
+      ),
+    });
+    const provider = new GeminiProvider({}, sdk.client);
+    // SAFETY: stream is unset, so completion returns ChatCompletion.
+    const result = (await provider.completion({
+      messages: [{ content: "sum", role: "user" }],
+      model: "gemini-test",
+    })) as ChatCompletion;
+    expect(result.choices[0]?.message.content).toBe("Let me compute. The answer is 2.");
+    expect(result.choices[0]?.message.extraContent).toEqual({
+      google: {
+        code_execution: [
+          { code: "print(1 + 1)", id: "code_exec_0", language: "PYTHON", type: "executable_code" },
+          {
+            id: "code_exec_0",
+            outcome: "OUTCOME_OK",
+            output: "2\n",
+            type: "code_execution_result",
+          },
+        ],
+        thoughtSignature: "sig",
+      },
+    });
+
+    const replayedMessage = result.choices[0]?.message;
+    if (replayedMessage === undefined) throw new Error("expected assistant message");
+    await provider.completion({
+      messages: [{ content: "sum", role: "user" }, replayedMessage],
+      model: "gemini-test",
+    });
+    const replayed = parseJsonObject(sdk.models.generateContent.mock.calls[1]?.[0]);
+    const replayedTurn = parseJsonObject(replayed.contents[1]);
+    expect(replayedTurn).toMatchObject({
+      parts: [
+        { executableCode: { code: "print(1 + 1)", language: "PYTHON" } },
+        { codeExecutionResult: { outcome: "OUTCOME_OK", output: "2\n" } },
+        { text: "Let me compute. The answer is 2.", thoughtSignature: "sig" },
+      ],
+      role: "model",
+    });
+    const firstPart = Array.isArray(replayedTurn.parts)
+      ? parseJsonObject(replayedTurn.parts[0])
+      : {};
+    expect(parseJsonObject(firstPart.executableCode ?? {})).not.toHaveProperty("id");
+  });
+
+  it("replays a code-execution-only turn without an empty text part", async () => {
+    const sdk = okSdk();
+    const provider = new GeminiProvider({}, sdk.client);
+    await provider.completion({
+      messages: [
+        { content: "sum", role: "user" },
+        {
+          content: null,
+          extraContent: {
+            google: {
+              code_execution: [
+                { code: "1+1", id: "abc", language: "PYTHON", type: "executable_code" },
+                { id: "abc", outcome: "OUTCOME_OK", output: "2", type: "code_execution_result" },
+              ],
+            },
+          },
+          role: "assistant",
+        },
+      ],
+      model: "gemini-test",
+    });
+    const request = parseJsonObject(sdk.models.generateContent.mock.calls[0]?.[0]);
+    expect(request.contents[1]).toEqual({
+      parts: [
+        { executableCode: { code: "1+1", id: "abc", language: "PYTHON" } },
+        { codeExecutionResult: { id: "abc", outcome: "OUTCOME_OK", output: "2" } },
+      ],
+      role: "model",
+    });
   });
 });

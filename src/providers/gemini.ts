@@ -2,7 +2,7 @@ import { includeWhen } from "../utils.js";
 import type { JsonValue } from "../types.js";
 import { parseJsonObject } from "../utils.js";
 import type { JsonObject } from "../types.js";
-import { isJsonObject, isObject, isString } from "../utils.js";
+import { isBoolean, isJsonObject, isNumber, isObject, isString } from "../utils.js";
 import { readFile } from "node:fs/promises";
 
 import {
@@ -14,6 +14,8 @@ import {
   type Content,
   type BatchJob,
   type GenerateContentConfig,
+  type Language,
+  type Outcome,
   type GenerateContentParameters,
   type GenerateContentResponse,
   type GoogleGenAIOptions,
@@ -101,9 +103,20 @@ import {
   type GeminiFileAuth,
 } from "./gemini-files.js";
 import { completeProviderMetadata } from "../provider-metadata.js";
+import {
+  geminiCacheIdentity,
+  openStreamWithContextCache,
+  prepareContextCache,
+  reportCacheWrite,
+  sendWithContextCache,
+  type ContextCacheUse,
+  type GeminiCacheIdentity,
+  type GeminiContextCacheRequest,
+} from "./gemini-context-cache.js";
 
 const INLINE_DATA_LIMIT_BYTES = 20 * 1024 * 1024;
 const SKIP_THOUGHT_SIGNATURE_VALIDATOR = "skip_thought_signature_validator";
+const SYNTHETIC_CODE_EXECUTION_ID_PREFIX = "code_exec_";
 
 type GeminiThinkingLevel = "HIGH" | "LOW" | "MEDIUM" | "MINIMAL";
 
@@ -181,11 +194,22 @@ interface ConvertedMessages {
 }
 
 interface StreamState {
+  codeExecution: CodeExecutionState;
   created: number;
   emittedRoles: Set<number>;
   id: string;
   model: string;
   nextToolIndices: Map<number, number>;
+}
+
+class CodeExecutionState {
+  executableCodeCount = 0;
+  lastExecutableCodeId: string | undefined;
+  lastOutputOwnerId: string | undefined;
+
+  nextId(): string {
+    return `${SYNTHETIC_CODE_EXECUTION_ID_PREFIX}${this.executableCodeCount}`;
+  }
 }
 
 function asRecord<Value>(value: Value): JsonObject | undefined {
@@ -412,19 +436,136 @@ function contentParts(content: ChatMessage["content"], provider: string): Part[]
   });
 }
 
-function textContent(message: ChatMessage): string {
-  if (isString(message.content)) return message.content;
-  // SAFETY: The provider contract establishes the asserted representation at this boundary.
-  return (message.content ?? [])
-    .filter((part) => part.type === "text" && "text" in part && isString(part.text))
-    .map((part) => (part as { text: string }).text)
-    .join("\n");
-}
-
 function thoughtSignature(value: JsonValue | undefined): string | undefined {
   const google = asRecord(asRecord(value)?.google);
   const signature = google?.thoughtSignature ?? google?.thought_signature;
   return isString(signature) && signature.length > 0 ? signature : undefined;
+}
+
+function enumValue<Value>(value: Value, fallback: string): string {
+  if (value === undefined || value === null) return fallback;
+  if (isString(value)) return value;
+  if (isNumber(value) || isBoolean(value)) return String(value);
+  if (isObject(value) && "value" in value) {
+    const inner = value.value;
+    if (isString(inner) || isNumber(inner) || isBoolean(inner)) return String(inner);
+  }
+  return fallback;
+}
+
+function codeExecutionItem(part: Part, state: CodeExecutionState): JsonObject | undefined {
+  if (part.executableCode !== undefined) {
+    const executable = part.executableCode;
+    const codeId =
+      isString(executable.id) && executable.id.length > 0 ? executable.id : state.nextId();
+    state.executableCodeCount += 1;
+    state.lastExecutableCodeId = codeId;
+    state.lastOutputOwnerId = codeId;
+    return {
+      code: executable.code ?? "",
+      id: codeId,
+      language: enumValue(executable.language, "LANGUAGE_UNSPECIFIED"),
+      type: "executable_code",
+    };
+  }
+  if (part.codeExecutionResult !== undefined) {
+    const result = part.codeExecutionResult;
+    const resultId =
+      isString(result.id) && result.id.length > 0
+        ? result.id
+        : (state.lastExecutableCodeId ?? state.nextId());
+    if (state.executableCodeCount > 0) state.lastOutputOwnerId = resultId;
+    return {
+      id: resultId,
+      outcome: enumValue(result.outcome, "OUTCOME_UNSPECIFIED"),
+      output: result.output ?? "",
+      type: "code_execution_result",
+    };
+  }
+  const blob = part.inlineData;
+  if (state.lastOutputOwnerId === undefined || blob === undefined) return undefined;
+  const bytes = inlineDataBytes(blob.data);
+  if (bytes === undefined) return undefined;
+  return {
+    data: bytes.toString("base64"),
+    id: state.lastOutputOwnerId,
+    mime_type: blob.mimeType ?? "",
+    type: "code_execution_output",
+  };
+}
+
+function mergeCodeExecution(
+  extraContent: JsonObject | undefined,
+  codeExecution: JsonObject[],
+): JsonObject | undefined {
+  if (codeExecution.length === 0) return extraContent;
+  const google = asRecord(extraContent?.google) ?? {};
+  return { ...extraContent, google: { ...google, code_execution: codeExecution } };
+}
+
+function replayCodeExecutionId(value: JsonValue | undefined): string | undefined {
+  if (
+    !isString(value) ||
+    value.length === 0 ||
+    value.startsWith(SYNTHETIC_CODE_EXECUTION_ID_PREFIX)
+  ) {
+    return undefined;
+  }
+  return value;
+}
+
+function codeExecutionParts(message: ChatMessage): Part[] {
+  const items = asRecord(message.extraContent)?.google;
+  const list = asRecord(items)?.code_execution;
+  if (!Array.isArray(list)) return [];
+  const parts: Part[] = [];
+  for (const item of list) {
+    if (!isObject(item) || Array.isArray(item)) continue;
+    const record = parseJsonObject(item);
+    const id = replayCodeExecutionId(record.id);
+    if (record.type === "executable_code") {
+      const executableCode: NonNullable<Part["executableCode"]> = {};
+      if (isString(record.code)) executableCode.code = record.code;
+      if (isString(record.language)) {
+        // SAFETY: The provider contract establishes the asserted representation at this boundary.
+        executableCode.language = record.language as Language;
+      }
+      if (id !== undefined) executableCode.id = id;
+      parts.push({ executableCode });
+    } else if (record.type === "code_execution_result") {
+      const codeExecutionResult: NonNullable<Part["codeExecutionResult"]> = {};
+      if (isString(record.outcome)) {
+        // SAFETY: The provider contract establishes the asserted representation at this boundary.
+        codeExecutionResult.outcome = record.outcome as Outcome;
+      }
+      if (isString(record.output)) codeExecutionResult.output = record.output;
+      if (id !== undefined) codeExecutionResult.id = id;
+      parts.push({ codeExecutionResult });
+    }
+  }
+  return parts;
+}
+
+function systemInstructionText(message: ChatMessage): string {
+  if (isString(message.content)) return message.content;
+  return (message.content ?? [])
+    .flatMap((part) => (part.type === "text" && isString(part.text) ? [part.text] : []))
+    .join("");
+}
+
+function enableServerSideToolInvocations(
+  tools: GeminiTool[] | undefined,
+  toolConfig: GenerateContentConfig["toolConfig"],
+): GenerateContentConfig["toolConfig"] {
+  if (tools === undefined) return toolConfig;
+  const hasFunctions = tools.some((tool) => (tool.functionDeclarations?.length ?? 0) > 0);
+  const hasBuiltIn = tools.some((tool) =>
+    Object.entries(tool).some(
+      ([key, value]) => key !== "functionDeclarations" && value !== undefined,
+    ),
+  );
+  if (!(hasFunctions && hasBuiltIn)) return toolConfig;
+  return { ...toolConfig, includeServerSideToolInvocations: true };
 }
 
 function parseJsonValue(value: string | Uint8Array): JsonValue {
@@ -491,8 +632,12 @@ function assistantParts(
       thought: true,
     });
   }
+  const replayedCode = codeExecutionParts(message);
+  parts.push(...replayedCode);
   const hasToolCalls = (message.toolCalls ?? []).length > 0;
-  const skipEmptyText = hasToolCalls && isString(message.content) && message.content.length === 0;
+  const skipEmptyText =
+    (replayedCode.length > 0 || hasToolCalls) &&
+    (message.content === null || (isString(message.content) && message.content.length === 0));
   const content = skipEmptyText ? [] : contentParts(message.content, provider);
   if (messageSignature !== undefined) {
     const signedPart = [...content].reverse().find((part) => part.text !== undefined);
@@ -529,9 +674,9 @@ function pendingFunctionResponseParts(contents: Content[]): Part[] | undefined {
 function convertMessages(messages: ChatMessage[], provider: string): ConvertedMessages {
   const systemInstruction = messages
     .filter((message) => message.role === "developer" || message.role === "system")
-    .map(textContent)
+    .map(systemInstructionText)
     .filter((value) => value.length > 0)
-    .join("\n\n");
+    .join("\n");
   const namesById = new Map<string, string>();
   const contents: Content[] = [];
 
@@ -959,7 +1104,11 @@ function streamAudioDelta(audio: ChatCompletionAudio): ChatCompletionDeltaAudio 
   };
 }
 
-function completionParts(parts: Part[] | undefined, candidateIndex: number) {
+function completionParts(
+  parts: Part[] | undefined,
+  candidateIndex: number,
+  codeExecutionState = new CodeExecutionState(),
+) {
   // An empty text part is still an answer: Gemini 3 answers a conversation
   // that ends on an assistant turn with "" and STOP.
   let content: string | null = null;
@@ -968,6 +1117,7 @@ function completionParts(parts: Part[] | undefined, candidateIndex: number) {
   const audioBlobs: { data: Buffer; mimeType: string }[] = [];
   const images: ImageContent[] = [];
   const toolCalls: ToolCall[] = [];
+  const codeExecution: JsonObject[] = [];
 
   for (const part of parts ?? []) {
     if (part.thought === true) {
@@ -995,19 +1145,22 @@ function completionParts(parts: Part[] | undefined, candidateIndex: number) {
     if (image !== undefined) images.push(image);
     const audioBlob = inlineAudioBlob(part);
     if (audioBlob !== undefined) audioBlobs.push(audioBlob);
+    const codeItem = codeExecutionItem(part, codeExecutionState);
+    if (codeItem !== undefined) codeExecution.push(codeItem);
     if (isString(part.text)) content = (content ?? "") + part.text;
     messageSignature = part.thoughtSignature ?? messageSignature;
   }
+
+  const messageExtraContent = mergeCodeExecution(
+    messageSignature === undefined ? undefined : { google: { thoughtSignature: messageSignature } },
+    codeExecution,
+  );
 
   return {
     audio: inlineDataAudio(audioBlobs, content ?? "", true),
     content,
     ...includeWhen(images.length > 0, { images }),
-    ...includeWhen(!(messageSignature === undefined), {
-      messageExtraContent: {
-        google: { thoughtSignature: messageSignature },
-      },
-    }),
+    ...includeWhen(!(messageExtraContent === undefined), { messageExtraContent }),
     ...includeWhen(!(reasoning.length === 0), { reasoning }),
     ...includeWhen(!(toolCalls.length === 0), { toolCalls }),
   };
@@ -1113,6 +1266,8 @@ function inlinedBatchRequest(entry: JsonObject, provider: string): InlinedReques
 
 export class GeminiProvider extends BaseProvider {
   readonly metadata: ProviderMetadata;
+  protected override readonly readsCacheControlSideChannel = true;
+  private readonly cacheIdentity: GeminiCacheIdentity;
   private readonly client: GoogleGenAI;
   private readonly fileAuth: GeminiFileAuth;
   private readonly interactionsVersion: string | undefined;
@@ -1136,6 +1291,14 @@ export class GeminiProvider extends BaseProvider {
       ...includeWhen(!(apiBase === undefined), { apiBase }),
       ...includeWhen(!(apiKey === undefined), { apiKey }),
     };
+    const clientOptions = isJsonObject(options.clientOptions) ? options.clientOptions : undefined;
+    const clientBaseUrl = asRecord(clientOptions?.httpOptions)?.baseUrl;
+    this.cacheIdentity = geminiCacheIdentity({
+      apiKey,
+      baseUrl: apiBase ?? (isString(clientBaseUrl) ? clientBaseUrl : undefined),
+      location: isString(clientOptions?.location) ? clientOptions.location : undefined,
+      project: isString(clientOptions?.project) ? clientOptions.project : undefined,
+    });
     this.interactionsVersion = interactionsApiVersion(geminiClientOptions(options.clientOptions));
     this.metadata = completeProviderMetadata({
       capabilities: {
@@ -1163,14 +1326,38 @@ export class GeminiProvider extends BaseProvider {
       return Promise.reject(new UnsupportedParameterError("parallelToolCalls", this.providerName));
     }
     const request = this.completionRequest(params);
+    if (!Array.isArray(request.contents)) {
+      return Promise.reject(new TypeError("Gemini completion contents must be an array."));
+    }
+    // SAFETY: convertMessages always produces Content[]; completionRequest forwards that array.
+    const converted: GeminiContextCacheRequest = {
+      config: request.config ?? {},
+      contents: request.contents as Content[],
+      model: request.model,
+    };
 
     return this.execute(async () => {
+      const cacheUse = await prepareContextCache({
+        client: this.client,
+        converted,
+        convertMessages: (messages) => convertMessages(messages, this.providerName),
+        identity: this.cacheIdentity,
+        messages: params.messages,
+        providerName: this.providerName,
+      });
       if (params.stream === true) {
-        const stream = await this.client.models.generateContentStream(request);
-        return this.protectStream(this.normalizeStream(stream));
+        const stream = await openStreamWithContextCache(
+          (cached) => this.client.models.generateContentStream(cached),
+          cacheUse,
+        );
+        return this.protectStream(this.normalizeStream(stream, cacheUse));
       }
-      const response = await this.client.models.generateContent(request);
+      const response = await sendWithContextCache(
+        (cached) => this.client.models.generateContent(cached),
+        cacheUse,
+      );
       const result = this.normalizeCompletion(response, params.model);
+      reportCacheWrite(result.usage, cacheUse);
       assertStructuredOutputCompleted(params, result, this.providerName);
       return result;
     });
@@ -1430,7 +1617,10 @@ export class GeminiProvider extends BaseProvider {
   private completionRequest(params: CompletionParams): GenerateContentParameters {
     const converted = convertMessages(params.messages, this.providerName);
     const tools = convertFunctionTools(params.tools, this.providerName);
-    const toolConfig = convertToolChoice(params.toolChoice, this.providerName);
+    const toolConfig = enableServerSideToolInvocations(
+      tools,
+      convertToolChoice(params.toolChoice, this.providerName),
+    );
     const thinkingConfig = thinkingConfiguration(
       params.reasoningEffort,
       params.model,
@@ -1545,8 +1735,10 @@ export class GeminiProvider extends BaseProvider {
 
   private async *normalizeStream(
     stream: AsyncIterable<GenerateContentResponse>,
+    cacheUse?: ContextCacheUse,
   ): AsyncIterable<ChatCompletionChunk> {
     const state: StreamState = {
+      codeExecution: new CodeExecutionState(),
       created: unixTimestamp(),
       emittedRoles: new Set(),
       id: "gemini-stream",
@@ -1586,6 +1778,7 @@ export class GeminiProvider extends BaseProvider {
           const audioBlobs: { data: Buffer; mimeType: string }[] = [];
           const images: ImageContent[] = [];
           const toolCalls: ToolCallDelta[] = [];
+          const codeExecution: JsonObject[] = [];
 
           for (const part of candidate.content?.parts ?? []) {
             if (part.thought === true) {
@@ -1614,17 +1807,21 @@ export class GeminiProvider extends BaseProvider {
             if (image !== undefined) images.push(image);
             const audioBlob = inlineAudioBlob(part);
             if (audioBlob !== undefined) audioBlobs.push(audioBlob);
+            const codeItem = codeExecutionItem(part, state.codeExecution);
+            if (codeItem !== undefined) codeExecution.push(codeItem);
             if (isString(part.text)) content += part.text;
             messageSignature = part.thoughtSignature ?? messageSignature;
           }
 
           if (content.length > 0) delta.content = content;
           if (reasoning.length > 0) delta.reasoning = reasoning;
-          if (messageSignature !== undefined) {
-            delta.extraContent = {
-              google: { thoughtSignature: messageSignature },
-            };
-          }
+          const extraContent = mergeCodeExecution(
+            messageSignature === undefined
+              ? undefined
+              : { google: { thoughtSignature: messageSignature } },
+            codeExecution,
+          );
+          if (extraContent !== undefined) delta.extraContent = extraContent;
           if (images.length > 0) delta.images = images;
           const audio = inlineDataAudio(audioBlobs, content, false);
           if (audio !== undefined) delta.audio = streamAudioDelta(audio);
@@ -1648,6 +1845,7 @@ export class GeminiProvider extends BaseProvider {
       }
 
       const usage = normalizeUsage(response.usageMetadata);
+      if (cacheUse !== undefined) reportCacheWrite(usage, cacheUse);
       yield {
         choices,
         created: state.created,

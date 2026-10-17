@@ -55,6 +55,8 @@ export abstract class BaseProvider {
   abstract readonly metadata: ProviderMetadata;
   /** Whether native Messages structured output can be streamed. */
   readonly supportsMessagesStructuredOutputStreaming: boolean = false;
+  /** Whether the Messages bridge should pass `cacheControl` breakpoints in `extraContent`. */
+  protected readonly readsCacheControlSideChannel: boolean = false;
   protected readonly unifiedExceptions: boolean;
 
   constructor(options: ProviderOptions = {}) {
@@ -161,7 +163,12 @@ export abstract class BaseProvider {
       );
     }
     try {
-      const result = await this.completion(messagesToCompletionParams(params), options);
+      const result = await this.completion(
+        messagesToCompletionParams(params, {
+          cacheBreakpoints: this.readsCacheControlSideChannel,
+        }),
+        options,
+      );
       return Symbol.asyncIterator in result
         ? completionStreamToMessageEvents(result)
         : completionToMessageResponse(result);

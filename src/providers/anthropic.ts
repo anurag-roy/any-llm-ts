@@ -60,7 +60,11 @@ import {
   timeoutRequestOptions,
   unixTimestamp,
 } from "../utils.js";
-import { messagesContainerRequest, normalizeMessagesContainer } from "../messages-compat.js";
+import {
+  messagesContainerRequest,
+  normalizeMessagesContainer,
+  prepareBlocksForNativeMessages,
+} from "../messages-compat.js";
 import { BaseProvider } from "./base.js";
 import { completeProviderMetadata } from "../provider-metadata.js";
 import {
@@ -477,6 +481,20 @@ function nativeInputBlock(block: MessagesInputContentBlock) {
       cache_control: "cacheControl" in block ? block.cacheControl : undefined,
       text: block.text,
       type: "text",
+      ...includeWhen("extraContent" in block && block.extraContent !== undefined, {
+        extra_content: block.extraContent,
+      }),
+    };
+  }
+  if (block.type === "tool_use" && "id" in block && "name" in block) {
+    return {
+      id: block.id,
+      input: "input" in block ? block.input : {},
+      name: block.name,
+      type: "tool_use",
+      ...includeWhen("extraContent" in block && block.extraContent !== undefined, {
+        extra_content: block.extraContent,
+      }),
     };
   }
   return { ...block };
@@ -542,10 +560,14 @@ export function nativeMessagesRequest(params: MessagesParams) {
         : messagesContainerRequest(normalizeMessagesContainer(params.container)),
     context_management: params.contextManagement,
     max_tokens: params.maxTokens,
-    messages: params.messages.map((message) => ({
-      content: isString(message.content) ? message.content : message.content.map(nativeInputBlock),
-      role: message.role,
-    })),
+    messages: prepareBlocksForNativeMessages(
+      params.messages.map((message) => ({
+        content: isString(message.content)
+          ? message.content
+          : message.content.map(nativeInputBlock),
+        role: message.role,
+      })),
+    ),
     metadata: params.metadata,
     model: params.model,
     output_config:
@@ -563,13 +585,28 @@ export function nativeMessagesRequest(params: MessagesParams) {
     temperature: params.temperature,
     thinking: params.thinking,
     tool_choice: params.toolChoice,
-    tools: params.tools?.map((tool) => ({
-      cache_control: tool.cacheControl,
-      description: tool.description,
-      input_schema: tool.inputSchema,
-      name: tool.name,
-      ...includeWhen(tool.deferLoading === true, { defer_loading: true }),
-    })),
+    tools: params.tools?.map((tool) => {
+      const record = parseJsonObject(tool);
+      if (
+        !(
+          "name" in record ||
+          "type" in record ||
+          "inputSchema" in record ||
+          "input_schema" in record
+        )
+      ) {
+        return record;
+      }
+      return {
+        cache_control: record.cacheControl,
+        description: record.description,
+        input_schema: record.inputSchema ?? record.input_schema,
+        name: record.name,
+        ...includeWhen(record.deferLoading === true || record.defer_loading === true, {
+          defer_loading: true,
+        }),
+      };
+    }),
     top_k: params.topK,
     top_p: params.topP,
     ...params.providerOptions,

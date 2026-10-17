@@ -14,7 +14,10 @@ depends on the model. Other Bedrock models, and Claude requests with `outputForm
 the Completions bridge. On the native Claude path, Bedrock keeps only the betas AWS documents,
 moves a top-level `cacheControl` onto the last cacheable block, adds
 `thinking-display-updates-2026-08-18` when `thinking.display` is `"updates"`, and refuses
-`container`.
+`container`. Native Anthropic and Meta calls strip the Messages bridge `extraContent` side-channel
+and render another provider's code-execution blocks as text, so a conversation that switches from
+Gemini to Claude does not send fields or ids Anthropic never issued. Gemini and Vertex AI read
+`cacheControl` breakpoints from that side-channel; other compatibility providers do not.
 
 ```ts
 import { messages } from "any-llm-ts";

@@ -164,4 +164,90 @@ describe("Meta provider", () => {
     ).resolves.toMatchObject({ id: "chat-1", provider: "meta" });
     expect(openAICreate).toHaveBeenCalledOnce();
   });
+
+  it("strips bridge extra_content from native Messages blocks", async () => {
+    const create = vi.fn().mockResolvedValue({
+      content: [{ text: "Hi!", type: "text" }],
+      id: "msg_1",
+      model: "muse-spark-1.2",
+      role: "assistant",
+      stop_reason: "end_turn",
+      type: "message",
+      usage: { input_tokens: 5, output_tokens: 2 },
+    });
+    const provider = new MetaProvider({ apiKey: "meta-key" }, clients(create));
+    await provider.messages({
+      maxTokens: 64,
+      messages: [
+        { content: "Weather?", role: "user" },
+        {
+          content: [
+            {
+              extraContent: { google: { thoughtSignature: "c2ln" } },
+              text: "Checking.",
+              type: "text",
+            },
+            {
+              extraContent: { google: { thoughtSignature: "c2ln" } },
+              id: "call_a",
+              input: {},
+              name: "get_weather",
+              type: "tool_use",
+            },
+          ],
+          role: "assistant",
+        },
+      ],
+      model: "muse-spark-1.2",
+    });
+    expect(create.mock.calls[0]?.[0].messages[1].content).toEqual([
+      { cache_control: undefined, text: "Checking.", type: "text" },
+      { id: "call_a", input: {}, name: "get_weather", type: "tool_use" },
+    ]);
+  });
+
+  it("renders foreign code execution blocks as text on the native Messages path", async () => {
+    const create = vi.fn().mockResolvedValue({
+      content: [{ text: "2", type: "text" }],
+      id: "msg_1",
+      model: "muse-spark-1.2",
+      role: "assistant",
+      stop_reason: "end_turn",
+      type: "message",
+      usage: { input_tokens: 5, output_tokens: 2 },
+    });
+    const provider = new MetaProvider({ apiKey: "meta-key" }, clients(create));
+    await provider.messages({
+      maxTokens: 64,
+      messages: [
+        { content: "Add", role: "user" },
+        {
+          content: [
+            {
+              id: "exec_1",
+              input: { code: "1+1" },
+              name: "code_execution",
+              type: "server_tool_use",
+            },
+            {
+              content: {
+                content: [],
+                return_code: 0,
+                stderr: "",
+                stdout: "2",
+                type: "code_execution_result",
+              },
+              toolUseId: "exec_1",
+              type: "code_execution_tool_result",
+            },
+          ],
+          role: "assistant",
+        },
+      ],
+      model: "muse-spark-1.2",
+    });
+    expect(create.mock.calls[0]?.[0].messages[1].content).toEqual([
+      { text: "Code execution (python):\n```python\n1+1\n```\nOutput:\n2", type: "text" },
+    ]);
+  });
 });
