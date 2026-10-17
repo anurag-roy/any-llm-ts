@@ -1,4 +1,11 @@
 {
   "title": "Guides",
-  "pages": ["reusable-clients", "streaming", "tool-calling", "structured-output", "error-handling"]
+  "pages": [
+    "reusable-clients",
+    "streaming",
+    "tool-calling",
+    "structured-output",
+    "prompt-caching",
+    "error-handling"
+  ]
 }

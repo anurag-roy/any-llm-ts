@@ -102,4 +102,5 @@ console.log(response.provider);
 ```
 
 The provider SDK response remains available as `response.raw` for fields that have no normalized
-equivalent.
+equivalent. Liner answer agents map each search reference onto `message.citations` (and
+`delta.citations` while streaming).

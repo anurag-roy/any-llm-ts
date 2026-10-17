@@ -86,7 +86,12 @@ describe("AnyLLM registry and facade", () => {
     expect(AnyLLM.getProviderMetadata("openai").capabilities.completion).toBe(true);
     expect(AnyLLM.getAllProviderMetadata().length).toBe(AnyLLM.getSupportedProviders().length);
     expect(AnyLLM.getProviderMetadata("anthropic").messagesNative).toBe(true);
+    expect(AnyLLM.getProviderMetadata("bedrock").messagesNative).toBe(true);
     expect(AnyLLM.getProviderMetadata("openai").messagesNative).toBe(false);
+    expect(
+      AnyLLM.servesMessagesNatively("bedrock", "us.anthropic.claude-haiku-4-5-20251001-v1:0"),
+    ).toBe(true);
+    expect(AnyLLM.servesMessagesNatively("bedrock", "amazon.nova-lite-v1:0")).toBe(false);
   });
 
   it("treats cascadia, llamacpp, and vllm API keys as optional and honors their env vars", () => {

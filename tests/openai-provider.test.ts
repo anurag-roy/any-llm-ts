@@ -1196,4 +1196,50 @@ describe("per-instance unified exceptions", () => {
       provider.rerank({ documents: ["a"], model: "r", query: "q" }),
     ).rejects.toBeInstanceOf(UnsupportedOperationError);
   });
+
+  it("drops the cache_control extraContent side-channel on completions", async () => {
+    const create = vi.fn().mockResolvedValue(completionResponse());
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+    await provider.completion({
+      messages: [
+        {
+          content: "Be brief.",
+          extraContent: { cache_control: { type: "ephemeral" } },
+          role: "system",
+        },
+        { content: "Hello", role: "user" },
+      ],
+      model: "gpt-5.6",
+    });
+    const body = JSON.stringify(create.mock.calls[0]?.[0]);
+    expect(body).not.toContain("cache_control");
+    expect(body).not.toContain("extra_content");
+  });
+
+  it("does not send Messages cache_control breakpoints through the OpenAI bridge", async () => {
+    const create = vi.fn().mockResolvedValue(completionResponse());
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+    const ephemeral = { ttl: "1h", type: "ephemeral" };
+    await provider.messages({
+      cacheControl: ephemeral,
+      maxTokens: 100,
+      messages: [
+        { content: [{ cacheControl: ephemeral, text: "Hello", type: "text" }], role: "user" },
+      ],
+      model: "gpt-5.6",
+      system: [{ cacheControl: ephemeral, text: "Be brief.", type: "text" }],
+    });
+    const body = JSON.stringify(create.mock.calls[0]?.[0]);
+    expect(body).not.toContain("cache_control");
+    expect(body).not.toContain("extra_content");
+    expect(create.mock.calls[0]?.[0].messages[0]).toEqual({ content: "Be brief.", role: "system" });
+  });
 });

@@ -18,6 +18,7 @@ export type MessageRole = "assistant" | "developer" | "system" | "tool" | "user"
 export interface TextContentPart {
   type: "text";
   text: string;
+  cacheControl?: JsonObject;
 }
 
 export interface ImageUrlContentPart {
@@ -80,11 +81,24 @@ export interface ChatCompletionDeltaAudio {
   transcript?: string;
 }
 
+export interface MessageCitation {
+  url: string;
+  date?: string;
+  description?: string;
+  favicon?: string;
+  image?: string;
+  title?: string;
+}
+
 export interface ChatMessage {
   content: MessageContentPart[] | string | null;
   role: MessageRole;
   /** OpenAI-compatible audio object for inline media responses. */
   audio?: ChatCompletionAudio | null;
+  /** Anthropic-style cache breakpoint on a chat message, as LiteLLM and OpenRouter accept it. */
+  cacheControl?: JsonObject;
+  /** Web references, as Exa and Liner return them on an answer. */
+  citations?: MessageCitation[];
   extraContent?: JsonObject;
   /** OpenAI-compatible inline images, typically Gemini data URLs. */
   images?: ImageContent[] | null;
@@ -268,6 +282,7 @@ export interface ToolCallDelta {
 export interface ChatCompletionDelta {
   content?: string | null;
   audio?: ChatCompletionDeltaAudio | null;
+  citations?: MessageCitation[];
   extraContent?: JsonObject;
   images?: ImageContent[] | null;
   reasoning?: string | null;
@@ -633,6 +648,7 @@ export interface MessagesTextBlock {
   text: string;
   type: "text";
   cacheControl?: JsonObject;
+  extraContent?: JsonObject;
 }
 
 export interface MessagesThinkingBlock {
@@ -646,6 +662,7 @@ export interface MessagesToolUseBlock {
   input: JsonValue;
   name: string;
   type: "tool_use";
+  extraContent?: JsonObject;
 }
 
 export interface MessagesToolResultBlock {
@@ -696,12 +713,17 @@ export interface MessagesInputMessage {
   role: "assistant" | "user";
 }
 
-export interface MessagesTool {
+export interface MessagesFunctionTool {
   inputSchema: JsonObject;
   name: string;
   description?: string;
   cacheControl?: JsonObject;
+  /** Anthropic tool-search: skip this tool until the model loads it. */
+  deferLoading?: boolean;
 }
+
+/** Anthropic tool, or a provider-native tool such as Gemini `{ google_search: {} }`. */
+export type MessagesTool = JsonObject | MessagesFunctionTool;
 
 export interface MessageContainerSkill {
   skillId: string;
@@ -973,7 +995,8 @@ export interface ProviderMetadata {
   id: string;
   /**
    * Whether `messages()` talks to a real Anthropic Messages endpoint instead of
-   * the Completions compatibility bridge.
+   * the Completions compatibility bridge. Bedrock sets this for Claude models
+   * and answers per model in `AnyLLM.servesMessagesNatively`.
    */
   messagesNative: boolean;
   name: string;

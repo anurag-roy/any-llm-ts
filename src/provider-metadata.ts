@@ -53,6 +53,7 @@ const displayNames = {
   gemini: "Google Gemini",
   github: "GitHub Models",
   huggingface: "Hugging Face",
+  liner: "Liner",
   lmstudio: "LM Studio",
   openai: "OpenAI",
   openrouter: "OpenRouter",

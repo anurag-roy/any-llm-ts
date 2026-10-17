@@ -1,7 +1,7 @@
 {
   "source": {
     "repository": "mozilla-ai/any-llm",
-    "commit": "18ed82b8ae89db560bf0b1ec8bccb752fc0e2b5d"
+    "commit": "5091661d986392c77cef1bbbc05582204e544654"
   },
   "providers": [
     "anthropic",
@@ -26,6 +26,7 @@
     "huggingface",
     "inception",
     "kenari",
+    "liner",
     "llama",
     "llamacpp",
     "llamafile",
@@ -58,7 +59,14 @@
     "xai",
     "zai"
   ],
-  "messagesNative": ["anthropic", "azureanthropic", "meta", "otari", "vertexaianthropic"],
+  "messagesNative": [
+    "anthropic",
+    "azureanthropic",
+    "bedrock",
+    "meta",
+    "otari",
+    "vertexaianthropic"
+  ],
   "verifiedProviders": [
     "anthropic",
     "azureopenai",
@@ -148,6 +156,7 @@
       "huggingface",
       "inception",
       "kenari",
+      "liner",
       "llama",
       "llamacpp",
       "llamafile",
@@ -282,6 +291,7 @@
       "huggingface",
       "inception",
       "kenari",
+      "liner",
       "llama",
       "llamacpp",
       "llamafile",
@@ -398,7 +408,7 @@
       "xai",
       "zai"
     ],
-    "rerank": ["cohere", "otari", "together", "voyage"],
+    "rerank": ["cohere", "fireworks", "otari", "together", "voyage"],
     "responses": [
       "azureopenai",
       "fireworks",
@@ -436,6 +446,7 @@
       "huggingface",
       "inception",
       "kenari",
+      "liner",
       "llama",
       "llamacpp",
       "lmstudio",

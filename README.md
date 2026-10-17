@@ -224,7 +224,7 @@ Provider SDK failures are converted into a common hierarchy:
 
 - `AuthenticationError`
 - `InvalidRequestError`
-- `RateLimitError`, including `retryAfter` when supplied
+- `RateLimitError`, including `retryAfter` from `Retry-After` or `retry-after-ms`
 - `ModelNotFoundError`
 - `ContextLengthExceededError`
 - `ContentFilterError`
