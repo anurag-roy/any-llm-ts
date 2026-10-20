@@ -197,6 +197,7 @@ await llm.responses({ model, input });
 await llm.embedding({ model, input });
 await llm.listModels();
 await llm.imageGeneration({ model, prompt });
+await llm.imageEdit({ model, image, prompt });
 await llm.transcription({ model, file });
 await llm.speech({ model, input, voice });
 await llm.moderation({ input });

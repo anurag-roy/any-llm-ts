@@ -42,7 +42,7 @@ function response(content: string, finishReason = "stop") {
 
 function config(
   name: string,
-  quirks: ConstructorParameters<typeof OpenAIProvider>[0]["quirks"],
+  quirks?: ConstructorParameters<typeof OpenAIProvider>[0]["quirks"],
 ): ConstructorParameters<typeof OpenAIProvider>[0] {
   return {
     apiBase: `https://${name}.example/v1`,
@@ -836,6 +836,21 @@ describe("OpenAI-compatible provider quirks", () => {
     expect(Symbol.asyncIterator in result).toBe(false);
     if (!(Symbol.asyncIterator in result)) {
       expect(result.choices[0]?.finishReason).toBe("length");
+    }
+
+    const keep = vi.fn().mockResolvedValue(response("ok", "sensitive"));
+    const passthrough = new OpenAIProvider(
+      config("openrouter"),
+      {},
+      fakeClient({ chat: { completions: { create: keep } } }),
+    );
+    const kept = await passthrough.completion({
+      messages: [{ content: "hello", role: "user" }],
+      model: "model-1",
+    });
+    expect(Symbol.asyncIterator in kept).toBe(false);
+    if (!(Symbol.asyncIterator in kept)) {
+      expect(kept.choices[0]?.finishReason).toBe("sensitive");
     }
   });
 

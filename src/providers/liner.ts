@@ -33,6 +33,7 @@ const DEFAULT_API_BASE = "https://platform.liner.com/api/v1/agents";
 const DEFAULT_TIMEOUT_SECONDS = 60;
 const FORWARDED_EVENTS = new Set(["text-delta", "data-search-references", "finish"]);
 const LINER_ROLES = new Set(["assistant", "user"]);
+const LINER_INSTRUCTION_ROLES = new Set(["developer", "system"]);
 const REFERENCE_FIELDS = {
   date: "date",
   description: "description",
@@ -48,6 +49,7 @@ const linerCapabilities: ProviderCapabilities = {
   completion: true,
   embedding: false,
   files: false,
+  imageEdit: false,
   imageGeneration: false,
   listModels: false,
   messages: true,
@@ -91,7 +93,13 @@ function linerTextContent(content: ChatMessage["content"], role: string): string
 }
 
 export function convertLinerMessages(messages: ChatMessage[]): { content: string; role: string }[] {
-  const converted = messages.map((message) => {
+  const instructions: string[] = [];
+  const converted: { content: string; role: string }[] = [];
+  for (const message of messages) {
+    if (LINER_INSTRUCTION_ROLES.has(message.role)) {
+      instructions.push(linerTextContent(message.content, message.role));
+      continue;
+    }
     if (!LINER_ROLES.has(message.role)) {
       throw new UnsupportedParameterError(
         "messages",
@@ -99,8 +107,14 @@ export function convertLinerMessages(messages: ChatMessage[]): { content: string
         `Liner accepts only user and assistant messages, not '${message.role}'.`,
       );
     }
-    return { content: linerTextContent(message.content, message.role), role: message.role };
-  });
+    converted.push({
+      content: linerTextContent(message.content, message.role),
+      role: message.role,
+    });
+  }
+  if (instructions.length > 0) {
+    converted.unshift({ content: instructions.join("\n\n"), role: "user" });
+  }
   if (converted.length > 0 && converted[converted.length - 1]?.role !== "user") {
     throw new UnsupportedParameterError(
       "messages",

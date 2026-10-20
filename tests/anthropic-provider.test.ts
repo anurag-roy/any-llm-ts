@@ -1050,7 +1050,7 @@ describe("Anthropic provider", () => {
         type: "document",
       },
     ]);
-    expect(request.tool_choice).toBeUndefined();
+    expect(request.tool_choice).toEqual({ type: "none" });
     expect(request.thinking).toEqual({ type: "disabled" });
   });
 

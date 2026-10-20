@@ -16,6 +16,7 @@ import { FireworksProvider } from "./fireworks.js";
 import { GeminiProvider } from "./gemini.js";
 import { GitHubProvider } from "./github.js";
 import { HuggingFaceProvider } from "./huggingface.js";
+import { DeepseekProvider } from "./deepseek.js";
 import { LinerProvider } from "./liner.js";
 import { MistralProvider } from "./mistral.js";
 import { TogetherProvider } from "./together.js";
@@ -58,6 +59,7 @@ const conservativeCapabilities: ProviderCapabilities = {
   completion: true,
   embedding: false,
   files: false,
+  imageEdit: false,
   imageGeneration: false,
   listModels: true,
   messages: true,
@@ -140,18 +142,6 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
     envApiBase: "DEEPINFRA_API_BASE",
     envApiKey: "DEEPINFRA_API_KEY",
     name: "deepinfra",
-  },
-  {
-    apiBase: "https://api.deepseek.com",
-    capabilities: capabilities({ moderation: true, reasoning: true }),
-    documentationUrl: "https://api-docs.deepseek.com/",
-    envApiBase: "DEEPSEEK_API_BASE",
-    envApiKey: "DEEPSEEK_API_KEY",
-    name: "deepseek",
-    quirks: {
-      maxCompletionTokensAsMaxTokens: true,
-      reasoningDirective: "deepseek",
-    },
   },
   {
     apiBase: "https://api.edenai.run/v3",
@@ -521,6 +511,7 @@ addBuiltIn("openai", {
       audioTranscription: true,
       batch: true,
       embedding: true,
+      imageEdit: true,
       imageGeneration: true,
       moderation: true,
       pdfInput: true,
@@ -830,6 +821,27 @@ addBuiltIn("github", {
     envApiBase: "GITHUB_MODELS_API_BASE",
     envApiKey: "GITHUB_TOKEN",
     name: "github",
+    requiresApiKey: true,
+    supportsCompletionN: true,
+  },
+});
+
+addBuiltIn("deepseek", {
+  adapterFamily: "openai",
+  create: (options) => new DeepseekProvider(options),
+  metadata: {
+    apiBase: "https://api.deepseek.com",
+    capabilities: capabilities({
+      moderation: true,
+      reasoning: true,
+      responses: true,
+      vision: true,
+    }),
+    documentationUrl: "https://platform.deepseek.com/",
+    envApiBase: "DEEPSEEK_API_BASE",
+    envApiKey: "DEEPSEEK_API_KEY",
+    messagesNative: true,
+    name: "deepseek",
     requiresApiKey: true,
     supportsCompletionN: true,
   },

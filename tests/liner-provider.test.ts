@@ -193,8 +193,23 @@ describe("Liner provider", () => {
     ]);
   });
 
+  it("sends system and developer messages as a leading user turn", async () => {
+    const requests: Request[] = [];
+    await provider(recordingFetch(jsonResponse(ANSWER), requests)).completion({
+      messages: [
+        { content: "Be brief.", role: "system" },
+        { content: "Stay terse.", role: "developer" },
+        { content: "What is Firefox?", role: "user" },
+      ],
+      model: "quick-answer",
+    });
+    expect((await requests[0]?.json())?.messages).toEqual([
+      { content: "Be brief.\n\nStay terse.", role: "user" },
+      { content: "What is Firefox?", role: "user" },
+    ]);
+  });
+
   it.each([
-    [[{ content: "Be brief.", role: "system" }]],
     [[{ content: "42", role: "tool", toolCallId: "c-1" }]],
     [[{ content: [{ imageUrl: { url: "x" }, type: "image_url" }], role: "user" }]],
     [[{ content: null, role: "assistant" }]],

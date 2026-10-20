@@ -21,6 +21,7 @@ import type {
   FileMetadata,
   FilePage,
   FileResourceParams,
+  ImageEditParams,
   ImageGenerationParams,
   ImageGenerationResponse,
   ListBatchesParams,
@@ -82,6 +83,10 @@ export abstract class BaseProvider {
 
   imageGeneration(_params: ImageGenerationParams): Promise<ImageGenerationResponse> {
     return Promise.reject(new UnsupportedOperationError("image generation", this.metadata.name));
+  }
+
+  imageEdit(_params: ImageEditParams): Promise<ImageGenerationResponse> {
+    return Promise.reject(new UnsupportedOperationError("image edit", this.metadata.name));
   }
 
   transcription(_params: TranscriptionParams): Promise<Transcription> {

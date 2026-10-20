@@ -1,4 +1,5 @@
 export { AnyLLM } from "./any-llm.js";
+export { ChatCompletionAccumulator, accumulateChunks } from "./streaming.js";
 export {
   cancelBatch,
   completion,
@@ -6,6 +7,7 @@ export {
   deleteFile,
   downloadFile,
   embedding,
+  imageEdit,
   imageGeneration,
   listModels,
   listBatches,
@@ -27,6 +29,7 @@ export type {
   DirectDownloadFileParams,
   DirectEmbeddingParams,
   DirectFileResourceParams,
+  DirectImageEditParams,
   DirectImageGenerationParams,
   DirectListBatchesParams,
   DirectListFilesParams,
@@ -88,6 +91,8 @@ export type {
   HuggingFaceInferenceClientLike,
   HuggingFaceProviderClients,
 } from "./providers/huggingface.js";
+export { DeepseekProvider } from "./providers/deepseek.js";
+export type { DeepseekProviderClients } from "./providers/deepseek.js";
 export { LinerProvider } from "./providers/liner.js";
 export { MistralProvider } from "./providers/mistral.js";
 export { TogetherProvider } from "./providers/together.js";

@@ -1,7 +1,7 @@
 {
   "source": {
     "repository": "mozilla-ai/any-llm",
-    "commit": "5091661d986392c77cef1bbbc05582204e544654"
+    "commit": "ca93db4ab509d3cbb97cc901f00c27560b4ffc34"
   },
   "providers": [
     "anthropic",
@@ -63,6 +63,7 @@
     "anthropic",
     "azureanthropic",
     "bedrock",
+    "deepseek",
     "meta",
     "otari",
     "vertexaianthropic"
@@ -100,6 +101,7 @@
     "responses",
     "messages",
     "embedding",
+    "imageEdit",
     "uploadFile",
     "listFiles",
     "retrieveFile",
@@ -219,6 +221,7 @@
       "voyage"
     ],
     "files": ["anthropic", "azureopenai", "gemini", "openai"],
+    "imageEdit": ["openai"],
     "imageGeneration": ["azureopenai", "neosantara", "openai", "otari"],
     "listModels": [
       "anthropic",
@@ -411,6 +414,7 @@
     "rerank": ["cohere", "fireworks", "otari", "together", "voyage"],
     "responses": [
       "azureopenai",
+      "deepseek",
       "fireworks",
       "gemini",
       "gmi",
@@ -485,6 +489,7 @@
       "cohere",
       "dashscope",
       "deepinfra",
+      "deepseek",
       "edenai",
       "fireworks",
       "gemini",

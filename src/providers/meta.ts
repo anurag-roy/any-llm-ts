@@ -20,7 +20,12 @@ import {
   parseJsonObject,
   resolvedMaxRetries,
 } from "../utils.js";
-import { nativeMessage, nativeMessageEvent, nativeMessagesRequest } from "./anthropic.js";
+import {
+  anthropicClientOptions,
+  nativeMessage,
+  nativeMessageEvent,
+  nativeMessagesRequest,
+} from "./anthropic.js";
 import { OpenAIProvider } from "./openai.js";
 
 export interface MetaProviderClients {
@@ -74,7 +79,7 @@ export class MetaProvider extends OpenAIProvider {
     this.anthropic =
       clients.anthropic ??
       new Anthropic({
-        ...options.clientOptions,
+        ...anthropicClientOptions(options.clientOptions),
         apiKey: null,
         authToken: apiKey,
         baseURL: anthropicBase(apiBase),

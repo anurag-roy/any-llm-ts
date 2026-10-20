@@ -82,6 +82,7 @@ const anthropicCapabilities: ProviderCapabilities = {
   completion: true,
   embedding: false,
   files: false,
+  imageEdit: false,
   imageGeneration: false,
   listModels: true,
   messages: true,
@@ -93,6 +94,29 @@ const anthropicCapabilities: ProviderCapabilities = {
   streaming: true,
   vision: true,
 };
+
+const ANTHROPIC_CLIENT_OPTION_KEYS = new Set([
+  "apiKey",
+  "authToken",
+  "baseURL",
+  "dangerouslyAllowBrowser",
+  "defaultHeaders",
+  "defaultQuery",
+  "fetch",
+  "httpAgent",
+  "logLevel",
+  "logger",
+  "maxRetries",
+  "timeout",
+]);
+
+/** Keep constructor fields the Anthropic SDK accepts when sharing OpenAI client options. */
+export function anthropicClientOptions(options: ProviderOptions["clientOptions"]) {
+  if (options === undefined) return {};
+  return Object.fromEntries(
+    Object.entries(options).filter(([key]) => ANTHROPIC_CLIENT_OPTION_KEYS.has(key)),
+  );
+}
 
 const anthropicFileOperations: FileOperation[] = [
   "delete",
@@ -257,13 +281,14 @@ function convertTools(tools: CompletionParams["tools"]) {
 }
 
 interface AnthropicToolChoice {
-  type: "any" | "auto" | "tool";
+  type: "any" | "auto" | "none" | "tool";
   disable_parallel_tool_use?: boolean;
   name?: string;
 }
 
 function convertToolChoice(value: CompletionParams["toolChoice"]): AnthropicToolChoice | undefined {
-  if (value === undefined || value === "none") return undefined;
+  if (value === undefined) return undefined;
+  if (value === "none") return { type: "none" };
   if (value === "auto") return { type: "auto" };
   if (value === "required") return { type: "any" };
   if (isObject(value)) {
@@ -1140,7 +1165,7 @@ export class AnthropicProvider extends BaseProvider {
       ...(parseOptionalJsonObject(reasoning.output_config) ?? {}),
     };
     let toolChoice = convertToolChoice(params.toolChoice);
-    if (params.parallelToolCalls !== undefined) {
+    if (params.parallelToolCalls !== undefined && toolChoice?.type !== "none") {
       (toolChoice ??= { type: "auto" }).disable_parallel_tool_use = !params.parallelToolCalls;
     }
     return {

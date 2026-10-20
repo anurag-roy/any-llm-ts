@@ -95,6 +95,7 @@ const bedrockCapabilities: ProviderCapabilities = {
   completion: true,
   embedding: true,
   files: false,
+  imageEdit: false,
   imageGeneration: false,
   listModels: true,
   messages: true,

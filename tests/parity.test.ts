@@ -47,6 +47,7 @@ describe("Python source parity contract", () => {
         "completion",
         "embedding",
         "files",
+        "imageEdit",
         "imageGeneration",
         "listModels",
         "messages",

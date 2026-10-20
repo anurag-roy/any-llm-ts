@@ -70,6 +70,7 @@ const capabilityKeys = [
   "completion",
   "embedding",
   "files",
+  "imageEdit",
   "imageGeneration",
   "listModels",
   "messages",
@@ -207,8 +208,8 @@ type IncompleteProviderMetadata = Omit<
   GeneratedProviderMetadataKeys | "capabilities"
 > &
   Partial<Pick<ProviderMetadata, GeneratedProviderMetadataKeys>> & {
-    capabilities: Omit<ProviderCapabilities, "files"> &
-      Partial<Pick<ProviderCapabilities, "files">>;
+    capabilities: Omit<ProviderCapabilities, "files" | "imageEdit"> &
+      Partial<Pick<ProviderCapabilities, "files" | "imageEdit">>;
   };
 
 const fileOperationsCatalog = ["delete", "download", "list", "retrieve", "upload"] as const;
@@ -236,6 +237,7 @@ export function completeProviderMetadata(
     capabilities: {
       ...metadata.capabilities,
       files: fileOperations.length > 0,
+      imageEdit: metadata.capabilities.imageEdit === true,
     },
     configuration: metadata.configuration ?? providerConfiguration(name, metadata.apiBase),
     displayName: metadata.displayName ?? providerDisplayName(name),

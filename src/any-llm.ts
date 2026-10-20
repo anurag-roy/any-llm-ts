@@ -1,7 +1,11 @@
 import { includeWhen } from "./utils.js";
 import type { JsonValue } from "./types.js";
 import type { JsonObject } from "./types.js";
-import { InvalidModelSyntaxError, UnsupportedParameterError } from "./errors.js";
+import {
+  InvalidModelSyntaxError,
+  UnsupportedOperationError,
+  UnsupportedParameterError,
+} from "./errors.js";
 import type {
   Batch,
   BatchResult,
@@ -19,6 +23,7 @@ import type {
   FileMetadata,
   FilePage,
   FileResourceParams,
+  ImageEditParams,
   ImageGenerationParams,
   ImageGenerationResponse,
   ListBatchesParams,
@@ -54,12 +59,13 @@ import {
   completionResponseFormat,
   isStructuredOutputFormat,
   messagesOutputFormat,
+  normalizeOutputConfig,
   parseCompletion,
   parseMessage,
   parseResponse,
   responsesTextFormat,
 } from "./structured-output.js";
-import { isAsyncIterable } from "./utils.js";
+import { isAsyncIterable, isObject } from "./utils.js";
 import { completionParamsWithValidatedN, validateProviderMetadata } from "./provider-metadata.js";
 import type { BaseProvider } from "./providers/base.js";
 import { OpenAIProvider } from "./providers/openai.js";
@@ -279,6 +285,13 @@ export class AnyLLM {
     return this.adapter.imageGeneration(params);
   }
 
+  imageEdit(params: ImageEditParams): Promise<ImageGenerationResponse> {
+    if (!this.metadata.capabilities.imageEdit) {
+      return Promise.reject(new UnsupportedOperationError("image edit", this.provider));
+    }
+    return this.adapter.imageEdit(params);
+  }
+
   transcription(params: TranscriptionParams): Promise<Transcription> {
     return this.adapter.transcription(params);
   }
@@ -351,9 +364,15 @@ export class AnyLLM {
     AsyncIterable<MessageStreamEvent> | MessageResponse | ParsedMessageResponse<JsonValue>
   > {
     this.validatePromptCacheKey(params.promptCacheKey);
+    const namesFormat =
+      params.outputFormat !== undefined &&
+      (isStructuredOutputFormat(params.outputFormat) ||
+        !isObject(params.outputFormat) ||
+        "format" in normalizeOutputConfig(params.outputFormat));
     if (
       params.outputFormat !== undefined &&
       params.stream === true &&
+      namesFormat &&
       !this.adapter.supportsMessagesStructuredOutputStreaming
     ) {
       throw new TypeError("stream is not supported with structured outputFormat.");

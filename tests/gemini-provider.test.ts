@@ -464,6 +464,149 @@ describe("Gemini provider", () => {
     });
   });
 
+  it("reports image and audio output tokens from candidatesTokensDetails", async () => {
+    const sdk = fakeGemini({
+      generateContent: vi.fn().mockResolvedValue(
+        response({
+          candidates: [
+            {
+              content: { parts: [{ text: "see" }], role: "model" },
+              finishReason: GeminiFinishReason.STOP,
+            },
+          ],
+          usageMetadata: {
+            candidatesTokenCount: 12,
+            candidatesTokensDetails: [
+              { modality: "IMAGE", tokenCount: 8 },
+              { modality: "AUDIO", tokenCount: 3 },
+            ],
+            promptTokenCount: 4,
+            thoughtsTokenCount: 1,
+            totalTokenCount: 17,
+          },
+        }),
+      ),
+    });
+    const provider = new GeminiProvider({}, sdk.client);
+    // SAFETY: stream is unset, so completion returns ChatCompletion.
+    const result = (await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "gemini-test",
+    })) as ChatCompletion;
+    expect(result.usage).toEqual({
+      completionTokens: 13,
+      completionTokensDetails: { audioTokens: 3, imageTokens: 8, reasoningTokens: 1 },
+      promptTokens: 4,
+      totalTokens: 17,
+    });
+  });
+
+  it("mints a stable function-call id and omits synthetic ids on replay", async () => {
+    const sdk = fakeGemini({
+      generateContent: vi.fn().mockResolvedValue(
+        response({
+          candidates: [
+            {
+              content: {
+                parts: [{ functionCall: { args: { q: "news" }, name: "search" } }],
+                role: "model",
+              },
+              finishReason: GeminiFinishReason.STOP,
+            },
+          ],
+          responseId: "resp-9",
+        }),
+      ),
+    });
+    const provider = new GeminiProvider({}, sdk.client);
+    // SAFETY: stream is unset, so completion returns ChatCompletion.
+    const result = (await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "gemini-test",
+    })) as ChatCompletion;
+    expect(result.choices[0]?.message.toolCalls?.[0]?.id).toBe("call_anyllm_resp-9_0");
+
+    sdk.models.generateContent.mockResolvedValueOnce(
+      response({
+        candidates: [
+          {
+            content: { parts: [{ text: "ok" }], role: "model" },
+            finishReason: GeminiFinishReason.STOP,
+          },
+        ],
+      }),
+    );
+    await provider.completion({
+      messages: [
+        { content: "Hi", role: "user" },
+        {
+          content: null,
+          role: "assistant",
+          toolCalls: [
+            {
+              function: { arguments: '{"q":"news"}', name: "search" },
+              id: "call_anyllm_resp-9_0",
+              type: "function",
+            },
+          ],
+        },
+        { content: "{}", role: "tool", toolCallId: "call_anyllm_resp-9_0" },
+      ],
+      model: "gemini-test",
+    });
+    expect(sdk.models.generateContent.mock.calls[1]?.[0].contents[1].parts[0].functionCall.id).toBe(
+      undefined,
+    );
+    expect(
+      sdk.models.generateContent.mock.calls[1]?.[0].contents[2].parts[0].functionResponse.id,
+    ).toBeUndefined();
+  });
+
+  it("sends Gemini 3 tool-result images as function-response media", async () => {
+    const png =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const sdk = okSdk();
+    const provider = new GeminiProvider({}, sdk.client);
+    await provider.completion({
+      messages: [
+        { content: "What is this?", role: "user" },
+        {
+          content: null,
+          role: "assistant",
+          toolCalls: [
+            {
+              function: { arguments: "{}", name: "look" },
+              id: "call_1",
+              type: "function",
+            },
+          ],
+        },
+        {
+          content: [
+            { text: "photo", type: "text" },
+            { image_url: { url: png }, type: "image_url" },
+          ],
+          role: "tool",
+          toolCallId: "call_1",
+        },
+      ],
+      model: "gemini-3.5-flash",
+    });
+    const part = sdk.models.generateContent.mock.calls[0]?.[0].contents[2].parts[0];
+    expect(part.functionResponse.response).toEqual({
+      result: [{ text: "photo", type: "text" }, { $ref: "attachment-1" }],
+    });
+    expect(part.functionResponse.parts).toEqual([
+      {
+        inlineData: {
+          data: png.slice(png.indexOf(",") + 1),
+          displayName: "attachment-1",
+          mimeType: "image/png",
+        },
+      },
+    ]);
+  });
+
   it("uses defaults, supports tool modes, and adds the thought-signature sentinel", async () => {
     const sdk = fakeGemini({
       generateContent: vi.fn().mockResolvedValue(
@@ -1009,7 +1152,7 @@ describe("Gemini provider", () => {
                   google: { thoughtSignature: "stream-tool-signature" },
                 },
                 function: { arguments: '{"q":"news"}', name: "search" },
-                id: "call_0_0",
+                id: "call_anyllm_stream-1_0",
                 index: 0,
                 type: "function",
               },

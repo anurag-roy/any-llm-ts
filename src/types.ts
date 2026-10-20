@@ -218,13 +218,15 @@ export interface CompletionUsage {
   totalTime?: number;
 }
 
-export type FinishReason =
+export type KnownFinishReason =
   | "content_filter"
   | "function_call"
   | "length"
   | "stop"
-  | "tool_calls"
-  | null;
+  | "tool_calls";
+
+/** OpenAI's five values, or the provider's own string when it sends something else. */
+export type FinishReason = KnownFinishReason | (string & {}) | null;
 
 export interface ChatCompletionChoice {
   finishReason: FinishReason;
@@ -406,6 +408,26 @@ export interface ImageGenerationParams {
   responseFormat?: "b64_json" | "url";
   size?: string;
   style?: string;
+  user?: string;
+}
+
+/** A path, bytes, Blob, or a `(filename, content[, mimeType])` tuple. */
+export type ImageFile =
+  | FileInput
+  | readonly [string | null, FileInput]
+  | readonly [string | null, FileInput, string | null];
+
+export type ImageInput = ImageFile | ImageFile[];
+
+export interface ImageEditParams {
+  image: ImageInput;
+  model: string;
+  prompt: string;
+  n?: number;
+  providerOptions?: JsonObject;
+  quality?: string;
+  responseFormat?: "b64_json" | "url";
+  size?: string;
   user?: string;
 }
 
@@ -883,6 +905,7 @@ export interface ProviderCapabilities {
   completion: boolean;
   embedding: boolean;
   files: boolean;
+  imageEdit: boolean;
   imageGeneration: boolean;
   listModels: boolean;
   messages: boolean;

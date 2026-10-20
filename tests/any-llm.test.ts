@@ -88,6 +88,8 @@ describe("AnyLLM registry and facade", () => {
     expect(AnyLLM.getProviderMetadata("anthropic").messagesNative).toBe(true);
     expect(AnyLLM.getProviderMetadata("bedrock").messagesNative).toBe(true);
     expect(AnyLLM.getProviderMetadata("openai").messagesNative).toBe(false);
+    expect(AnyLLM.getProviderMetadata("deepseek").messagesNative).toBe(true);
+    expect(AnyLLM.getProviderMetadata("openai").capabilities.imageEdit).toBe(true);
     expect(
       AnyLLM.servesMessagesNatively("bedrock", "us.anthropic.claude-haiku-4-5-20251001-v1:0"),
     ).toBe(true);
@@ -392,6 +394,9 @@ describe("AnyLLM registry and facade", () => {
     await expect(llm.imageGeneration({ model: "image", prompt: "hello" })).rejects.toBeInstanceOf(
       UnsupportedOperationError,
     );
+    await expect(
+      llm.imageEdit({ image: new Uint8Array([1]), model: "image", prompt: "hello" }),
+    ).rejects.toBeInstanceOf(UnsupportedOperationError);
     await expect(llm.transcription({ file: new Blob(), model: "audio" })).rejects.toBeInstanceOf(
       UnsupportedOperationError,
     );
