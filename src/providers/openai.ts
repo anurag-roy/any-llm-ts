@@ -483,9 +483,16 @@ function normalizeUsage(value: JsonValue | undefined): CompletionUsage | undefin
   if (isObject(promptTokensDetails)) {
     normalized.promptTokensDetails = parseJsonObject(promptTokensDetails);
   }
-  const cachedTokens = usage.prompt_cache_hit_tokens;
-  if (isNumber(cachedTokens) && normalized.promptTokensDetails === undefined) {
-    normalized.promptTokensDetails = { cachedTokens };
+  const detailsCached =
+    normalized.promptTokensDetails?.cachedTokens ?? normalized.promptTokensDetails?.cached_tokens;
+  const cachedTokens =
+    detailsCached ?? usage.cached_tokens ?? usage.cachedTokens ?? usage.prompt_cache_hit_tokens;
+  if (isNumber(cachedTokens)) {
+    if (normalized.promptTokensDetails === undefined) {
+      normalized.promptTokensDetails = { cachedTokens };
+    } else {
+      normalized.promptTokensDetails.cachedTokens = cachedTokens;
+    }
   }
   return normalized;
 }

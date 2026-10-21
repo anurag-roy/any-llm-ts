@@ -46,7 +46,7 @@ Composition keeps the public client stable even when a provider adapter has a co
 
 ## Current scope
 
-The port now tracks the Python source at commit `ca93db4ab509d3cbb97cc901f00c27560b4ffc34` with:
+The port now tracks the Python source at commit `798f6be898f0b0e6a2c44097ad0ee152514a47a3` with:
 
 - the same 54 registered provider names and the same stateless operation set
   (`typesafe` is omitted: Python-only SDK and a `decide` API, not chat completions);

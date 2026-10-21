@@ -196,11 +196,64 @@ describe("OpenAI-compatible provider", () => {
         completionTokens: 5,
         promptTime: 0.2,
         promptTokens: 7,
+        promptTokensDetails: { cachedTokens: 3, cached_tokens: 3 },
         queueTime: 0.1,
         totalTime: 0.6,
         totalTokens: 12,
       },
     });
+  });
+
+  it("keeps cached token details from nested or top-level usage fields", async () => {
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ...completionResponse(),
+        usage: {
+          completion_tokens: 5,
+          completion_tokens_details: { reasoning_tokens: 5 },
+          prompt_tokens: 10439,
+          prompt_tokens_details: { cached_tokens: 10368 },
+          total_tokens: 10444,
+        },
+      })
+      .mockResolvedValueOnce({
+        ...completionResponse(),
+        usage: {
+          cached_tokens: 64,
+          completion_tokens: 1,
+          prompt_tokens: 100,
+          prompt_tokens_details: { cached_tokens: null },
+          total_tokens: 101,
+        },
+      });
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+    const nested = await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "model-a",
+    });
+    expect(Symbol.asyncIterator in nested).toBe(false);
+    if (!(Symbol.asyncIterator in nested)) {
+      expect(nested.usage).toMatchObject({
+        completionTokens: 5,
+        completionTokensDetails: { reasoning_tokens: 5 },
+        promptTokens: 10439,
+        promptTokensDetails: { cachedTokens: 10368 },
+        totalTokens: 10444,
+      });
+    }
+    const fallback = await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "model-a",
+    });
+    expect(Symbol.asyncIterator in fallback).toBe(false);
+    if (!(Symbol.asyncIterator in fallback)) {
+      expect(fallback.usage?.promptTokensDetails).toMatchObject({ cachedTokens: 64 });
+    }
   });
 
   it("does not send an unset n to chat completions", async () => {

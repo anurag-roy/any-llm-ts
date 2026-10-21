@@ -4,7 +4,7 @@ import { isJsonObject, isJsonValue, parseJsonObject, parseJsonValue } from "./ut
 import type { JsonObject } from "./types.js";
 import { isNumber, isObject, isString } from "./utils.js";
 import { InvalidRequestError } from "./errors.js";
-import { normalizeOutputConfig } from "./structured-output.js";
+import { isStructuredOutputFormat, normalizeOutputConfig } from "./structured-output.js";
 import type {
   CacheCreationTokenDetails,
   ChatCompletion,
@@ -434,6 +434,33 @@ function outputFormat(value: MessagesParams["outputFormat"]) {
   };
 }
 
+const outputConfigEfforts = ["low", "medium", "high", "xhigh", "max"] as const;
+
+function isOutputConfigEffort(
+  value: JsonValue | undefined,
+): value is (typeof outputConfigEfforts)[number] {
+  return isString(value) && outputConfigEfforts.some((effort) => effort === value);
+}
+
+/** Return `output_config.effort` as a completion `reasoningEffort`, or undefined if unset. */
+export function outputConfigEffort(params: MessagesParams): CompletionParams["reasoningEffort"] {
+  if (
+    params.outputFormat === undefined ||
+    !isObject(params.outputFormat) ||
+    isStructuredOutputFormat(params.outputFormat)
+  ) {
+    return undefined;
+  }
+  const effort = params.outputFormat.effort;
+  if (effort === undefined) return undefined;
+  if (!isOutputConfigEffort(effort)) {
+    throw new InvalidRequestError(
+      `output_config effort ${JSON.stringify(effort)} is not one of ${outputConfigEfforts.join(", ")}.`,
+    );
+  }
+  return effort;
+}
+
 function reasoningEffort(
   thinking: MessagesParams["thinking"],
 ): CompletionParams["reasoningEffort"] {
@@ -489,7 +516,10 @@ export function messagesToCompletionParams(
   options: { cacheBreakpoints?: boolean } = {},
 ): CompletionParams {
   const cacheBreakpoints = options.cacheBreakpoints === true;
-  const effort = reasoningEffort(params.thinking);
+  const thinkingType = params.thinking?.type;
+  const configEffort = outputConfigEffort(params);
+  const effort =
+    thinkingType === "disabled" ? "none" : (configEffort ?? reasoningEffort(params.thinking));
   const format = outputFormat(params.outputFormat);
   const selectedToolChoice =
     params.toolChoice === undefined ? undefined : toolChoice(params.toolChoice);

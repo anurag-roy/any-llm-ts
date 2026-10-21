@@ -170,6 +170,8 @@ export function messagesParamsToResponsesParams(params: MessagesParams): Respons
       effort: completion.reasoningEffort ?? "medium",
       summary: "auto",
     };
+  } else if (completion.reasoningEffort !== undefined && params.thinking?.type !== "disabled") {
+    request.reasoning = { effort: completion.reasoningEffort };
   }
   const format = responsesFormat(completion.responseFormat);
   if (format !== undefined) request.responseFormat = format;

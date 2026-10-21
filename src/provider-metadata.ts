@@ -186,7 +186,14 @@ export function providerTier(name: string): ProviderTier {
 
 export function providerPromptCacheKeySupport(name: string): PromptCacheKeySupport {
   const normalized = name.trim().toLowerCase();
-  if (normalized === "openai" || normalized === "meta") return "supported";
+  if (
+    normalized === "openai" ||
+    normalized === "meta" ||
+    normalized === "mistral" ||
+    normalized === "together"
+  ) {
+    return "supported";
+  }
   if (normalized === "otari") return "passthrough";
   return "unsupported";
 }

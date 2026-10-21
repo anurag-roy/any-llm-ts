@@ -65,6 +65,7 @@ import {
 } from "../utils.js";
 import { BaseProvider } from "./base.js";
 import { completeProviderMetadata } from "../provider-metadata.js";
+import { isStructuredOutputFormat, normalizeOutputConfig } from "../structured-output.js";
 import {
   messagesBetas,
   nativeMessage,
@@ -305,6 +306,37 @@ function placeCacheBreakpoint(body: JsonObject, cacheControl: JsonObject): void 
 function thinkingDisplay(thinking: JsonValue | undefined): string | undefined {
   if (!isJsonObject(thinking) || !isString(thinking.display)) return undefined;
   return thinking.display;
+}
+
+function formatlessOutputConfig(params: MessagesParams): JsonObject | undefined {
+  if (
+    params.outputFormat === undefined ||
+    !isObject(params.outputFormat) ||
+    isStructuredOutputFormat(params.outputFormat)
+  ) {
+    return undefined;
+  }
+  const outputConfig = normalizeOutputConfig(params.outputFormat);
+  return "format" in outputConfig ? undefined : outputConfig;
+}
+
+function withoutEffortBesideAFormat(params: MessagesParams): MessagesParams {
+  if (
+    params.outputFormat === undefined ||
+    !isObject(params.outputFormat) ||
+    isStructuredOutputFormat(params.outputFormat) ||
+    !("effort" in params.outputFormat)
+  ) {
+    return params;
+  }
+  const outputConfig = normalizeOutputConfig(params.outputFormat);
+  if (!("format" in outputConfig)) return params;
+  return {
+    ...params,
+    outputFormat: Object.fromEntries(
+      Object.entries(outputConfig).filter(([key]) => key !== "effort"),
+    ),
+  };
 }
 
 function bedrockNativeMessagesBody(params: MessagesParams) {
@@ -1096,14 +1128,20 @@ export class BedrockProvider extends BaseProvider {
     params: MessagesParams,
     options?: CompletionOperationOptions,
   ): Promise<AsyncIterable<MessageStreamEvent> | MessageResponse> {
-    if (params.outputFormat !== undefined || !this.servesMessagesNatively(params.model)) {
-      return super.messages(params, options);
+    const outputConfig = formatlessOutputConfig(params);
+    if (
+      (params.outputFormat !== undefined && outputConfig === undefined) ||
+      !this.servesMessagesNatively(params.model)
+    ) {
+      return super.messages(withoutEffortBesideAFormat(params), options);
     }
     return this.execute(async () => {
+      const body = bedrockNativeMessagesBody(params);
+      if (outputConfig !== undefined) body.output_config = outputConfig;
       // SAFETY: Provider options are extra InvokeModel fields such as guardrailIdentifier.
       const request = {
         accept: "application/json",
-        body: JSON.stringify(bedrockNativeMessagesBody(params)),
+        body: JSON.stringify(body),
         contentType: "application/json",
         modelId: params.model,
         ...params.providerOptions,

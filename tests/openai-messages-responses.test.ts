@@ -61,6 +61,28 @@ describe("messagesParamsToResponsesParams", () => {
     expect(converted.tools?.[0]).not.toHaveProperty("function");
   });
 
+  it("carries outputFormat effort as Responses reasoning", () => {
+    const base = {
+      maxTokens: 4096,
+      messages: [{ content: "What's the weather in Paris?", role: "user" as const }],
+      model: "gpt-5.6",
+      outputFormat: { effort: "high" },
+    };
+    expect(messagesParamsToResponsesParams(base).reasoning).toEqual({ effort: "high" });
+    expect(
+      messagesParamsToResponsesParams({
+        ...base,
+        thinking: { budgetTokens: 2048, type: "enabled" },
+      }).reasoning,
+    ).toEqual({ effort: "high", summary: "auto" });
+    expect(
+      messagesParamsToResponsesParams({
+        ...base,
+        thinking: { type: "disabled" },
+      }).reasoning,
+    ).toBeUndefined();
+  });
+
   it("maps system, sampling, documents, images, and assistant replay", () => {
     const converted = messagesParamsToResponsesParams({
       maxTokens: 128,

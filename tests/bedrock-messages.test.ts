@@ -674,4 +674,94 @@ describe("Bedrock native Messages", () => {
       content: [{ text: '{"city":"Paris"}', type: "text" }],
     });
   });
+
+  it("keeps a schema outputFormat with effort on the Converse bridge", async () => {
+    const send = vi.fn(async (command: ConverseCommand) => {
+      expect(command).toBeInstanceOf(ConverseCommand);
+      expect(command.input.additionalModelRequestFields).toBeUndefined();
+      return {
+        output: {
+          message: {
+            content: [
+              {
+                toolUse: {
+                  input: { city: "Paris" },
+                  name: "any_llm_structured_output",
+                  toolUseId: "t1",
+                },
+              },
+            ],
+            role: "assistant",
+          },
+        },
+        stopReason: "tool_use",
+        usage: { inputTokens: 3, outputTokens: 1, totalTokens: 4 },
+      };
+    });
+    await provider(send).messages({
+      maxTokens: 64,
+      messages: [{ content: "Capital of France?", role: "user" }],
+      model: CLAUDE_MODEL,
+      outputFormat: {
+        effort: "low",
+        format: {
+          schema: { properties: { city: { type: "string" } }, required: ["city"], type: "object" },
+          type: "json_schema",
+        },
+      },
+    });
+    expect(send.mock.calls[0]?.[0]).toBeInstanceOf(ConverseCommand);
+  });
+
+  it("sends an effort-only outputFormat on the native Claude path", async () => {
+    const send = vi.fn(async (command: InvokeModelCommand) => {
+      expect(command).toBeInstanceOf(InvokeModelCommand);
+      expect(sentBody(command).output_config).toEqual({ effort: "high" });
+      expect(sentBody(command).messages).toEqual([
+        { content: "What is 2+2?", role: "user" },
+        {
+          content: [
+            { signature: "sig-1", thinking: "Add them.", type: "thinking" },
+            { data: "opaque", type: "redacted_thinking" },
+            { text: "4", type: "text" },
+          ],
+          role: "assistant",
+        },
+        {
+          content: [{ cache_control: { type: "ephemeral" }, text: "And 3+3?", type: "text" }],
+          role: "user",
+        },
+      ]);
+      return { body: new TextEncoder().encode(JSON.stringify(claudeMessage)) };
+    });
+    const result = await provider(send).messages({
+      maxTokens: 64,
+      messages: thinkingHistory,
+      model: CLAUDE_MODEL,
+      outputFormat: { effort: "high" },
+    });
+    expect(send.mock.calls[0]?.[0]).toBeInstanceOf(InvokeModelCommand);
+    expect(result).toMatchObject({ id: "msg_bdrk_1" });
+  });
+
+  it("streams an effort-only outputFormat on the native Claude path", async () => {
+    const send = vi.fn(async (command: InvokeModelWithResponseStreamCommand) => {
+      expect(command).toBeInstanceOf(InvokeModelWithResponseStreamCommand);
+      expect(sentBody(command).output_config).toEqual({ effort: "high" });
+      return { body: events(claudeStream.map(encodeEvent)) };
+    });
+    const stream = await provider(send).messages({
+      maxTokens: 64,
+      messages: thinkingHistory,
+      model: CLAUDE_MODEL,
+      outputFormat: { effort: "high" },
+      stream: true,
+    });
+    expect(isAsyncIterable(stream)).toBe(true);
+    const received: MessageStreamEvent[] = [];
+    if (isAsyncIterable(stream)) {
+      for await (const event of stream) received.push(event);
+    }
+    expect(received.some((event) => event.type === "message_stop")).toBe(true);
+  });
 });

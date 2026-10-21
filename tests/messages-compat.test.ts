@@ -1011,14 +1011,65 @@ describe("Messages compatibility API", () => {
       json_schema: { name: "City", schema: { title: "City", type: "object" } },
       type: "json_schema",
     });
+    const effortOnly = messagesToCompletionParams({
+      maxTokens: 10,
+      messages: [{ content: "Hello", role: "user" }],
+      model: "model-a",
+      outputFormat: { effort: "high" },
+    });
+    expect(effortOnly.responseFormat).toBeUndefined();
+    expect(effortOnly.reasoningEffort).toBe("high");
+    const effortAndSchema = messagesToCompletionParams({
+      maxTokens: 10,
+      messages: [{ content: "Hello", role: "user" }],
+      model: "model-a",
+      outputFormat: {
+        effort: "max",
+        format: { schema: { type: "object" }, type: "json_schema" },
+      },
+    });
+    expect(effortAndSchema.responseFormat).toEqual({
+      json_schema: { name: "structured_output", schema: { type: "object" } },
+      type: "json_schema",
+    });
+    expect(effortAndSchema.reasoningEffort).toBe("max");
     expect(
       messagesToCompletionParams({
-        maxTokens: 10,
+        maxTokens: 4096,
         messages: [{ content: "Hello", role: "user" }],
         model: "model-a",
-        outputFormat: { effort: "high" },
-      }).responseFormat,
-    ).toBeUndefined();
+        outputFormat: { effort: "low" },
+        thinking: { budgetTokens: 1024, type: "enabled" },
+      }).reasoningEffort,
+    ).toBe("low");
+    expect(
+      messagesToCompletionParams({
+        maxTokens: 4096,
+        messages: [{ content: "Hello", role: "user" }],
+        model: "model-a",
+        outputFormat: { effort: "low" },
+        thinking: { type: "adaptive" },
+      }).reasoningEffort,
+    ).toBe("low");
+    expect(
+      messagesToCompletionParams({
+        maxTokens: 4096,
+        messages: [{ content: "Hello", role: "user" }],
+        model: "model-a",
+        outputFormat: { effort: "low" },
+        thinking: { type: "disabled" },
+      }).reasoningEffort,
+    ).toBe("none");
+    for (const effort of ["extreme", "none", "minimal", "auto"]) {
+      expect(() =>
+        messagesToCompletionParams({
+          maxTokens: 10,
+          messages: [{ content: "Hello", role: "user" }],
+          model: "model-a",
+          outputFormat: { effort },
+        }),
+      ).toThrow(InvalidRequestError);
+    }
     expect(() =>
       messagesToCompletionParams({
         maxTokens: 10,

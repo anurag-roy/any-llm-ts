@@ -69,7 +69,22 @@ describe("Together provider", () => {
     expect(createProvider("together", { apiKey: "secret" })).toBeInstanceOf(TogetherProvider);
     expect(AnyLLM.getProviderMetadata("together")).toMatchObject({
       capabilities: { batch: true, embedding: true, rerank: true },
+      promptCacheKeySupport: "supported",
     });
+  });
+
+  it("forwards promptCacheKey on chat completions", async () => {
+    const create = vi.fn().mockResolvedValue(completionResponse());
+    const provider = new TogetherProvider(
+      { apiKey: "secret" },
+      client({ chat: { completions: { create } } }),
+    );
+    await AnyLLM.fromProvider(provider).completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "deepseek-ai/DeepSeek-V4.1-Flash",
+      promptCacheKey: "tenant-1",
+    });
+    expect(create.mock.calls[0]?.[0]).toMatchObject({ prompt_cache_key: "tenant-1" });
   });
 
   it("reranks documents and sorts by descending relevance", async () => {
