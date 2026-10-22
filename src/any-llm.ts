@@ -59,13 +59,12 @@ import {
   completionResponseFormat,
   isStructuredOutputFormat,
   messagesOutputFormat,
-  normalizeOutputConfig,
   parseCompletion,
   parseMessage,
   parseResponse,
   responsesTextFormat,
 } from "./structured-output.js";
-import { isAsyncIterable, isObject } from "./utils.js";
+import { isAsyncIterable } from "./utils.js";
 import { completionParamsWithValidatedN, validateProviderMetadata } from "./provider-metadata.js";
 import type { BaseProvider } from "./providers/base.js";
 import { OpenAIProvider } from "./providers/openai.js";
@@ -364,15 +363,11 @@ export class AnyLLM {
     AsyncIterable<MessageStreamEvent> | MessageResponse | ParsedMessageResponse<JsonValue>
   > {
     this.validatePromptCacheKey(params.promptCacheKey);
-    const namesFormat =
-      params.outputFormat !== undefined &&
-      (isStructuredOutputFormat(params.outputFormat) ||
-        !isObject(params.outputFormat) ||
-        "format" in normalizeOutputConfig(params.outputFormat));
+    // A raw output_config dict streams as JSON text deltas. Only a typed format needs a
+    // finished message to parse into, which a stream never produces.
     if (
-      params.outputFormat !== undefined &&
+      isStructuredOutputFormat(params.outputFormat) &&
       params.stream === true &&
-      namesFormat &&
       !this.adapter.supportsMessagesStructuredOutputStreaming
     ) {
       throw new TypeError("stream is not supported with structured outputFormat.");

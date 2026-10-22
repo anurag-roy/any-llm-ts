@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { completeProviderMetadata } from "../src/provider-metadata.js";
+import { isString } from "../src/utils.js";
 
 import {
   AnyLLM,
@@ -356,6 +357,51 @@ describe("Messages compatibility API", () => {
     expect(provider.requests[0]).toMatchObject({
       stream: true,
       streamOptions: { include_usage: true },
+    });
+  });
+
+  it("streams a raw outputFormat dict through the Completions bridge", async () => {
+    class JsonStreamProvider extends MessagesProvider {
+      override completion(
+        params: CompletionParams,
+      ): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion> {
+        this.requests.push(params);
+        return Promise.resolve(
+          (async function* () {
+            yield chunk({ content: '{"city_name": ' });
+            yield chunk({ content: '"Paris"}' }, "stop");
+          })(),
+        );
+      }
+    }
+    const provider = new JsonStreamProvider();
+    const stream = await AnyLLM.fromProvider(provider).messages({
+      maxTokens: 128,
+      messages: [{ content: "Capital of France?", role: "user" }],
+      model: "model-a",
+      outputFormat: {
+        effort: "high",
+        format: { schema: { title: "City", type: "object" }, type: "json_schema" },
+      },
+      stream: true,
+    });
+    const events: MessageStreamEvent[] = [];
+    for await (const event of stream) events.push(event);
+    const fragments: string[] = [];
+    for (const event of events) {
+      if (event.type !== "content_block_delta" || event.delta.type !== "text_delta") continue;
+      const text = event.delta.text;
+      if (isString(text)) fragments.push(text);
+    }
+    expect(JSON.parse(fragments.join(""))).toEqual({ city_name: "Paris" });
+    expect(events.at(-1)?.type).toBe("message_stop");
+    expect(provider.requests[0]).toMatchObject({
+      reasoningEffort: "high",
+      responseFormat: {
+        json_schema: { name: "City", schema: { title: "City", type: "object" } },
+        type: "json_schema",
+      },
+      stream: true,
     });
   });
 

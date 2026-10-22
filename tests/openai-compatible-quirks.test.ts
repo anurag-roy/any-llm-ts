@@ -3,14 +3,17 @@ import OpenAI from "openai";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  AnyLLM,
   InvalidRequestError,
   UnsupportedParameterError,
   type ChatCompletion,
   type ChatCompletionChunk,
   type JsonObject,
+  type MessageStreamEvent,
   type ReasoningEffort,
 } from "../src/index.js";
 import { OpenAIProvider } from "../src/providers/openai.js";
+import { isString } from "../src/utils.js";
 
 interface OpenAITestOverrides {
   chat?: object;
@@ -139,6 +142,135 @@ describe("OpenAI-compatible provider quirks", () => {
     expect(request.messages[0]).not.toHaveProperty("extra_content");
     expect(request.messages[1].content).toContain("JSON object");
     expect(request.messages[1].content).toContain("Return an answer");
+    expect(request.messages[1].content).toContain(
+      JSON.stringify(
+        {
+          properties: { answer: { type: "boolean" } },
+          type: "object",
+        },
+        null,
+        2,
+      ),
+    );
+  });
+
+  it("serves a schema-less DeepSeek json_schema as JSON mode", async () => {
+    const create = vi.fn().mockResolvedValue(response("{}"));
+    const provider = new OpenAIProvider(
+      config("deepseek", { reasoningDirective: "deepseek" }),
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+    await provider.completion({
+      messages: [{ content: "Hello", role: "user" }],
+      model: "deepseek-v4-flash",
+      responseFormat: {
+        json_schema: { name: "structured_output" },
+        type: "json_schema",
+      },
+    });
+    const request = create.mock.calls[0]?.[0];
+    expect(request.response_format).toEqual({ type: "json_object" });
+    expect(request.messages[0].content).toContain("Please respond with a JSON object.\n");
+    expect(request.messages[0].content).not.toContain("schema");
+    expect(request.messages[0].content).toContain("Hello");
+  });
+
+  it("refuses a malformed DeepSeek json_schema responseFormat", async () => {
+    const provider = new OpenAIProvider(
+      config("deepseek", { reasoningDirective: "deepseek" }),
+      {},
+      fakeClient({ chat: { completions: { create: vi.fn() } } }),
+    );
+    const messages = [{ content: "Hello", role: "user" as const }];
+    await expect(
+      provider.completion({
+        messages,
+        model: "deepseek-v4-flash",
+        responseFormat: { type: "json_schema" },
+      }),
+    ).rejects.toThrow(/must include a 'json_schema' object/u);
+    await expect(
+      provider.completion({
+        messages,
+        model: "deepseek-v4-flash",
+        responseFormat: { json_schema: "structured_output", type: "json_schema" },
+      }),
+    ).rejects.toThrow(/must include a 'json_schema' object/u);
+    await expect(
+      provider.completion({
+        messages,
+        model: "deepseek-v4-flash",
+        responseFormat: {
+          json_schema: { name: "structured_output", schema: "object" },
+          type: "json_schema",
+        },
+      }),
+    ).rejects.toThrow(/must be a JSON schema object/u);
+    await expect(
+      provider.completion({
+        messages,
+        model: "deepseek-v4-flash",
+        responseFormat: { type: "json_schema" },
+      }),
+    ).rejects.toBeInstanceOf(InvalidRequestError);
+  });
+
+  it("streams Messages output_config as json_schema on OpenAI-compatible providers", async () => {
+    const schema = {
+      properties: { title: { type: "string" } },
+      required: ["title"],
+      type: "object",
+    };
+    async function* stream(): AsyncIterable<unknown> {
+      yield {
+        choices: [{ delta: { content: '{"title": ' }, finish_reason: null, index: 0 }],
+        created: 0,
+        id: "chunk-1",
+        model: "deepseek-ai/DeepSeek-V4-Flash",
+        object: "chat.completion.chunk",
+      };
+      yield {
+        choices: [{ delta: { content: '"Session check"}' }, finish_reason: "stop", index: 0 }],
+        created: 0,
+        id: "chunk-1",
+        model: "deepseek-ai/DeepSeek-V4-Flash",
+        object: "chat.completion.chunk",
+      };
+    }
+    const create = vi.fn().mockResolvedValue(stream());
+    const provider = new OpenAIProvider(
+      config("deepinfra"),
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+    const result = await AnyLLM.fromProvider(provider).messages({
+      maxTokens: 32_000,
+      messages: [{ content: "Are you there?", role: "user" }],
+      model: "deepseek-ai/DeepSeek-V4-Flash",
+      outputFormat: {
+        effort: "high",
+        format: { schema, type: "json_schema" },
+      },
+      stream: true,
+    });
+    const events: MessageStreamEvent[] = [];
+    for await (const event of result) events.push(event);
+    const fragments: string[] = [];
+    for (const event of events) {
+      if (event.type !== "content_block_delta" || event.delta.type !== "text_delta") continue;
+      const text = event.delta.text;
+      if (isString(text)) fragments.push(text);
+    }
+    expect(JSON.parse(fragments.join(""))).toEqual({ title: "Session check" });
+    expect(events.at(-1)?.type).toBe("message_stop");
+    expect(create.mock.calls[0]?.[0]).toMatchObject({
+      response_format: {
+        json_schema: { name: "structured_output", schema },
+        type: "json_schema",
+      },
+      stream: true,
+    });
   });
 
   it("renames reasoning_content to reasoning and drops extra_content for Groq and Cerebras", async () => {

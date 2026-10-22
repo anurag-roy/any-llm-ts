@@ -364,6 +364,73 @@ function deepSeekReasoningControls(
   }
 }
 
+interface DeepSeekJsonModeRequest {
+  messages?: OpenAIMessageRequest[];
+  response_format?: JsonValue;
+}
+
+function isJsonRecord(value: JsonValue | undefined): value is JsonObject {
+  return isObject(value) && !Array.isArray(value);
+}
+
+function applyDeepSeekJsonMode(request: DeepSeekJsonModeRequest): void {
+  if (request.response_format === undefined) return;
+  const responseFormat = parseJsonObject(request.response_format);
+  if (responseFormat.type !== "json_schema") return;
+  const jsonSchema = responseFormat.json_schema;
+  if (!isJsonRecord(jsonSchema)) {
+    throw new InvalidRequestError(
+      "response_format of type 'json_schema' must include a 'json_schema' object",
+      { provider: "deepseek" },
+    );
+  }
+  const definition = parseJsonObject(jsonSchema);
+  let schema: JsonObject | undefined;
+  if ("schema" in definition) {
+    if (!isJsonRecord(definition.schema)) {
+      throw new InvalidRequestError(
+        "response_format 'json_schema.schema' must be a JSON schema object",
+        { provider: "deepseek" },
+      );
+    }
+    schema = parseJsonObject(definition.schema);
+  }
+  const messages = request.messages;
+  if (messages === undefined) {
+    throw new TypeError("DeepSeek structured output requires messages.");
+  }
+  const last = messages.at(-1);
+  if (last?.role !== "user") {
+    throw new TypeError(
+      "DeepSeek structured output requires the last message to be a user message.",
+    );
+  }
+  const original = last.content;
+  const jsonPrompt =
+    schema === undefined
+      ? "Please respond with a JSON object."
+      : [
+          "Please respond with a JSON object that matches the following schema:",
+          "",
+          JSON.stringify(schema, null, 2),
+        ].join("\n");
+  const instruction = [
+    jsonPrompt,
+    "",
+    "Return the JSON object only, with no other text and no Markdown code fence.",
+    "",
+  ].join("\n");
+  const content = Array.isArray(original)
+    ? [{ text: instruction, type: "text" as const }, ...original]
+    : isString(original)
+      ? `${instruction}\n${original}\n`
+      : original;
+  const modified = messages.slice();
+  modified[modified.length - 1] = { ...last, content };
+  request.messages = modified;
+  request.response_format = { type: "json_object" };
+}
+
 function applyDeepSeekV4ChatRequest(request: DeepSeekChatRequest, params: CompletionParams): void {
   delete request.frequency_penalty;
   delete request.logit_bias;
@@ -1522,44 +1589,7 @@ export class OpenAIProvider extends BaseProvider {
     }
     if (quirks?.reasoningDirective === "deepseek") {
       applyDeepSeekV4ChatRequest(request, params);
-      if (request.response_format !== undefined) {
-        const responseFormat = parseJsonObject(request.response_format);
-        const jsonSchema = responseFormat.json_schema;
-        if (responseFormat.type === "json_schema" && isObject(jsonSchema)) {
-          const schema = parseJsonObject(jsonSchema).schema;
-          const messages = request.messages;
-          if (!Array.isArray(messages)) {
-            throw new TypeError("DeepSeek structured output requires messages.");
-          }
-          const last = parseOptionalJsonObject(messages.at(-1));
-          if (last?.role !== "user") {
-            throw new TypeError(
-              "DeepSeek structured output requires the last message to be a user message.",
-            );
-          }
-          const original = last.content;
-          const instruction = [
-            "Please respond with a JSON object that matches the following schema:",
-            "",
-            JSON.stringify(schema, null, 2),
-            "",
-            "Return the JSON object only, with no other text and no Markdown code fence.",
-            "",
-          ].join("\n");
-          const modified = messages.slice();
-          const content = Array.isArray(original)
-            ? [{ text: instruction, type: "text" as const }, ...original]
-            : isString(original)
-              ? `${instruction}\n${original}\n`
-              : original;
-          modified[modified.length - 1] = {
-            ...last,
-            content,
-          };
-          request.messages = modified;
-          request.response_format = { type: "json_object" };
-        }
-      }
+      applyDeepSeekJsonMode(request);
     } else if (
       quirks?.reasoningDirective === "openrouter" ||
       quirks?.reasoningDirective === "requesty"

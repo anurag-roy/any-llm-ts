@@ -103,6 +103,11 @@ export class MetaProvider extends OpenAIProvider {
     ] as const) {
       if (value !== undefined) return Promise.reject(new UnsupportedParameterError(name, "meta"));
     }
+    if (params.outputFormat !== undefined && params.stream === true) {
+      // The native path below makes non-streaming calls only when outputFormat is set, so
+      // refuse rather than silently dropping `stream`.
+      return Promise.reject(new TypeError("stream is not supported for outputFormat"));
+    }
     return this.execute(async () => {
       // SAFETY: The provider contract establishes the asserted representation at this boundary.
       const response = await this.anthropic.messages.create(nativeMessagesRequest(params) as never);

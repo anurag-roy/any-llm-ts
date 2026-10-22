@@ -54,7 +54,7 @@ import { mapAsyncIterableErrors } from "../utils.js";
 
 export abstract class BaseProvider {
   abstract readonly metadata: ProviderMetadata;
-  /** Whether native Messages structured output can be streamed. */
+  /** Whether a Messages `outputFormat` type can be streamed by this provider. */
   readonly supportsMessagesStructuredOutputStreaming: boolean = false;
   /** Whether the Messages bridge should pass `cacheControl` breakpoints in `extraContent`. */
   protected readonly readsCacheControlSideChannel: boolean = false;

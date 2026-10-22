@@ -139,6 +139,13 @@ describe("Meta provider", () => {
     await expect(provider.messages({ ...common, betas: ["beta"] })).rejects.toBeInstanceOf(
       UnsupportedOperationError,
     );
+    await expect(
+      provider.messages({
+        ...common,
+        outputFormat: { schema: { type: "object" }, type: "json_schema" },
+        stream: true,
+      }),
+    ).rejects.toThrow(/stream is not supported for outputFormat/u);
   });
 
   it("keeps chat completions on Meta's OpenAI-compatible route", async () => {

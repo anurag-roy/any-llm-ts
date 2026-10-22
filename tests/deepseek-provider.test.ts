@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { DeepseekProvider, MissingApiKeyError, UnsupportedParameterError } from "../src/index.js";
 import type { ChatCompletionChunk, MessageStreamEvent } from "../src/index.js";
+import { isString } from "../src/utils.js";
 
 function clients(messageCreate: ReturnType<typeof vi.fn>, chatCreate: ReturnType<typeof vi.fn>) {
   return {
@@ -89,6 +90,61 @@ describe("DeepSeek provider", () => {
     });
     expect(messageCreate).not.toHaveBeenCalled();
     expect(chatCreate).toHaveBeenCalled();
+    expect(chatCreate.mock.calls[0]?.[0]).toMatchObject({
+      response_format: { type: "json_object" },
+    });
+    const bridgedMessages = chatCreate.mock.calls[0]?.[0].messages;
+    expect(bridgedMessages?.at(-1)?.content).toContain(JSON.stringify({ type: "object" }, null, 2));
+  });
+
+  it("streams a schema outputFormat through Completions as JSON mode", async () => {
+    async function* stream(): AsyncIterable<unknown> {
+      yield {
+        choices: [{ delta: { content: '{"ok":' }, finish_reason: null, index: 0 }],
+        created: 1,
+        id: "chat-1",
+        model: "deepseek-chat",
+        object: "chat.completion.chunk",
+      };
+      yield {
+        choices: [{ delta: { content: "true}" }, finish_reason: "stop", index: 0 }],
+        created: 1,
+        id: "chat-1",
+        model: "deepseek-chat",
+        object: "chat.completion.chunk",
+      };
+    }
+    const chatCreate = vi.fn().mockResolvedValue(stream());
+    const messageCreate = vi.fn();
+    const provider = new DeepseekProvider({ apiKey: "secret" }, clients(messageCreate, chatCreate));
+    const result = await provider.messages({
+      maxTokens: 16,
+      messages: [{ content: "Name this session", role: "user" }],
+      model: "deepseek-chat",
+      outputFormat: {
+        effort: "high",
+        format: {
+          schema: { properties: { title: { type: "string" } }, type: "object" },
+          type: "json_schema",
+        },
+      },
+      stream: true,
+    });
+    const events: MessageStreamEvent[] = [];
+    // SAFETY: The streaming request makes this Messages result an async iterable in the test.
+    for await (const event of result as AsyncIterable<MessageStreamEvent>) events.push(event);
+    expect(messageCreate).not.toHaveBeenCalled();
+    expect(chatCreate.mock.calls[0]?.[0]).toMatchObject({
+      response_format: { type: "json_object" },
+      stream: true,
+    });
+    const fragments: string[] = [];
+    for (const event of events) {
+      if (event.type !== "content_block_delta" || event.delta.type !== "text_delta") continue;
+      const text = event.delta.text;
+      if (isString(text)) fragments.push(text);
+    }
+    expect(JSON.parse(fragments.join(""))).toEqual({ ok: true });
   });
 
   it("replays streamed reasoning onto extra_content", async () => {

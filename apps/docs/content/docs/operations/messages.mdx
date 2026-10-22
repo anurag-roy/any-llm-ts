@@ -87,6 +87,8 @@ Compatibility streams emit the standard message-start, content-block, message-de
 message-stop lifecycle. Native-only beta and context-management options reject on adapters that
 cannot preserve their semantics.
 
-Anthropic and Otari can stream schema-constrained Messages events together with `outputFormat`.
-Other providers reject that combination because structured Messages parsing needs a complete
-response.
+A typed `outputFormat` (one with `parse`) still cannot stream except on Anthropic and Otari,
+because parsing needs a finished message. A raw `output_config` dict streams as JSON text through
+the Completions bridge, with its schema sent as `responseFormat`. Providers that cannot stream a
+`responseFormat` still refuse at the completion layer. Meta's native Messages path refuses any
+`outputFormat` combined with `stream`.
