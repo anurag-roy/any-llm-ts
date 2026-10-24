@@ -197,6 +197,7 @@ await llm.responses({ model, input });
 await llm.embedding({ model, input });
 await llm.listModels();
 await llm.imageGeneration({ model, prompt });
+await llm.imageEdit({ model, image, prompt });
 await llm.transcription({ model, file });
 await llm.speech({ model, input, voice });
 await llm.moderation({ input });
@@ -224,7 +225,7 @@ Provider SDK failures are converted into a common hierarchy:
 
 - `AuthenticationError`
 - `InvalidRequestError`
-- `RateLimitError`, including `retryAfter` when supplied
+- `RateLimitError`, including `retryAfter` from `Retry-After` or `retry-after-ms`
 - `ModelNotFoundError`
 - `ContextLengthExceededError`
 - `ContentFilterError`

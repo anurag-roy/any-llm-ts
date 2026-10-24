@@ -19,6 +19,7 @@ import type {
   FileMetadata,
   FilePage,
   FileResourceParams,
+  ImageEditParams,
   ImageGenerationParams,
   ImageGenerationResponse,
   ListBatchesParams,
@@ -184,6 +185,7 @@ export async function embedding(params: DirectEmbeddingParams): Promise<Embeddin
 }
 
 export interface DirectImageGenerationParams extends ImageGenerationParams, DirectProviderOptions {}
+export interface DirectImageEditParams extends ImageEditParams, DirectProviderOptions {}
 
 export async function imageGeneration(
   params: DirectImageGenerationParams,
@@ -191,6 +193,15 @@ export async function imageGeneration(
   const { apiBase, apiKey, clientOptions, provider, ...request } = params;
   const target = resolveTarget(request.model, provider);
   return client(target.provider, directOptions(apiBase, apiKey, clientOptions)).imageGeneration({
+    ...request,
+    model: target.model,
+  });
+}
+
+export async function imageEdit(params: DirectImageEditParams): Promise<ImageGenerationResponse> {
+  const { apiBase, apiKey, clientOptions, provider, ...request } = params;
+  const target = resolveTarget(request.model, provider);
+  return client(target.provider, directOptions(apiBase, apiKey, clientOptions)).imageEdit({
     ...request,
     model: target.model,
   });

@@ -48,9 +48,12 @@ job lifecycle while returning the same normalized batch types.
 
 ## Reranking
 
-Reranking scores candidate documents against a query. Cohere, Otari, Together, and Voyage
-currently advertise the operation. Together serves no rerank model on its serverless tier, so a
+Reranking scores candidate documents against a query. Cohere, Fireworks, Otari, Together, and
+Voyage currently advertise the operation. Fireworks posts to `/rerank` on its inference API;
+`returnDocuments` defaults to `false` because `RerankResponse` carries no document text, and
+`maxTokensPerDoc` is rejected. Together serves no rerank model on its serverless tier, so a
 dedicated endpoint is required. Voyage maps `topN` to `topK` and does not return a response id.
+Fireworks also omits a response id.
 
 ```ts
 import { rerank } from "any-llm-ts";
@@ -70,8 +73,8 @@ console.log(result.model, result.results[0]?.index, result.results[0]?.relevance
 ```
 
 `result.model` is the provider-reported serving model when one is available, otherwise the
-requested model. Together copies `model` from its rerank payload; Cohere and Voyage fall back to
-the requested model.
+requested model. Together and Fireworks copy `model` from the rerank payload; Cohere and Voyage
+fall back to the requested model.
 
 Documents may be strings or provider-compatible records. Use `providerOptions` for reranker fields
 outside the common contract.

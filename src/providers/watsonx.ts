@@ -55,6 +55,7 @@ const watsonxCapabilities: ProviderCapabilities = {
   completion: true,
   embedding: false,
   files: false,
+  imageEdit: false,
   imageGeneration: false,
   listModels: true,
   messages: true,

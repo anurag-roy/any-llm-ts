@@ -13,6 +13,7 @@ import {
   BatchNotCompleteError,
   InvalidRequestError,
   MissingApiKeyError,
+  UnsupportedOperationError,
   UnsupportedParameterError,
 } from "../errors.js";
 import type {
@@ -37,10 +38,14 @@ import type {
   FilePage,
   FileResourceParams,
   FinishReason,
+  ImageEditParams,
   ImageGenerationParams,
   ImageGenerationResponse,
   ListBatchesParams,
   ListFilesParams,
+  MessageResponse,
+  MessageStreamEvent,
+  MessagesParams,
   Model,
   ModerationParams,
   ModerationResponse,
@@ -59,6 +64,14 @@ import type {
 } from "../types.js";
 import { completeProviderMetadata, completionParamsWithValidatedN } from "../provider-metadata.js";
 import { resolveTranscriptionFile } from "../audio.js";
+import { resolveImages } from "../image.js";
+import { normalizeMessagesContainer } from "../messages-compat.js";
+import {
+  convertResponsesStream,
+  messagesNeedsResponses,
+  messagesParamsToResponsesParams,
+  responseToMessageResponse,
+} from "./openai-messages-responses.js";
 import {
   compactObject,
   completionRequestOptions,
@@ -89,6 +102,7 @@ export const openAICapabilities: ProviderCapabilities = {
   completion: true,
   embedding: true,
   files: false,
+  imageEdit: true,
   imageGeneration: true,
   listModels: true,
   messages: true,
@@ -106,6 +120,7 @@ const baseOpenAICompatibleCapabilities: ProviderCapabilities = {
   audioSpeech: false,
   audioTranscription: false,
   batch: false,
+  imageEdit: false,
   imageGeneration: false,
   responses: false,
 };
@@ -120,6 +135,7 @@ interface OpenAIProviderConfig {
   name: string;
   fileOperations?: FileOperation[];
   messagesNative?: boolean;
+  messagesToolsThinkingViaResponses?: boolean;
   promptCacheKeySupport?: ProviderMetadata["promptCacheKeySupport"];
   quirks?: OpenAIProviderQuirks;
   requiresApiKey?: boolean;
@@ -348,6 +364,73 @@ function deepSeekReasoningControls(
   }
 }
 
+interface DeepSeekJsonModeRequest {
+  messages?: OpenAIMessageRequest[];
+  response_format?: JsonValue;
+}
+
+function isJsonRecord(value: JsonValue | undefined): value is JsonObject {
+  return isObject(value) && !Array.isArray(value);
+}
+
+function applyDeepSeekJsonMode(request: DeepSeekJsonModeRequest): void {
+  if (request.response_format === undefined) return;
+  const responseFormat = parseJsonObject(request.response_format);
+  if (responseFormat.type !== "json_schema") return;
+  const jsonSchema = responseFormat.json_schema;
+  if (!isJsonRecord(jsonSchema)) {
+    throw new InvalidRequestError(
+      "response_format of type 'json_schema' must include a 'json_schema' object",
+      { provider: "deepseek" },
+    );
+  }
+  const definition = parseJsonObject(jsonSchema);
+  let schema: JsonObject | undefined;
+  if ("schema" in definition) {
+    if (!isJsonRecord(definition.schema)) {
+      throw new InvalidRequestError(
+        "response_format 'json_schema.schema' must be a JSON schema object",
+        { provider: "deepseek" },
+      );
+    }
+    schema = parseJsonObject(definition.schema);
+  }
+  const messages = request.messages;
+  if (messages === undefined) {
+    throw new TypeError("DeepSeek structured output requires messages.");
+  }
+  const last = messages.at(-1);
+  if (last?.role !== "user") {
+    throw new TypeError(
+      "DeepSeek structured output requires the last message to be a user message.",
+    );
+  }
+  const original = last.content;
+  const jsonPrompt =
+    schema === undefined
+      ? "Please respond with a JSON object."
+      : [
+          "Please respond with a JSON object that matches the following schema:",
+          "",
+          JSON.stringify(schema, null, 2),
+        ].join("\n");
+  const instruction = [
+    jsonPrompt,
+    "",
+    "Return the JSON object only, with no other text and no Markdown code fence.",
+    "",
+  ].join("\n");
+  const content = Array.isArray(original)
+    ? [{ text: instruction, type: "text" as const }, ...original]
+    : isString(original)
+      ? `${instruction}\n${original}\n`
+      : original;
+  const modified = messages.slice();
+  modified[modified.length - 1] = { ...last, content };
+  request.messages = modified;
+  request.response_format = { type: "json_object" };
+}
+
 function applyDeepSeekV4ChatRequest(request: DeepSeekChatRequest, params: CompletionParams): void {
   delete request.frequency_penalty;
   delete request.logit_bias;
@@ -467,9 +550,16 @@ function normalizeUsage(value: JsonValue | undefined): CompletionUsage | undefin
   if (isObject(promptTokensDetails)) {
     normalized.promptTokensDetails = parseJsonObject(promptTokensDetails);
   }
-  const cachedTokens = usage.prompt_cache_hit_tokens;
-  if (isNumber(cachedTokens) && normalized.promptTokensDetails === undefined) {
-    normalized.promptTokensDetails = { cachedTokens };
+  const detailsCached =
+    normalized.promptTokensDetails?.cachedTokens ?? normalized.promptTokensDetails?.cached_tokens;
+  const cachedTokens =
+    detailsCached ?? usage.cached_tokens ?? usage.cachedTokens ?? usage.prompt_cache_hit_tokens;
+  if (isNumber(cachedTokens)) {
+    if (normalized.promptTokensDetails === undefined) {
+      normalized.promptTokensDetails = { cachedTokens };
+    } else {
+      normalized.promptTokensDetails.cachedTokens = cachedTokens;
+    }
   }
   return normalized;
 }
@@ -481,16 +571,7 @@ function normalizeFinishReason(
   if (isString(value) && mapping[value] !== undefined) {
     return mapping[value];
   }
-  if (
-    value === "content_filter" ||
-    value === "function_call" ||
-    value === "length" ||
-    value === "stop" ||
-    value === "tool_calls"
-  ) {
-    return value;
-  }
-  return null;
+  return isString(value) ? value : null;
 }
 
 const reasoningTags = ["reasoning_content", "thinking", "think", "chain_of_thought"] as const;
@@ -1156,6 +1237,41 @@ export class OpenAIProvider extends BaseProvider {
     });
   }
 
+  override imageEdit(params: ImageEditParams): Promise<ImageGenerationResponse> {
+    return this.execute(async () => {
+      const requestOptions = this.mediaRequestOptions(params.providerOptions);
+      const image = await resolveImages(params.image, this.metadata.name);
+      // SAFETY: The provider contract establishes the asserted representation at this boundary.
+      const body = {
+        image,
+        model: params.model,
+        n: params.n,
+        prompt: params.prompt,
+        quality: params.quality,
+        response_format: params.responseFormat,
+        size: params.size,
+        user: params.user,
+        ...withoutExtraQuery(params.providerOptions),
+      } as never;
+      const response =
+        requestOptions === undefined
+          ? await this.client.images.edit(body)
+          : await this.client.images.edit(body, requestOptions);
+      return {
+        created: response.created,
+        data: (response.data ?? []).map((edited) => ({
+          ...includeWhen(!(edited.b64_json === undefined), { b64Json: edited.b64_json }),
+          ...includeWhen(!(edited.revised_prompt === undefined), {
+            revisedPrompt: edited.revised_prompt,
+          }),
+          ...includeWhen(!(edited.url === undefined), { url: edited.url }),
+        })),
+        provider: this.metadata.name,
+        raw: response,
+      };
+    });
+  }
+
   override transcription(params: TranscriptionParams): Promise<Transcription> {
     return this.execute(async () => {
       const requestOptions = this.mediaRequestOptions(params.providerOptions);
@@ -1359,6 +1475,43 @@ export class OpenAIProvider extends BaseProvider {
     );
   }
 
+  override messages(
+    params: MessagesParams,
+    options?: CompletionOperationOptions,
+  ): Promise<AsyncIterable<MessageStreamEvent> | MessageResponse> {
+    if (
+      !(this.config.messagesToolsThinkingViaResponses === true && messagesNeedsResponses(params))
+    ) {
+      return super.messages(params, options);
+    }
+    if (params.container !== undefined) {
+      normalizeMessagesContainer(params.container);
+      return Promise.reject(
+        new UnsupportedOperationError("Messages container continuity", this.metadata.name),
+      );
+    }
+    if (params.contextManagement !== undefined || (params.betas?.length ?? 0) > 0) {
+      return Promise.reject(
+        new UnsupportedOperationError(
+          "Messages context management and beta features",
+          this.metadata.name,
+        ),
+      );
+    }
+    if (params.stopSequences !== undefined) {
+      return Promise.reject(
+        new UnsupportedParameterError(
+          "stopSequences",
+          this.metadata.name,
+          "Messages requests with tools and enabled thinking are served by the Responses API, which has no stop parameter.",
+        ),
+      );
+    }
+    return this.responses(messagesParamsToResponsesParams(params)).then((result) =>
+      isAsyncIterable(result) ? convertResponsesStream(result) : responseToMessageResponse(result),
+    );
+  }
+
   protected completionRequest(params: CompletionParams) {
     const maxCompletionTokens = params.maxCompletionTokens ?? params.maxTokens;
     const reasoningEffort = params.reasoningEffort === "auto" ? undefined : params.reasoningEffort;
@@ -1436,39 +1589,7 @@ export class OpenAIProvider extends BaseProvider {
     }
     if (quirks?.reasoningDirective === "deepseek") {
       applyDeepSeekV4ChatRequest(request, params);
-      if (request.response_format !== undefined) {
-        const responseFormat = parseJsonObject(request.response_format);
-        const jsonSchema = responseFormat.json_schema;
-        if (responseFormat.type === "json_schema" && isObject(jsonSchema)) {
-          const schema = parseJsonObject(jsonSchema).schema;
-          const messages = request.messages;
-          if (!Array.isArray(messages)) {
-            throw new TypeError("DeepSeek structured output requires messages.");
-          }
-          const last = parseOptionalJsonObject(messages.at(-1));
-          if (last?.role !== "user") {
-            throw new TypeError(
-              "DeepSeek structured output requires the last message to be a user message.",
-            );
-          }
-          const original = last.content;
-          const instruction = [
-            "Please respond with a JSON object that matches the following schema:",
-            "",
-            JSON.stringify(schema, null, 2),
-            "",
-            "Return the JSON object only, with no other text and no Markdown code fence.",
-            "",
-          ].join("\n");
-          const modified = messages.slice();
-          modified[modified.length - 1] = {
-            ...last,
-            content: isString(original) ? `${instruction}${original}` : original,
-          };
-          request.messages = modified;
-          request.response_format = { type: "json_object" };
-        }
-      }
+      applyDeepSeekJsonMode(request);
     } else if (
       quirks?.reasoningDirective === "openrouter" ||
       quirks?.reasoningDirective === "requesty"
@@ -1542,6 +1663,13 @@ export class OpenAIProvider extends BaseProvider {
       normalized.systemFingerprint = systemFingerprint;
     }
     if (usage !== undefined) normalized.usage = usage;
+    if (isObject(response.metadata) && !Array.isArray(response.metadata)) {
+      normalized.metadata = Object.fromEntries(
+        Object.entries(response.metadata).filter((entry): entry is [string, string] =>
+          isString(entry[1]),
+        ),
+      );
+    }
     if (this.config.quirks?.xmlReasoning === true) {
       for (const choice of normalized.choices) {
         if (!isString(choice.message.content)) continue;
@@ -1715,6 +1843,7 @@ export class AzureOpenAIProvider extends OpenAIProvider {
         capabilities: {
           ...openAICapabilities,
           batch: false,
+          imageEdit: false,
           moderation: false,
           pdfInput: false,
           reasoning: false,
@@ -1723,6 +1852,7 @@ export class AzureOpenAIProvider extends OpenAIProvider {
         envApiBase: "AZURE_OPENAI_ENDPOINT",
         envApiKey: "AZURE_OPENAI_API_KEY",
         fileOperations: openAIFileOperations,
+        messagesToolsThinkingViaResponses: true,
         name: "azureopenai",
       },
       options,
@@ -1743,6 +1873,7 @@ export function createOpenAIProvider(options: ProviderOptions = {}): OpenAIProvi
       envApiBase: "OPENAI_BASE_URL",
       envApiKey: "OPENAI_API_KEY",
       fileOperations: openAIFileOperations,
+      messagesToolsThinkingViaResponses: true,
       name: "openai",
       capabilities: openAICapabilities,
     },

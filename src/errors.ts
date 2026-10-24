@@ -138,8 +138,13 @@ export class BatchNotCompleteError extends AnyLLMError {
   }
 }
 
+type RetryAfterHeaderName = "retry-after" | "Retry-After" | "retry-after-ms" | "Retry-After-Ms";
+
 interface ErrorRecord {
-  "retry-after"?: string;
+  "Retry-After"?: string | number;
+  "Retry-After-Ms"?: string | number;
+  "retry-after"?: string | number;
+  "retry-after-ms"?: string | number;
   code?: string;
   error?: ErrorRecord;
   headers?: Headers | ErrorRecord;
@@ -164,12 +169,53 @@ function numberValue(value: number | undefined): number | undefined {
   return isNumber(value) && Number.isFinite(value) ? value : undefined;
 }
 
-function retryAfterHeader(headers: ErrorRecord["headers"]): string | undefined {
+function usableHeaderValue(value: string | number | undefined): string | undefined {
+  if (isString(value)) return value;
+  if (isNumber(value) && Number.isInteger(value)) return String(value);
+  return undefined;
+}
+
+function readHeader(
+  headers: ErrorRecord["headers"],
+  names: readonly RetryAfterHeaderName[],
+): string | undefined {
   if (headers instanceof Headers) {
-    return headers.get("retry-after") ?? undefined;
+    for (const name of names) {
+      const value = headers.get(name);
+      if (value !== null) return value;
+    }
+    return undefined;
   }
   const record = asRecord(headers);
-  return stringValue(record?.["retry-after"]);
+  if (record === undefined) return undefined;
+  for (const name of names) {
+    const value = usableHeaderValue(record[name]);
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
+
+function headerValue(
+  record: ErrorRecord | undefined,
+  names: readonly RetryAfterHeaderName[],
+): string | undefined {
+  if (record === undefined) return undefined;
+  return readHeader(record.headers, names) ?? readHeader(asRecord(record.response)?.headers, names);
+}
+
+function millisecondsToSeconds(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return undefined;
+  const milliseconds = Number(trimmed);
+  if (!Number.isFinite(milliseconds) || milliseconds < 0) return undefined;
+  return String(milliseconds / 1000);
+}
+
+function retryAfterHint(record: ErrorRecord | undefined): string | undefined {
+  const retryAfter = headerValue(record, ["retry-after", "Retry-After"]);
+  if (retryAfter !== undefined && retryAfter.length > 0) return retryAfter;
+  const retryAfterMs = headerValue(record, ["retry-after-ms", "Retry-After-Ms"]);
+  return retryAfterMs === undefined ? undefined : millisecondsToSeconds(retryAfterMs);
 }
 
 export function normalizeProviderError(
@@ -215,7 +261,7 @@ export function normalizeProviderError(
       : new ModelNotFoundError(message, options);
   }
   if (statusCode === 429) {
-    const retryAfter = retryAfterHeader(record?.headers);
+    const retryAfter = retryAfterHint(record);
     return new RateLimitError(
       message,
       retryAfter === undefined ? options : { ...options, retryAfter },

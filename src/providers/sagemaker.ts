@@ -50,6 +50,7 @@ const sagemakerCapabilities: ProviderCapabilities = {
   completion: true,
   embedding: true,
   files: false,
+  imageEdit: false,
   imageGeneration: false,
   listModels: false,
   messages: true,

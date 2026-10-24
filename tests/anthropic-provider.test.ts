@@ -1050,7 +1050,7 @@ describe("Anthropic provider", () => {
         type: "document",
       },
     ]);
-    expect(request.tool_choice).toBeUndefined();
+    expect(request.tool_choice).toEqual({ type: "none" });
     expect(request.thinking).toEqual({ type: "disabled" });
   });
 
@@ -1594,5 +1594,53 @@ describe("Anthropic provider", () => {
       }),
     ).rejects.toBeInstanceOf(UnsupportedParameterError);
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it("strips bridge extra_content from native Messages blocks", async () => {
+    const create = vi.fn().mockResolvedValue({
+      content: [{ text: "Hi!", type: "text" }],
+      id: "msg_1",
+      model: "claude-sonnet-4-5",
+      role: "assistant",
+      stop_reason: "end_turn",
+      type: "message",
+      usage: { input_tokens: 5, output_tokens: 2 },
+    });
+    const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
+    const conversation = [
+      { content: "Weather?", role: "user" as const },
+      {
+        content: [
+          {
+            extraContent: { google: { thoughtSignature: "c2ln" } },
+            text: "Checking.",
+            type: "text" as const,
+          },
+          {
+            extraContent: { google: { thoughtSignature: "c2ln" } },
+            id: "call_a",
+            input: {},
+            name: "get_weather",
+            type: "tool_use" as const,
+          },
+        ],
+        role: "assistant" as const,
+      },
+      {
+        content: [{ content: "Sunny", toolUseId: "call_a", type: "tool_result" as const }],
+        role: "user" as const,
+      },
+    ];
+    await provider.messages({
+      maxTokens: 64,
+      messages: conversation,
+      model: "claude-sonnet-4-5",
+    });
+    const sent = parseJsonObject(create.mock.calls[0]?.[0]);
+    expect(sent.messages[1].content).toEqual([
+      { cache_control: undefined, text: "Checking.", type: "text" },
+      { id: "call_a", input: {}, name: "get_weather", type: "tool_use" },
+    ]);
+    expect(conversation[1]?.content[0]).toHaveProperty("extraContent");
   });
 });

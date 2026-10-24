@@ -53,6 +53,7 @@ const displayNames = {
   gemini: "Google Gemini",
   github: "GitHub Models",
   huggingface: "Hugging Face",
+  liner: "Liner",
   lmstudio: "LM Studio",
   openai: "OpenAI",
   openrouter: "OpenRouter",
@@ -69,6 +70,7 @@ const capabilityKeys = [
   "completion",
   "embedding",
   "files",
+  "imageEdit",
   "imageGeneration",
   "listModels",
   "messages",
@@ -184,7 +186,14 @@ export function providerTier(name: string): ProviderTier {
 
 export function providerPromptCacheKeySupport(name: string): PromptCacheKeySupport {
   const normalized = name.trim().toLowerCase();
-  if (normalized === "openai" || normalized === "meta") return "supported";
+  if (
+    normalized === "openai" ||
+    normalized === "meta" ||
+    normalized === "mistral" ||
+    normalized === "together"
+  ) {
+    return "supported";
+  }
   if (normalized === "otari") return "passthrough";
   return "unsupported";
 }
@@ -206,8 +215,8 @@ type IncompleteProviderMetadata = Omit<
   GeneratedProviderMetadataKeys | "capabilities"
 > &
   Partial<Pick<ProviderMetadata, GeneratedProviderMetadataKeys>> & {
-    capabilities: Omit<ProviderCapabilities, "files"> &
-      Partial<Pick<ProviderCapabilities, "files">>;
+    capabilities: Omit<ProviderCapabilities, "files" | "imageEdit"> &
+      Partial<Pick<ProviderCapabilities, "files" | "imageEdit">>;
   };
 
 const fileOperationsCatalog = ["delete", "download", "list", "retrieve", "upload"] as const;
@@ -235,6 +244,7 @@ export function completeProviderMetadata(
     capabilities: {
       ...metadata.capabilities,
       files: fileOperations.length > 0,
+      imageEdit: metadata.capabilities.imageEdit === true,
     },
     configuration: metadata.configuration ?? providerConfiguration(name, metadata.apiBase),
     displayName: metadata.displayName ?? providerDisplayName(name),

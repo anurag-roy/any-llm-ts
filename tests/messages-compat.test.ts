@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { completeProviderMetadata } from "../src/provider-metadata.js";
+import { isString } from "../src/utils.js";
 
 import {
   AnyLLM,
@@ -17,6 +18,7 @@ import {
   completionToMessageResponse,
   messagesToCompletionParams,
   normalizeMessagesContainer,
+  prepareBlocksForNativeMessages,
 } from "../src/messages-compat.js";
 import type {
   ChatCompletion,
@@ -355,6 +357,51 @@ describe("Messages compatibility API", () => {
     expect(provider.requests[0]).toMatchObject({
       stream: true,
       streamOptions: { include_usage: true },
+    });
+  });
+
+  it("streams a raw outputFormat dict through the Completions bridge", async () => {
+    class JsonStreamProvider extends MessagesProvider {
+      override completion(
+        params: CompletionParams,
+      ): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion> {
+        this.requests.push(params);
+        return Promise.resolve(
+          (async function* () {
+            yield chunk({ content: '{"city_name": ' });
+            yield chunk({ content: '"Paris"}' }, "stop");
+          })(),
+        );
+      }
+    }
+    const provider = new JsonStreamProvider();
+    const stream = await AnyLLM.fromProvider(provider).messages({
+      maxTokens: 128,
+      messages: [{ content: "Capital of France?", role: "user" }],
+      model: "model-a",
+      outputFormat: {
+        effort: "high",
+        format: { schema: { title: "City", type: "object" }, type: "json_schema" },
+      },
+      stream: true,
+    });
+    const events: MessageStreamEvent[] = [];
+    for await (const event of stream) events.push(event);
+    const fragments: string[] = [];
+    for (const event of events) {
+      if (event.type !== "content_block_delta" || event.delta.type !== "text_delta") continue;
+      const text = event.delta.text;
+      if (isString(text)) fragments.push(text);
+    }
+    expect(JSON.parse(fragments.join(""))).toEqual({ city_name: "Paris" });
+    expect(events.at(-1)?.type).toBe("message_stop");
+    expect(provider.requests[0]).toMatchObject({
+      reasoningEffort: "high",
+      responseFormat: {
+        json_schema: { name: "City", schema: { title: "City", type: "object" } },
+        type: "json_schema",
+      },
+      stream: true,
     });
   });
 
@@ -1010,14 +1057,65 @@ describe("Messages compatibility API", () => {
       json_schema: { name: "City", schema: { title: "City", type: "object" } },
       type: "json_schema",
     });
+    const effortOnly = messagesToCompletionParams({
+      maxTokens: 10,
+      messages: [{ content: "Hello", role: "user" }],
+      model: "model-a",
+      outputFormat: { effort: "high" },
+    });
+    expect(effortOnly.responseFormat).toBeUndefined();
+    expect(effortOnly.reasoningEffort).toBe("high");
+    const effortAndSchema = messagesToCompletionParams({
+      maxTokens: 10,
+      messages: [{ content: "Hello", role: "user" }],
+      model: "model-a",
+      outputFormat: {
+        effort: "max",
+        format: { schema: { type: "object" }, type: "json_schema" },
+      },
+    });
+    expect(effortAndSchema.responseFormat).toEqual({
+      json_schema: { name: "structured_output", schema: { type: "object" } },
+      type: "json_schema",
+    });
+    expect(effortAndSchema.reasoningEffort).toBe("max");
     expect(
       messagesToCompletionParams({
-        maxTokens: 10,
+        maxTokens: 4096,
         messages: [{ content: "Hello", role: "user" }],
         model: "model-a",
-        outputFormat: { effort: "high" },
-      }).responseFormat,
-    ).toBeUndefined();
+        outputFormat: { effort: "low" },
+        thinking: { budgetTokens: 1024, type: "enabled" },
+      }).reasoningEffort,
+    ).toBe("low");
+    expect(
+      messagesToCompletionParams({
+        maxTokens: 4096,
+        messages: [{ content: "Hello", role: "user" }],
+        model: "model-a",
+        outputFormat: { effort: "low" },
+        thinking: { type: "adaptive" },
+      }).reasoningEffort,
+    ).toBe("low");
+    expect(
+      messagesToCompletionParams({
+        maxTokens: 4096,
+        messages: [{ content: "Hello", role: "user" }],
+        model: "model-a",
+        outputFormat: { effort: "low" },
+        thinking: { type: "disabled" },
+      }).reasoningEffort,
+    ).toBe("none");
+    for (const effort of ["extreme", "none", "minimal", "auto"]) {
+      expect(() =>
+        messagesToCompletionParams({
+          maxTokens: 10,
+          messages: [{ content: "Hello", role: "user" }],
+          model: "model-a",
+          outputFormat: { effort },
+        }),
+      ).toThrow(InvalidRequestError);
+    }
     expect(() =>
       messagesToCompletionParams({
         maxTokens: 10,
@@ -1156,5 +1254,219 @@ describe("Messages compatibility API", () => {
         model: "messages-fake:model-b",
       }),
     ).resolves.toMatchObject({ model: "model-b", type: "message" });
+  });
+
+  it("forwards provider-native tools instead of unnamed functions", () => {
+    expect(
+      messagesToCompletionParams({
+        maxTokens: 32,
+        messages: [{ content: "search", role: "user" }],
+        model: "gemini-test",
+        tools: [{ google_search: {} }, { inputSchema: { type: "object" }, name: "get_weather" }],
+      }).tools,
+    ).toEqual([
+      { google_search: {} },
+      {
+        function: { name: "get_weather", parameters: { type: "object" } },
+        type: "function",
+      },
+    ]);
+  });
+
+  it("carries Gemini signatures and code execution through the Messages bridge", () => {
+    const signature = { google: { thoughtSignature: "c2ln" } };
+    const completion: ChatCompletion = {
+      choices: [
+        {
+          finishReason: "tool_calls",
+          index: 0,
+          message: {
+            content: "Checking.",
+            extraContent: {
+              google: {
+                code_execution: [
+                  { code: "print(1)", id: "exec_1", language: "PYTHON", type: "executable_code" },
+                  {
+                    id: "exec_1",
+                    outcome: "OUTCOME_OK",
+                    output: "1\n",
+                    type: "code_execution_result",
+                  },
+                ],
+                thoughtSignature: "c2ln",
+              },
+            },
+            role: "assistant",
+            toolCalls: [
+              {
+                extraContent: signature,
+                function: { arguments: '{"city":"Paris"}', name: "get_weather" },
+                id: "call_a",
+                type: "function",
+              },
+            ],
+          },
+        },
+      ],
+      created: 0,
+      id: "chatcmpl-gemini",
+      model: "gemini-3-pro",
+      object: "chat.completion",
+      provider: "gemini",
+    };
+    const converted = completionToMessageResponse(completion);
+    expect(converted.content).toMatchObject([
+      { name: "code_execution", type: "server_tool_use" },
+      { type: "code_execution_tool_result" },
+      { extraContent: signature, text: "Checking.", type: "text" },
+      { extraContent: signature, id: "call_a", type: "tool_use" },
+    ]);
+
+    const replayed = messagesToCompletionParams({
+      maxTokens: 32,
+      messages: [{ content: converted.content, role: "assistant" }],
+      model: "gemini-3-pro",
+    });
+    expect(replayed.messages[0]?.extraContent).toMatchObject({
+      google: {
+        code_execution: [
+          { code: "print(1)", id: "exec_1", language: "PYTHON", type: "executable_code" },
+          { id: "exec_1", outcome: "OUTCOME_OK", output: "1\n", type: "code_execution_result" },
+        ],
+        thoughtSignature: "c2ln",
+      },
+    });
+    expect(replayed.messages[0]?.toolCalls?.[0]?.extraContent).toEqual(signature);
+  });
+
+  it("puts cache_control breakpoints in extraContent only when asked", () => {
+    const ephemeral = { ttl: "1h", type: "ephemeral" };
+    const without = messagesToCompletionParams({
+      cacheControl: ephemeral,
+      maxTokens: 32,
+      messages: [
+        { content: [{ cacheControl: ephemeral, text: "Hello", type: "text" }], role: "user" },
+      ],
+      model: "gpt-5.6",
+      system: [{ cacheControl: ephemeral, text: "Be brief.", type: "text" }],
+    });
+    expect(without.messages.every((message) => message.extraContent === undefined)).toBe(true);
+
+    const withBreakpoints = messagesToCompletionParams(
+      {
+        cacheControl: ephemeral,
+        maxTokens: 32,
+        messages: [
+          { content: [{ cacheControl: ephemeral, text: "Hello", type: "text" }], role: "user" },
+        ],
+        model: "gemini-test",
+        system: [{ cacheControl: ephemeral, text: "Be brief.", type: "text" }],
+      },
+      { cacheBreakpoints: true },
+    );
+    expect(withBreakpoints.messages[0]?.extraContent).toEqual({ cache_control: ephemeral });
+    expect(withBreakpoints.messages.at(-1)?.extraContent).toEqual({ cache_control: ephemeral });
+  });
+
+  it("strips extra_content and renders foreign code execution as text for native Messages", () => {
+    const messages = [
+      { content: "Weather?", role: "user" as const },
+      {
+        content: [
+          {
+            extra_content: { google: { thought_signature: "c2ln" } },
+            text: "Checking.",
+            type: "text",
+          },
+          {
+            extra_content: { google: { thought_signature: "c2ln" } },
+            id: "call_a",
+            input: {},
+            name: "get_weather",
+            type: "tool_use",
+          },
+          {
+            id: "exec_1",
+            input: { code: "1+1", language: "python" },
+            name: "code_execution",
+            type: "server_tool_use",
+          },
+          {
+            content: {
+              content: [],
+              return_code: 0,
+              stderr: "",
+              stdout: "2",
+              type: "code_execution_result",
+            },
+            tool_use_id: "exec_1",
+            type: "code_execution_tool_result",
+          },
+        ],
+        role: "assistant" as const,
+      },
+    ];
+    const prepared = prepareBlocksForNativeMessages(messages);
+    expect(prepared[1]?.content).toEqual([
+      { text: "Checking.", type: "text" },
+      { id: "call_a", input: {}, name: "get_weather", type: "tool_use" },
+      {
+        text: "Code execution (python):\n```python\n1+1\n```\nOutput:\n2",
+        type: "text",
+      },
+    ]);
+    expect(messages[1]?.content[0]).toHaveProperty("extra_content");
+  });
+
+  it("opens streamed tool_use blocks with extraContent and emits code execution whole", async () => {
+    const events: MessageStreamEvent[] = [];
+    for await (const event of completionStreamToMessageEvents(
+      (async function* () {
+        yield chunk({
+          extraContent: {
+            google: {
+              code_execution: [
+                { code: "print(1)", id: "exec_1", language: "PYTHON", type: "executable_code" },
+              ],
+            },
+          },
+        });
+        yield chunk({
+          extraContent: {
+            google: {
+              code_execution: [
+                {
+                  id: "exec_1",
+                  outcome: "OUTCOME_OK",
+                  output: "1\n",
+                  type: "code_execution_result",
+                },
+              ],
+            },
+          },
+        });
+        yield chunk({
+          toolCalls: [
+            {
+              extraContent: { google: { thoughtSignature: "c2ln" } },
+              function: { arguments: "{}", name: "get_weather" },
+              id: "call_a",
+              index: 0,
+            },
+          ],
+        });
+        yield chunk({}, "tool_calls");
+      })(),
+    )) {
+      events.push(event);
+    }
+    expect(events.filter((event) => event.type === "content_block_start")).toMatchObject([
+      { contentBlock: { name: "code_execution", type: "server_tool_use" }, index: 0 },
+      { contentBlock: { type: "code_execution_tool_result" }, index: 1 },
+      {
+        contentBlock: { extraContent: { google: { thoughtSignature: "c2ln" } }, id: "call_a" },
+        index: 2,
+      },
+    ]);
   });
 });

@@ -1,7 +1,11 @@
 import { includeWhen } from "./utils.js";
 import type { JsonValue } from "./types.js";
 import type { JsonObject } from "./types.js";
-import { InvalidModelSyntaxError, UnsupportedParameterError } from "./errors.js";
+import {
+  InvalidModelSyntaxError,
+  UnsupportedOperationError,
+  UnsupportedParameterError,
+} from "./errors.js";
 import type {
   Batch,
   BatchResult,
@@ -19,6 +23,7 @@ import type {
   FileMetadata,
   FilePage,
   FileResourceParams,
+  ImageEditParams,
   ImageGenerationParams,
   ImageGenerationResponse,
   ListBatchesParams,
@@ -68,6 +73,7 @@ import {
   getAllProviderMetadata,
   getProviderMetadata,
   getSupportedProviders,
+  servesMessagesNatively,
 } from "./providers/registry.js";
 
 export class AnyLLM {
@@ -144,6 +150,19 @@ export class AnyLLM {
     return getAllProviderMetadata();
   }
 
+  /**
+   * Whether this provider serves `model` through a real Anthropic Messages
+   * endpoint. Only those requests keep fields the Completions bridge cannot
+   * carry, such as `betas` and `contextManagement`.
+   */
+  static servesMessagesNatively(provider: string, model: string): boolean {
+    return servesMessagesNatively(provider, model);
+  }
+
+  servesMessagesNatively(model: string): boolean {
+    return this.adapter.servesMessagesNatively(model);
+  }
+
   static splitModelProvider(model: string) {
     const colon = model.indexOf(":");
     if (colon > 0 && colon < model.length - 1) {
@@ -201,7 +220,17 @@ export class AnyLLM {
     AsyncIterable<ChatCompletionChunk> | ChatCompletion | ParsedChatCompletion<JsonValue>
   > {
     this.validatePromptCacheKey(params.promptCacheKey);
-    const request = completionParamsWithValidatedN(params, this.metadata);
+    const reasoningEffort = this.adapter.reasoningEffortForModel(
+      params.reasoningEffort,
+      params.model,
+    );
+    const request = completionParamsWithValidatedN(
+      {
+        ...params,
+        ...includeWhen(reasoningEffort !== undefined, { reasoningEffort }),
+      },
+      this.metadata,
+    );
     if (isStructuredOutputFormat(request.responseFormat)) {
       if (request.stream === true)
         throw new TypeError("stream is not supported with structured responseFormat.");
@@ -263,6 +292,13 @@ export class AnyLLM {
 
   imageGeneration(params: ImageGenerationParams): Promise<ImageGenerationResponse> {
     return this.adapter.imageGeneration(params);
+  }
+
+  imageEdit(params: ImageEditParams): Promise<ImageGenerationResponse> {
+    if (!this.metadata.capabilities.imageEdit) {
+      return Promise.reject(new UnsupportedOperationError("image edit", this.provider));
+    }
+    return this.adapter.imageEdit(params);
   }
 
   transcription(params: TranscriptionParams): Promise<Transcription> {
@@ -337,8 +373,10 @@ export class AnyLLM {
     AsyncIterable<MessageStreamEvent> | MessageResponse | ParsedMessageResponse<JsonValue>
   > {
     this.validatePromptCacheKey(params.promptCacheKey);
+    // A raw output_config dict streams as JSON text deltas. Only a typed format needs a
+    // finished message to parse into, which a stream never produces.
     if (
-      params.outputFormat !== undefined &&
+      isStructuredOutputFormat(params.outputFormat) &&
       params.stream === true &&
       !this.adapter.supportsMessagesStructuredOutputStreaming
     ) {

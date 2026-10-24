@@ -47,6 +47,7 @@ describe("Python source parity contract", () => {
         "completion",
         "embedding",
         "files",
+        "imageEdit",
         "imageGeneration",
         "listModels",
         "messages",
@@ -95,6 +96,8 @@ describe("Python source parity contract", () => {
   it("exposes the Python prompt-cache-key support policy", () => {
     expect(AnyLLM.getProviderMetadata("openai").promptCacheKeySupport).toBe("supported");
     expect(AnyLLM.getProviderMetadata("meta").promptCacheKeySupport).toBe("supported");
+    expect(AnyLLM.getProviderMetadata("mistral").promptCacheKeySupport).toBe("supported");
+    expect(AnyLLM.getProviderMetadata("together").promptCacheKeySupport).toBe("supported");
     expect(AnyLLM.getProviderMetadata("otari").promptCacheKeySupport).toBe("passthrough");
     expect(AnyLLM.getProviderMetadata("anthropic").promptCacheKeySupport).toBe("unsupported");
   });

@@ -11,7 +11,11 @@ import {
   UnsupportedOperationError,
   UnsupportedParameterError,
 } from "../src/index.js";
-import { AzureOpenAIProvider, OpenAIProvider } from "../src/providers/openai.js";
+import {
+  AzureOpenAIProvider,
+  OpenAIProvider,
+  createOpenAIProvider,
+} from "../src/providers/openai.js";
 import type { ChatCompletionChunk } from "../src/types.js";
 
 const config = {
@@ -50,7 +54,7 @@ function fakeClient(overrides: OpenAITestOverrides = {}): OpenAI {
     chat: { completions: { create: vi.fn() } },
     embeddings: { create: vi.fn() },
     files: { content: vi.fn(), create: vi.fn() },
-    images: { generate: vi.fn() },
+    images: { edit: vi.fn(), generate: vi.fn() },
     models: { list: vi.fn() },
     moderations: { create: vi.fn() },
     responses: { create: vi.fn() },
@@ -109,6 +113,10 @@ afterEach(() => {
 });
 
 describe("OpenAI-compatible provider", () => {
+  it("advertises image edit on the OpenAI provider", () => {
+    expect(createOpenAIProvider({ apiKey: "secret" }).metadata.capabilities.imageEdit).toBe(true);
+  });
+
   it("normalizes non-streaming completions and request parameters", async () => {
     const create = vi.fn().mockResolvedValue(completionResponse());
     const provider = new OpenAIProvider(
@@ -188,11 +196,120 @@ describe("OpenAI-compatible provider", () => {
         completionTokens: 5,
         promptTime: 0.2,
         promptTokens: 7,
+        promptTokensDetails: { cachedTokens: 3, cached_tokens: 3 },
         queueTime: 0.1,
         totalTime: 0.6,
         totalTokens: 12,
       },
     });
+  });
+
+  it("keeps only string metadata on a chat completion", async () => {
+    const create = vi.fn().mockResolvedValue({
+      ...completionResponse(),
+      metadata: {
+        region: "eu-north1",
+        weight_versions: [{ end: 57, start: 0, version: "default" }],
+      },
+    });
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+
+    const response = await provider.completion({
+      messages: [{ content: "Hello", role: "user" }],
+      model: "deepseek-ai/DeepSeek-V4.1-Flash",
+    });
+
+    expect(response).toMatchObject({
+      choices: [{ message: { content: null } }],
+      metadata: { region: "eu-north1" },
+    });
+  });
+
+  it("drops a chat completion metadata object that has no string values", async () => {
+    const create = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          finish_reason: "stop",
+          index: 0,
+          message: { content: '{"answer":"Earth"}', role: "assistant" },
+        },
+      ],
+      created: 0,
+      id: "chatcmpl-nebius",
+      metadata: { weight_versions: [{ end: 57, start: 0, version: "default" }] },
+      model: "deepseek-ai/DeepSeek-V4.1-Flash",
+    });
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+
+    const response = await provider.completion({
+      messages: [{ content: "Hello", role: "user" }],
+      model: "deepseek-ai/DeepSeek-V4.1-Flash",
+    });
+
+    expect(response).toMatchObject({
+      choices: [{ message: { content: '{"answer":"Earth"}' } }],
+      metadata: {},
+    });
+  });
+
+  it("keeps cached token details from nested or top-level usage fields", async () => {
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ...completionResponse(),
+        usage: {
+          completion_tokens: 5,
+          completion_tokens_details: { reasoning_tokens: 5 },
+          prompt_tokens: 10439,
+          prompt_tokens_details: { cached_tokens: 10368 },
+          total_tokens: 10444,
+        },
+      })
+      .mockResolvedValueOnce({
+        ...completionResponse(),
+        usage: {
+          cached_tokens: 64,
+          completion_tokens: 1,
+          prompt_tokens: 100,
+          prompt_tokens_details: { cached_tokens: null },
+          total_tokens: 101,
+        },
+      });
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+    const nested = await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "model-a",
+    });
+    expect(Symbol.asyncIterator in nested).toBe(false);
+    if (!(Symbol.asyncIterator in nested)) {
+      expect(nested.usage).toMatchObject({
+        completionTokens: 5,
+        completionTokensDetails: { reasoning_tokens: 5 },
+        promptTokens: 10439,
+        promptTokensDetails: { cachedTokens: 10368 },
+        totalTokens: 10444,
+      });
+    }
+    const fallback = await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "model-a",
+    });
+    expect(Symbol.asyncIterator in fallback).toBe(false);
+    if (!(Symbol.asyncIterator in fallback)) {
+      expect(fallback.usage?.promptTokensDetails).toMatchObject({ cachedTokens: 64 });
+    }
   });
 
   it("does not send an unset n to chat completions", async () => {
@@ -680,7 +797,7 @@ describe("OpenAI-compatible provider", () => {
           speech: { create: speech },
           transcriptions: { create: transcription },
         },
-        images: { generate: image },
+        images: { edit: vi.fn(), generate: image },
         moderations: { create: moderation },
       }),
     );
@@ -711,6 +828,29 @@ describe("OpenAI-compatible provider", () => {
         response_format: "b64_json",
         style: "vivid",
         user: "user-1",
+      }),
+    );
+
+    const edit = vi.fn().mockResolvedValue({
+      created: 124,
+      data: [{ b64_json: "edited" }],
+    });
+    const editor = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ images: { edit, generate: vi.fn() } }),
+    );
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+    await expect(
+      editor.imageEdit({ image: png, model: "gpt-image-1", prompt: "make it blue" }),
+    ).resolves.toMatchObject({
+      data: [{ b64Json: "edited" }],
+      provider: "test-openai",
+    });
+    expect(edit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: "gpt-image-1",
+        prompt: "make it blue",
       }),
     );
     await expect(provider.moderation({ includeRaw: true, input: "hello" })).resolves.toMatchObject({
@@ -863,6 +1003,78 @@ describe("OpenAI-compatible provider", () => {
     ]);
     expect(batches.retrieve).toHaveBeenCalledWith("batch-1", { request: true });
     expect(batches.list).toHaveBeenCalledWith({ after: "batch-0", limit: 5 });
+  });
+
+  it("routes Messages tools and enabled thinking through Responses", async () => {
+    const create = vi.fn().mockResolvedValue({
+      id: "resp-1",
+      model: "gpt-5",
+      output: [
+        { summary: [{ text: "plan", type: "summary_text" }], type: "reasoning" },
+        { content: [{ text: "done", type: "output_text" }], type: "message" },
+        {
+          arguments: '{"city":"Paris"}',
+          call_id: "call_1",
+          name: "weather",
+          type: "function_call",
+        },
+      ],
+      status: "completed",
+      usage: { input_tokens: 4, output_tokens: 2 },
+    });
+    const provider = new OpenAIProvider(
+      {
+        ...config,
+        capabilities: { responses: true },
+        messagesToolsThinkingViaResponses: true,
+      },
+      {},
+      fakeClient({ responses: { create } }),
+    );
+    await expect(
+      provider.messages({
+        maxTokens: 64,
+        messages: [{ content: "hi", role: "user" }],
+        model: "gpt-5",
+        thinking: { budgetTokens: 8192, type: "enabled" },
+        tools: [{ inputSchema: { type: "object" }, name: "weather" }],
+      }),
+    ).resolves.toMatchObject({
+      content: [
+        { thinking: "plan", type: "thinking" },
+        { text: "done", type: "text" },
+        { id: "call_1", name: "weather", type: "tool_use" },
+      ],
+      stopReason: "tool_use",
+    });
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reasoning: { effort: "medium", summary: "auto" },
+        tools: [expect.objectContaining({ name: "weather", type: "function" })],
+      }),
+    );
+  });
+
+  it("refuses stopSequences when Messages tools and thinking use Responses", async () => {
+    const provider = new OpenAIProvider(
+      {
+        ...config,
+        capabilities: { responses: true },
+        messagesToolsThinkingViaResponses: true,
+      },
+      {},
+      fakeClient(),
+    );
+    await expect(
+      provider.messages({
+        maxTokens: 16,
+        messages: [{ content: "hi", role: "user" }],
+        model: "gpt-5",
+        stopSequences: ["END"],
+        thinking: { type: "enabled" },
+        tools: [{ inputSchema: { type: "object" }, name: "weather" }],
+      }),
+    ).rejects.toBeInstanceOf(UnsupportedParameterError);
   });
 
   it("blocks batch calls for OpenAI-compatible providers without batch support", async () => {
@@ -1195,5 +1407,51 @@ describe("per-instance unified exceptions", () => {
     await expect(
       provider.rerank({ documents: ["a"], model: "r", query: "q" }),
     ).rejects.toBeInstanceOf(UnsupportedOperationError);
+  });
+
+  it("drops the cache_control extraContent side-channel on completions", async () => {
+    const create = vi.fn().mockResolvedValue(completionResponse());
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+    await provider.completion({
+      messages: [
+        {
+          content: "Be brief.",
+          extraContent: { cache_control: { type: "ephemeral" } },
+          role: "system",
+        },
+        { content: "Hello", role: "user" },
+      ],
+      model: "gpt-5.6",
+    });
+    const body = JSON.stringify(create.mock.calls[0]?.[0]);
+    expect(body).not.toContain("cache_control");
+    expect(body).not.toContain("extra_content");
+  });
+
+  it("does not send Messages cache_control breakpoints through the OpenAI bridge", async () => {
+    const create = vi.fn().mockResolvedValue(completionResponse());
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+    const ephemeral = { ttl: "1h", type: "ephemeral" };
+    await provider.messages({
+      cacheControl: ephemeral,
+      maxTokens: 100,
+      messages: [
+        { content: [{ cacheControl: ephemeral, text: "Hello", type: "text" }], role: "user" },
+      ],
+      model: "gpt-5.6",
+      system: [{ cacheControl: ephemeral, text: "Be brief.", type: "text" }],
+    });
+    const body = JSON.stringify(create.mock.calls[0]?.[0]);
+    expect(body).not.toContain("cache_control");
+    expect(body).not.toContain("extra_content");
+    expect(create.mock.calls[0]?.[0].messages[0]).toEqual({ content: "Be brief.", role: "system" });
   });
 });

@@ -9,12 +9,15 @@ import {
 import { AnthropicProvider } from "./anthropic.js";
 import { AzureProvider } from "./azure.js";
 import { AzureAnthropicProvider } from "./azureanthropic.js";
-import { BedrockProvider } from "./bedrock.js";
+import { BedrockProvider, isAnthropicBedrockModel } from "./bedrock.js";
 import type { BaseProvider } from "./base.js";
 import { CohereProvider } from "./cohere.js";
+import { FireworksProvider } from "./fireworks.js";
 import { GeminiProvider } from "./gemini.js";
 import { GitHubProvider } from "./github.js";
 import { HuggingFaceProvider } from "./huggingface.js";
+import { DeepseekProvider } from "./deepseek.js";
+import { LinerProvider } from "./liner.js";
 import { MistralProvider } from "./mistral.js";
 import { TogetherProvider } from "./together.js";
 import { MetaProvider } from "./meta.js";
@@ -56,6 +59,7 @@ const conservativeCapabilities: ProviderCapabilities = {
   completion: true,
   embedding: false,
   files: false,
+  imageEdit: false,
   imageGeneration: false,
   listModels: true,
   messages: true,
@@ -140,18 +144,6 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
     name: "deepinfra",
   },
   {
-    apiBase: "https://api.deepseek.com",
-    capabilities: capabilities({ moderation: true, reasoning: true }),
-    documentationUrl: "https://api-docs.deepseek.com/",
-    envApiBase: "DEEPSEEK_API_BASE",
-    envApiKey: "DEEPSEEK_API_KEY",
-    name: "deepseek",
-    quirks: {
-      maxCompletionTokensAsMaxTokens: true,
-      reasoningDirective: "deepseek",
-    },
-  },
-  {
     apiBase: "https://api.edenai.run/v3",
     capabilities: capabilities({
       embedding: true,
@@ -164,19 +156,6 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
     envApiKey: "EDENAI_API_KEY",
     name: "edenai",
     quirks: { defaultModelOwner: "edenai" },
-  },
-  {
-    apiBase: "https://api.fireworks.ai/inference/v1",
-    capabilities: capabilities({
-      moderation: true,
-      reasoning: true,
-      responses: true,
-      vision: true,
-    }),
-    documentationUrl: "https://docs.fireworks.ai/api-reference/introduction",
-    envApiBase: "FIREWORKS_API_BASE",
-    envApiKey: "FIREWORKS_API_KEY",
-    name: "fireworks",
   },
   {
     apiBase: "https://api.gmi-serving.com/v1",
@@ -532,6 +511,7 @@ addBuiltIn("openai", {
       audioTranscription: true,
       batch: true,
       embedding: true,
+      imageEdit: true,
       imageGeneration: true,
       moderation: true,
       pdfInput: true,
@@ -620,6 +600,7 @@ addBuiltIn("bedrock", {
     documentationUrl: "https://aws.amazon.com/bedrock/",
     envApiBase: "AWS_ENDPOINT_URL_BEDROCK_RUNTIME",
     envApiKey: "AWS_BEARER_TOKEN_BEDROCK",
+    messagesNative: true,
     name: "bedrock",
     requiresApiKey: false,
   },
@@ -740,6 +721,27 @@ addBuiltIn("together", {
   },
 });
 
+addBuiltIn("fireworks", {
+  adapterFamily: "openai",
+  create: (options) => new FireworksProvider(options),
+  metadata: {
+    apiBase: "https://api.fireworks.ai/inference/v1",
+    capabilities: capabilities({
+      moderation: true,
+      reasoning: true,
+      rerank: true,
+      responses: true,
+      vision: true,
+    }),
+    documentationUrl: "https://docs.fireworks.ai/api-reference/introduction",
+    envApiBase: "FIREWORKS_API_BASE",
+    envApiKey: "FIREWORKS_API_KEY",
+    name: "fireworks",
+    requiresApiKey: true,
+    supportsCompletionN: true,
+  },
+});
+
 addBuiltIn("cohere", {
   adapterFamily: "openai",
   create: (options) => new CohereProvider(options),
@@ -824,6 +826,27 @@ addBuiltIn("github", {
   },
 });
 
+addBuiltIn("deepseek", {
+  adapterFamily: "openai",
+  create: (options) => new DeepseekProvider(options),
+  metadata: {
+    apiBase: "https://api.deepseek.com",
+    capabilities: capabilities({
+      moderation: true,
+      reasoning: true,
+      responses: true,
+      vision: true,
+    }),
+    documentationUrl: "https://platform.deepseek.com/",
+    envApiBase: "DEEPSEEK_API_BASE",
+    envApiKey: "DEEPSEEK_API_KEY",
+    messagesNative: true,
+    name: "deepseek",
+    requiresApiKey: true,
+    supportsCompletionN: true,
+  },
+});
+
 addBuiltIn("meta", {
   adapterFamily: "openai",
   create: (options) => new MetaProvider(options),
@@ -861,6 +884,22 @@ addBuiltIn("huggingface", {
     name: "huggingface",
     requiresApiKey: true,
     supportsCompletionN: true,
+  },
+});
+
+addBuiltIn("liner", {
+  create: (options) => new LinerProvider(options),
+  metadata: {
+    apiBase: "https://platform.liner.com/api/v1/agents",
+    capabilities: capabilities({
+      listModels: false,
+      reasoning: false,
+    }),
+    documentationUrl: "https://liner.com/developers/docs",
+    envApiBase: "LINER_API_BASE",
+    envApiKey: "LINER_API_KEY",
+    name: "liner",
+    requiresApiKey: true,
   },
 });
 
@@ -954,6 +993,12 @@ export function getProviderMetadata(name: string): ProviderMetadata {
 
 export function getAllProviderMetadata(): ProviderMetadata[] {
   return getSupportedProviders().map(getProviderMetadata);
+}
+
+export function servesMessagesNatively(provider: string, model: string): boolean {
+  const name = normalizeName(provider);
+  if (name === "bedrock") return isAnthropicBedrockModel(model);
+  return getProviderMetadata(name).messagesNative;
 }
 
 export function getProviderDescriptor(name: string): ProviderMetadata {

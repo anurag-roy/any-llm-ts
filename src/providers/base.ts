@@ -21,6 +21,7 @@ import type {
   FileMetadata,
   FilePage,
   FileResourceParams,
+  ImageEditParams,
   ImageGenerationParams,
   ImageGenerationResponse,
   ListBatchesParams,
@@ -33,6 +34,7 @@ import type {
   ModerationResponse,
   ProviderMetadata,
   ProviderOptions,
+  ReasoningEffort,
   RerankParams,
   RerankResponse,
   ResponsesParams,
@@ -49,12 +51,28 @@ import {
   messagesToCompletionParams,
   normalizeMessagesContainer,
 } from "../messages-compat.js";
-import { mapAsyncIterableErrors } from "../utils.js";
+import { includeWhen, mapAsyncIterableErrors } from "../utils.js";
+
+const deepSeekV4Model = /\bdeepseek-v4(?!\d)/iu;
+
+function deepSeekV4Effort(effort: ReasoningEffort): ReasoningEffort {
+  switch (effort) {
+    case "medium":
+    case "xhigh":
+      return "high";
+    case "minimal":
+      return "low";
+    default:
+      return effort;
+  }
+}
 
 export abstract class BaseProvider {
   abstract readonly metadata: ProviderMetadata;
-  /** Whether native Messages structured output can be streamed. */
+  /** Whether a Messages `outputFormat` type can be streamed by this provider. */
   readonly supportsMessagesStructuredOutputStreaming: boolean = false;
+  /** Whether the Messages bridge should pass `cacheControl` breakpoints in `extraContent`. */
+  protected readonly readsCacheControlSideChannel: boolean = false;
   protected readonly unifiedExceptions: boolean;
 
   constructor(options: ProviderOptions = {}) {
@@ -80,6 +98,10 @@ export abstract class BaseProvider {
 
   imageGeneration(_params: ImageGenerationParams): Promise<ImageGenerationResponse> {
     return Promise.reject(new UnsupportedOperationError("image generation", this.metadata.name));
+  }
+
+  imageEdit(_params: ImageEditParams): Promise<ImageGenerationResponse> {
+    return Promise.reject(new UnsupportedOperationError("image edit", this.metadata.name));
   }
 
   transcription(_params: TranscriptionParams): Promise<Transcription> {
@@ -138,6 +160,30 @@ export abstract class BaseProvider {
     return Promise.reject(new UnsupportedOperationError("file downloads", this.metadata.name));
   }
 
+  /**
+   * Whether `messages()` for this model talks to a real Anthropic Messages
+   * endpoint instead of the Completions compatibility bridge.
+   */
+  servesMessagesNatively(_model: string): boolean {
+    return this.metadata.messagesNative;
+  }
+
+  /**
+   * The level `model` accepts in place of `reasoningEffort`.
+   *
+   * Hosts serving DeepSeek V4 or V4.1 render it with a chat template that
+   * lacks some levels, so they are mapped by model name rather than per provider.
+   */
+  reasoningEffortForModel(
+    reasoningEffort: ReasoningEffort | undefined,
+    model: string,
+  ): ReasoningEffort | undefined {
+    if (reasoningEffort !== undefined && deepSeekV4Model.test(model)) {
+      return deepSeekV4Effort(reasoningEffort);
+    }
+    return reasoningEffort;
+  }
+
   async messages(
     params: MessagesParams,
     options?: CompletionOperationOptions,
@@ -153,7 +199,20 @@ export abstract class BaseProvider {
       );
     }
     try {
-      const result = await this.completion(messagesToCompletionParams(params), options);
+      const completionParams = messagesToCompletionParams(params, {
+        cacheBreakpoints: this.readsCacheControlSideChannel,
+      });
+      const reasoningEffort = this.reasoningEffortForModel(
+        completionParams.reasoningEffort,
+        completionParams.model,
+      );
+      const result = await this.completion(
+        {
+          ...completionParams,
+          ...includeWhen(reasoningEffort !== undefined, { reasoningEffort }),
+        },
+        options,
+      );
       return Symbol.asyncIterator in result
         ? completionStreamToMessageEvents(result)
         : completionToMessageResponse(result);

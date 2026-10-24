@@ -89,6 +89,58 @@ describe("provider error normalization", () => {
     expect(fromRecord.retryAfter).toBe("Wed, 21 Oct 2026 07:28:00 GMT");
   });
 
+  it.each([
+    [{ "retry-after-ms": "1500" }, "1.5"],
+    [{ "Retry-After-Ms": "2000" }, "2"],
+    [{ "retry-after-ms": 250 }, "0.25"],
+    [{ "retry-after-ms": "0" }, "0"],
+    [{ "retry-after": "30", "retry-after-ms": "1500" }, "30"],
+  ])("falls back to retry-after-ms when retry-after is absent: %j", (headers, expected) => {
+    const normalized = normalizeProviderError(
+      {
+        headers,
+        message: "Rate limit exceeded",
+        status: 429,
+      },
+      "openai",
+    );
+    expect(normalized).toBeInstanceOf(RateLimitError);
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    expect((normalized as RateLimitError).retryAfter).toBe(expected);
+  });
+
+  it("prefers Retry-After on the response over retry-after-ms on the error", () => {
+    const normalized = normalizeProviderError(
+      {
+        headers: { "retry-after-ms": "1500" },
+        message: "slow down",
+        response: { headers: { "retry-after": "9" } },
+        status: 429,
+      },
+      "test",
+    );
+    expect(normalized).toBeInstanceOf(RateLimitError);
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    expect((normalized as RateLimitError).retryAfter).toBe("9");
+  });
+
+  it.each(["soon", "-5", "nan", "inf", "", true, 1.5, {}])(
+    "ignores unusable retry-after-ms values: %j",
+    (value) => {
+      const normalized = normalizeProviderError(
+        {
+          headers: { "retry-after-ms": value },
+          message: "Rate limit exceeded",
+          status: 429,
+        },
+        "openai",
+      );
+      expect(normalized).toBeInstanceOf(RateLimitError);
+      // SAFETY: This test double implements the provider surface exercised by this test.
+      expect((normalized as RateLimitError).retryAfter).toBeUndefined();
+    },
+  );
+
   it("recognizes context and content-filter errors without a status", () => {
     expect(
       normalizeProviderError(new Error("Maximum context token length exceeded"), "test"),

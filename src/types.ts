@@ -18,6 +18,7 @@ export type MessageRole = "assistant" | "developer" | "system" | "tool" | "user"
 export interface TextContentPart {
   type: "text";
   text: string;
+  cacheControl?: JsonObject;
 }
 
 export interface ImageUrlContentPart {
@@ -80,11 +81,24 @@ export interface ChatCompletionDeltaAudio {
   transcript?: string;
 }
 
+export interface MessageCitation {
+  url: string;
+  date?: string;
+  description?: string;
+  favicon?: string;
+  image?: string;
+  title?: string;
+}
+
 export interface ChatMessage {
   content: MessageContentPart[] | string | null;
   role: MessageRole;
   /** OpenAI-compatible audio object for inline media responses. */
   audio?: ChatCompletionAudio | null;
+  /** Anthropic-style cache breakpoint on a chat message, as LiteLLM and OpenRouter accept it. */
+  cacheControl?: JsonObject;
+  /** Web references, as Exa and Liner return them on an answer. */
+  citations?: MessageCitation[];
   extraContent?: JsonObject;
   /** OpenAI-compatible inline images, typically Gemini data URLs. */
   images?: ImageContent[] | null;
@@ -204,13 +218,15 @@ export interface CompletionUsage {
   totalTime?: number;
 }
 
-export type FinishReason =
+export type KnownFinishReason =
   | "content_filter"
   | "function_call"
   | "length"
   | "stop"
-  | "tool_calls"
-  | null;
+  | "tool_calls";
+
+/** OpenAI's five values, or the provider's own string when it sends something else. */
+export type FinishReason = KnownFinishReason | (string & {}) | null;
 
 export interface ChatCompletionChoice {
   finishReason: FinishReason;
@@ -226,6 +242,7 @@ export interface ChatCompletion {
   model: string;
   object: "chat.completion";
   provider: string;
+  metadata?: Record<string, string>;
   serviceTier?: string | null;
   systemFingerprint?: string | null;
   usage?: CompletionUsage;
@@ -268,6 +285,7 @@ export interface ToolCallDelta {
 export interface ChatCompletionDelta {
   content?: string | null;
   audio?: ChatCompletionDeltaAudio | null;
+  citations?: MessageCitation[];
   extraContent?: JsonObject;
   images?: ImageContent[] | null;
   reasoning?: string | null;
@@ -391,6 +409,26 @@ export interface ImageGenerationParams {
   responseFormat?: "b64_json" | "url";
   size?: string;
   style?: string;
+  user?: string;
+}
+
+/** A path, bytes, Blob, or a `(filename, content[, mimeType])` tuple. */
+export type ImageFile =
+  | FileInput
+  | readonly [string | null, FileInput]
+  | readonly [string | null, FileInput, string | null];
+
+export type ImageInput = ImageFile | ImageFile[];
+
+export interface ImageEditParams {
+  image: ImageInput;
+  model: string;
+  prompt: string;
+  n?: number;
+  providerOptions?: JsonObject;
+  quality?: string;
+  responseFormat?: "b64_json" | "url";
+  size?: string;
   user?: string;
 }
 
@@ -633,6 +671,7 @@ export interface MessagesTextBlock {
   text: string;
   type: "text";
   cacheControl?: JsonObject;
+  extraContent?: JsonObject;
 }
 
 export interface MessagesThinkingBlock {
@@ -646,6 +685,7 @@ export interface MessagesToolUseBlock {
   input: JsonValue;
   name: string;
   type: "tool_use";
+  extraContent?: JsonObject;
 }
 
 export interface MessagesToolResultBlock {
@@ -696,12 +736,17 @@ export interface MessagesInputMessage {
   role: "assistant" | "user";
 }
 
-export interface MessagesTool {
+export interface MessagesFunctionTool {
   inputSchema: JsonObject;
   name: string;
   description?: string;
   cacheControl?: JsonObject;
+  /** Anthropic tool-search: skip this tool until the model loads it. */
+  deferLoading?: boolean;
 }
+
+/** Anthropic tool, or a provider-native tool such as Gemini `{ google_search: {} }`. */
+export type MessagesTool = JsonObject | MessagesFunctionTool;
 
 export interface MessageContainerSkill {
   skillId: string;
@@ -861,6 +906,7 @@ export interface ProviderCapabilities {
   completion: boolean;
   embedding: boolean;
   files: boolean;
+  imageEdit: boolean;
   imageGeneration: boolean;
   listModels: boolean;
   messages: boolean;
@@ -973,7 +1019,8 @@ export interface ProviderMetadata {
   id: string;
   /**
    * Whether `messages()` talks to a real Anthropic Messages endpoint instead of
-   * the Completions compatibility bridge.
+   * the Completions compatibility bridge. Bedrock sets this for Claude models
+   * and answers per model in `AnyLLM.servesMessagesNatively`.
    */
   messagesNative: boolean;
   name: string;
