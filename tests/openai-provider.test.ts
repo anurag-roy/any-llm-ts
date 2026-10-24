@@ -204,6 +204,62 @@ describe("OpenAI-compatible provider", () => {
     });
   });
 
+  it("keeps only string metadata on a chat completion", async () => {
+    const create = vi.fn().mockResolvedValue({
+      ...completionResponse(),
+      metadata: {
+        region: "eu-north1",
+        weight_versions: [{ end: 57, start: 0, version: "default" }],
+      },
+    });
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+
+    const response = await provider.completion({
+      messages: [{ content: "Hello", role: "user" }],
+      model: "deepseek-ai/DeepSeek-V4.1-Flash",
+    });
+
+    expect(response).toMatchObject({
+      choices: [{ message: { content: null } }],
+      metadata: { region: "eu-north1" },
+    });
+  });
+
+  it("drops a chat completion metadata object that has no string values", async () => {
+    const create = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          finish_reason: "stop",
+          index: 0,
+          message: { content: '{"answer":"Earth"}', role: "assistant" },
+        },
+      ],
+      created: 0,
+      id: "chatcmpl-nebius",
+      metadata: { weight_versions: [{ end: 57, start: 0, version: "default" }] },
+      model: "deepseek-ai/DeepSeek-V4.1-Flash",
+    });
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ chat: { completions: { create } } }),
+    );
+
+    const response = await provider.completion({
+      messages: [{ content: "Hello", role: "user" }],
+      model: "deepseek-ai/DeepSeek-V4.1-Flash",
+    });
+
+    expect(response).toMatchObject({
+      choices: [{ message: { content: '{"answer":"Earth"}' } }],
+      metadata: {},
+    });
+  });
+
   it("keeps cached token details from nested or top-level usage fields", async () => {
     const create = vi
       .fn()

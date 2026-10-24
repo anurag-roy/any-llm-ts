@@ -2,7 +2,13 @@ import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import { describe, expect, it, vi } from "vitest";
 
-import { DeepseekProvider, MissingApiKeyError, UnsupportedParameterError } from "../src/index.js";
+import {
+  AnyLLM,
+  DeepseekProvider,
+  InvalidRequestError,
+  MissingApiKeyError,
+  UnsupportedParameterError,
+} from "../src/index.js";
 import type { ChatCompletionChunk, MessageStreamEvent } from "../src/index.js";
 import { isString } from "../src/utils.js";
 
@@ -21,6 +27,18 @@ function clients(messageCreate: ReturnType<typeof vi.fn>, chatCreate: ReturnType
 describe("DeepSeek provider", () => {
   it("requires DEEPSEEK_API_KEY", () => {
     expect(() => new DeepseekProvider()).toThrow(MissingApiKeyError);
+  });
+
+  it("keeps minimal reasoningEffort so DeepSeek Chat can reject it", async () => {
+    const provider = new DeepseekProvider({ apiKey: "secret" }, clients(vi.fn(), vi.fn()));
+    expect(provider.reasoningEffortForModel("minimal", "deepseek-v4-pro")).toBe("minimal");
+    await expect(
+      AnyLLM.fromProvider(provider).completion({
+        messages: [{ content: "hi", role: "user" }],
+        model: "deepseek-v4-pro",
+        reasoningEffort: "minimal",
+      }),
+    ).rejects.toBeInstanceOf(InvalidRequestError);
   });
 
   it("serves Messages natively and drops context management", async () => {

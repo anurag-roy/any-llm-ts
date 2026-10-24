@@ -220,7 +220,17 @@ export class AnyLLM {
     AsyncIterable<ChatCompletionChunk> | ChatCompletion | ParsedChatCompletion<JsonValue>
   > {
     this.validatePromptCacheKey(params.promptCacheKey);
-    const request = completionParamsWithValidatedN(params, this.metadata);
+    const reasoningEffort = this.adapter.reasoningEffortForModel(
+      params.reasoningEffort,
+      params.model,
+    );
+    const request = completionParamsWithValidatedN(
+      {
+        ...params,
+        ...includeWhen(reasoningEffort !== undefined, { reasoningEffort }),
+      },
+      this.metadata,
+    );
     if (isStructuredOutputFormat(request.responseFormat)) {
       if (request.stream === true)
         throw new TypeError("stream is not supported with structured responseFormat.");

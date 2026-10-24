@@ -1890,20 +1890,42 @@ describe("Gemini provider", () => {
     expect(listed).toEqual([
       {
         created: 0,
-        id: "models/gemini-a",
+        id: "gemini-a",
         object: "model",
         ownedBy: "google",
         raw: { displayName: "Gemini A", name: "models/gemini-a" },
       },
       {
         created: 0,
-        id: "models/gemini-b",
+        id: "gemini-b",
         object: "model",
         ownedBy: "google",
         raw: { name: "models/gemini-b" },
       },
     ]);
   });
+
+  it.each([
+    ["models/gemini-2.5-flash", "gemini-2.5-flash"],
+    ["publishers/google/models/gemini-2.5-flash", "gemini-2.5-flash"],
+    ["tunedModels/my-tuned-model", "tunedModels/my-tuned-model"],
+    ["publishers/meta/models/llama-4", "publishers/meta/models/llama-4"],
+    ["gemini-2.5-flash", "gemini-2.5-flash"],
+    [undefined, "unknown"],
+  ] as const)(
+    "strips Gemini resource prefixes from listed model id %s",
+    async (name, expectedId) => {
+      async function* models() {
+        yield name === undefined ? {} : { name };
+      }
+      const sdk = fakeGemini({
+        list: vi.fn().mockResolvedValue(models()),
+      });
+      const listed = await new GeminiProvider({}, sdk.client).listModels();
+      expect(listed.map((model) => model.id)).toEqual([expectedId]);
+      expect(listed[0]?.ownedBy).toBe("google");
+    },
+  );
 
   it("encodes float embeddings as base64 without sending encoding_format", async () => {
     const sdk = fakeGemini({

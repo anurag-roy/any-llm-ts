@@ -242,6 +242,7 @@ export interface ChatCompletion {
   model: string;
   object: "chat.completion";
   provider: string;
+  metadata?: Record<string, string>;
   serviceTier?: string | null;
   systemFingerprint?: string | null;
   usage?: CompletionUsage;

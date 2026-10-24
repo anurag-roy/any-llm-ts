@@ -34,6 +34,7 @@ import type {
   ModerationResponse,
   ProviderMetadata,
   ProviderOptions,
+  ReasoningEffort,
   RerankParams,
   RerankResponse,
   ResponsesParams,
@@ -50,7 +51,21 @@ import {
   messagesToCompletionParams,
   normalizeMessagesContainer,
 } from "../messages-compat.js";
-import { mapAsyncIterableErrors } from "../utils.js";
+import { includeWhen, mapAsyncIterableErrors } from "../utils.js";
+
+const deepSeekV4Model = /\bdeepseek-v4(?!\d)/iu;
+
+function deepSeekV4Effort(effort: ReasoningEffort): ReasoningEffort {
+  switch (effort) {
+    case "medium":
+    case "xhigh":
+      return "high";
+    case "minimal":
+      return "low";
+    default:
+      return effort;
+  }
+}
 
 export abstract class BaseProvider {
   abstract readonly metadata: ProviderMetadata;
@@ -153,6 +168,22 @@ export abstract class BaseProvider {
     return this.metadata.messagesNative;
   }
 
+  /**
+   * The level `model` accepts in place of `reasoningEffort`.
+   *
+   * Hosts serving DeepSeek V4 or V4.1 render it with a chat template that
+   * lacks some levels, so they are mapped by model name rather than per provider.
+   */
+  reasoningEffortForModel(
+    reasoningEffort: ReasoningEffort | undefined,
+    model: string,
+  ): ReasoningEffort | undefined {
+    if (reasoningEffort !== undefined && deepSeekV4Model.test(model)) {
+      return deepSeekV4Effort(reasoningEffort);
+    }
+    return reasoningEffort;
+  }
+
   async messages(
     params: MessagesParams,
     options?: CompletionOperationOptions,
@@ -168,10 +199,18 @@ export abstract class BaseProvider {
       );
     }
     try {
+      const completionParams = messagesToCompletionParams(params, {
+        cacheBreakpoints: this.readsCacheControlSideChannel,
+      });
+      const reasoningEffort = this.reasoningEffortForModel(
+        completionParams.reasoningEffort,
+        completionParams.model,
+      );
       const result = await this.completion(
-        messagesToCompletionParams(params, {
-          cacheBreakpoints: this.readsCacheControlSideChannel,
-        }),
+        {
+          ...completionParams,
+          ...includeWhen(reasoningEffort !== undefined, { reasoningEffort }),
+        },
         options,
       );
       return Symbol.asyncIterator in result

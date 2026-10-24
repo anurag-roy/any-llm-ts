@@ -1663,6 +1663,13 @@ export class OpenAIProvider extends BaseProvider {
       normalized.systemFingerprint = systemFingerprint;
     }
     if (usage !== undefined) normalized.usage = usage;
+    if (isObject(response.metadata) && !Array.isArray(response.metadata)) {
+      normalized.metadata = Object.fromEntries(
+        Object.entries(response.metadata).filter((entry): entry is [string, string] =>
+          isString(entry[1]),
+        ),
+      );
+    }
     if (this.config.quirks?.xmlReasoning === true) {
       for (const choice of normalized.choices) {
         if (!isString(choice.message.content)) continue;

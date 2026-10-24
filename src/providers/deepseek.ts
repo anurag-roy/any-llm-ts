@@ -13,6 +13,7 @@ import type {
   MessageStreamEvent,
   MessagesParams,
   ProviderOptions,
+  ReasoningEffort,
 } from "../types.js";
 import {
   getEnvironmentVariable,
@@ -89,6 +90,13 @@ export class DeepseekProvider extends OpenAIProvider {
         baseURL: anthropicBase(apiBase),
         ...includeWhen(maxRetries !== undefined, { maxRetries }),
       });
+  }
+
+  override reasoningEffortForModel(
+    reasoningEffort: ReasoningEffort | undefined,
+    _model: string,
+  ): ReasoningEffort | undefined {
+    return reasoningEffort;
   }
 
   override completion(

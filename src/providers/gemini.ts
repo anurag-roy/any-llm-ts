@@ -129,6 +129,7 @@ const FUNCTION_RESPONSE_MIME_TYPES = new Set([
   "text/plain",
 ]);
 const GEMINI_MAJOR_VERSION = /(?:^|\/)gemini-(\d+)/u;
+const MODEL_RESOURCE_PREFIX = /^(?:publishers\/google\/)?models\//u;
 
 type GeminiThinkingLevel = "HIGH" | "LOW" | "MEDIUM" | "MINIMAL";
 
@@ -1610,7 +1611,10 @@ export class GeminiProvider extends BaseProvider {
       for await (const model of page) {
         models.push({
           created: 0,
-          id: model.name ?? "unknown",
+          id:
+            model.name === undefined || model.name.length === 0
+              ? "unknown"
+              : model.name.replace(MODEL_RESOURCE_PREFIX, ""),
           object: "model",
           ownedBy: "google",
           raw: model,
