@@ -1,5 +1,24 @@
 # any-llm-ts
 
+## 0.8.0
+
+### Minor Changes
+
+- 1900740: Sync with Python any-llm through `5091661`: Gemini gateway parity for code execution extra content, Messages-bridge thought signatures, mixed built-in tools, and Anthropic-style `cacheControl` context caches on Gemini and Vertex AI.
+- a891d04: Sync with Python any-llm through `99f2d1c`: reject empty Gemini candidates, report streamed Gemini tool calls on the STOP chunk, drop empty Mistral assistant turns, raise Otari Messages stream errors, name in-memory transcription uploads, add `maxRetries`, and route Vertex Mistral and partner models off `generateContent`.
+- a891d04: Sync with Python any-llm through `c527b1f`: add Gemini Developer API Files, merge Gemini parallel tool results, send system-only Gemini requests as the user turn, list invocable Bedrock model IDs, enable Nebius Responses, and add `model` to `RerankResponse`.
+- 1900740: Sync with Python any-llm through `ca93db4`: DeepSeek native Messages/Responses and vision, OpenAI image edit, Gemini function-call ids / usage / tool-result images, stream accumulator, Anthropic `tool_choice: none`, Liner instruction rewrite, and unknown `finish_reason` strings.
+- 1900740: Sync with Python any-llm through `4d3250c`: add Fireworks rerank and Liner answer agents, keep Gemini empty text answers as a choice, and send only Bedrock-supported Claude Messages fields (including the thinking display-updates beta).
+
+### Patch Changes
+
+- 1900740: Sync with Python any-llm through `14b2595`: map DeepSeek V4 reasoning-effort aliases on every host, keep only string chat-completion metadata, and strip Gemini/Vertex `models/` resource prefixes from listed ids.
+- a891d04: Sync with Python any-llm through `18ed82b`: drop default `n=1` for every provider and refuse other values unless `supportsCompletionN` is true.
+- a891d04: Sync with Python any-llm through `37b6949`: page every Cohere model catalog response, reject Cohere `n` other than `1`, and encode Gemini/Voyage embeddings as little-endian float32 base64 when requested.
+- 1900740: Sync with Python any-llm through `798f6be`: keep cached-token usage details, accept `promptCacheKey` on Mistral and Together, keep Bedrock Claude native for effort-only `outputFormat`, and carry `output_config.effort` across the Messages bridges.
+- 1900740: Sync with Python any-llm through `b87e732`: fall back to `retry-after-ms` (converted to seconds) when `RateLimitError.retryAfter` has no `Retry-After` header.
+- 1900740: Sync with Python any-llm through `d69a13c`: stream raw Messages `outputFormat` dicts through the Completions bridge, rewrite DeepSeek `json_schema` into JSON mode (including schema-less requests), and refuse malformed DeepSeek schemas before the call.
+
 ## 0.7.0
 
 ### Minor Changes
