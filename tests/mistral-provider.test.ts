@@ -257,6 +257,30 @@ describe("Mistral provider batches", () => {
   });
 });
 
+describe("Mistral prompt cache key", () => {
+  it("advertises support and forwards promptCacheKey", async () => {
+    const create = vi.fn().mockResolvedValue({
+      choices: [{ finish_reason: "stop", index: 0, message: { content: "ok", role: "assistant" } }],
+      created: 1,
+      id: "chat-1",
+      model: "mistral-small-latest",
+      usage: { completion_tokens: 1, prompt_tokens: 2, total_tokens: 3 },
+    });
+    const provider = new MistralProvider({ apiKey: "secret" });
+    expect(provider.metadata.promptCacheKeySupport).toBe("supported");
+    expect(AnyLLM.getProviderMetadata("mistral").promptCacheKeySupport).toBe("supported");
+    Object.defineProperty(provider, "client", {
+      value: { chat: { completions: { create } } },
+    });
+    await AnyLLM.fromProvider(provider).completion({
+      messages: [{ content: "Hello", role: "user" }],
+      model: "mistral-small-latest",
+      promptCacheKey: "tenant-1",
+    });
+    expect(create.mock.calls[0]?.[0]).toMatchObject({ prompt_cache_key: "tenant-1" });
+  });
+});
+
 describe("Mistral empty assistant messages", () => {
   it("drops assistant turns that carry no content, tools, or reasoning", () => {
     expect(

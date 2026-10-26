@@ -34,7 +34,7 @@ RateLimitError;
 UpstreamProviderError;
 ```
 
-`RateLimitError` also exposes `retryAfter?: string`.
+`RateLimitError` also exposes `retryAfter?: string`, taken from `Retry-After` or from `retry-after-ms` converted to seconds.
 
 ## Library and configuration failures
 

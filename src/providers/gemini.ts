@@ -2,7 +2,8 @@ import { includeWhen } from "../utils.js";
 import type { JsonValue } from "../types.js";
 import { parseJsonObject } from "../utils.js";
 import type { JsonObject } from "../types.js";
-import { isJsonObject, isObject, isString } from "../utils.js";
+import { isBoolean, isJsonObject, isNumber, isObject, isString } from "../utils.js";
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
 import {
@@ -14,9 +15,13 @@ import {
   type Content,
   type BatchJob,
   type GenerateContentConfig,
+  type Language,
+  type Outcome,
   type GenerateContentParameters,
   type GenerateContentResponse,
   type GoogleGenAIOptions,
+  MediaModality,
+  type FunctionResponsePart,
   type Part,
   type InlinedRequest,
   type Tool as GeminiTool,
@@ -101,9 +106,30 @@ import {
   type GeminiFileAuth,
 } from "./gemini-files.js";
 import { completeProviderMetadata } from "../provider-metadata.js";
+import {
+  geminiCacheIdentity,
+  openStreamWithContextCache,
+  prepareContextCache,
+  reportCacheWrite,
+  sendWithContextCache,
+  type ContextCacheUse,
+  type GeminiCacheIdentity,
+  type GeminiContextCacheRequest,
+} from "./gemini-context-cache.js";
 
 const INLINE_DATA_LIMIT_BYTES = 20 * 1024 * 1024;
 const SKIP_THOUGHT_SIGNATURE_VALIDATOR = "skip_thought_signature_validator";
+const SYNTHETIC_CODE_EXECUTION_ID_PREFIX = "code_exec_";
+const SYNTHETIC_TOOL_CALL_ID_PREFIX = "call_anyllm_";
+const FUNCTION_RESPONSE_MIME_TYPES = new Set([
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "text/plain",
+]);
+const GEMINI_MAJOR_VERSION = /(?:^|\/)gemini-(\d+)/u;
+const MODEL_RESOURCE_PREFIX = /^(?:publishers\/google\/)?models\//u;
 
 type GeminiThinkingLevel = "HIGH" | "LOW" | "MEDIUM" | "MINIMAL";
 
@@ -153,6 +179,7 @@ const geminiCapabilities: ProviderCapabilities = {
   completion: true,
   embedding: true,
   files: false,
+  imageEdit: false,
   imageGeneration: false,
   listModels: true,
   messages: true,
@@ -181,11 +208,22 @@ interface ConvertedMessages {
 }
 
 interface StreamState {
+  codeExecution: CodeExecutionState;
   created: number;
   emittedRoles: Set<number>;
   id: string;
   model: string;
   nextToolIndices: Map<number, number>;
+}
+
+class CodeExecutionState {
+  executableCodeCount = 0;
+  lastExecutableCodeId: string | undefined;
+  lastOutputOwnerId: string | undefined;
+
+  nextId(): string {
+    return `${SYNTHETIC_CODE_EXECUTION_ID_PREFIX}${this.executableCodeCount}`;
+  }
 }
 
 function asRecord<Value>(value: Value): JsonObject | undefined {
@@ -412,19 +450,136 @@ function contentParts(content: ChatMessage["content"], provider: string): Part[]
   });
 }
 
-function textContent(message: ChatMessage): string {
-  if (isString(message.content)) return message.content;
-  // SAFETY: The provider contract establishes the asserted representation at this boundary.
-  return (message.content ?? [])
-    .filter((part) => part.type === "text" && "text" in part && isString(part.text))
-    .map((part) => (part as { text: string }).text)
-    .join("\n");
-}
-
 function thoughtSignature(value: JsonValue | undefined): string | undefined {
   const google = asRecord(asRecord(value)?.google);
   const signature = google?.thoughtSignature ?? google?.thought_signature;
   return isString(signature) && signature.length > 0 ? signature : undefined;
+}
+
+function enumValue<Value>(value: Value, fallback: string): string {
+  if (value === undefined || value === null) return fallback;
+  if (isString(value)) return value;
+  if (isNumber(value) || isBoolean(value)) return String(value);
+  if (isObject(value) && "value" in value) {
+    const inner = value.value;
+    if (isString(inner) || isNumber(inner) || isBoolean(inner)) return String(inner);
+  }
+  return fallback;
+}
+
+function codeExecutionItem(part: Part, state: CodeExecutionState): JsonObject | undefined {
+  if (part.executableCode !== undefined) {
+    const executable = part.executableCode;
+    const codeId =
+      isString(executable.id) && executable.id.length > 0 ? executable.id : state.nextId();
+    state.executableCodeCount += 1;
+    state.lastExecutableCodeId = codeId;
+    state.lastOutputOwnerId = codeId;
+    return {
+      code: executable.code ?? "",
+      id: codeId,
+      language: enumValue(executable.language, "LANGUAGE_UNSPECIFIED"),
+      type: "executable_code",
+    };
+  }
+  if (part.codeExecutionResult !== undefined) {
+    const result = part.codeExecutionResult;
+    const resultId =
+      isString(result.id) && result.id.length > 0
+        ? result.id
+        : (state.lastExecutableCodeId ?? state.nextId());
+    if (state.executableCodeCount > 0) state.lastOutputOwnerId = resultId;
+    return {
+      id: resultId,
+      outcome: enumValue(result.outcome, "OUTCOME_UNSPECIFIED"),
+      output: result.output ?? "",
+      type: "code_execution_result",
+    };
+  }
+  const blob = part.inlineData;
+  if (state.lastOutputOwnerId === undefined || blob === undefined) return undefined;
+  const bytes = inlineDataBytes(blob.data);
+  if (bytes === undefined) return undefined;
+  return {
+    data: bytes.toString("base64"),
+    id: state.lastOutputOwnerId,
+    mime_type: blob.mimeType ?? "",
+    type: "code_execution_output",
+  };
+}
+
+function mergeCodeExecution(
+  extraContent: JsonObject | undefined,
+  codeExecution: JsonObject[],
+): JsonObject | undefined {
+  if (codeExecution.length === 0) return extraContent;
+  const google = asRecord(extraContent?.google) ?? {};
+  return { ...extraContent, google: { ...google, code_execution: codeExecution } };
+}
+
+function replayCodeExecutionId(value: JsonValue | undefined): string | undefined {
+  if (
+    !isString(value) ||
+    value.length === 0 ||
+    value.startsWith(SYNTHETIC_CODE_EXECUTION_ID_PREFIX)
+  ) {
+    return undefined;
+  }
+  return value;
+}
+
+function codeExecutionParts(message: ChatMessage): Part[] {
+  const items = asRecord(message.extraContent)?.google;
+  const list = asRecord(items)?.code_execution;
+  if (!Array.isArray(list)) return [];
+  const parts: Part[] = [];
+  for (const item of list) {
+    if (!isObject(item) || Array.isArray(item)) continue;
+    const record = parseJsonObject(item);
+    const id = replayCodeExecutionId(record.id);
+    if (record.type === "executable_code") {
+      const executableCode: NonNullable<Part["executableCode"]> = {};
+      if (isString(record.code)) executableCode.code = record.code;
+      if (isString(record.language)) {
+        // SAFETY: The provider contract establishes the asserted representation at this boundary.
+        executableCode.language = record.language as Language;
+      }
+      if (id !== undefined) executableCode.id = id;
+      parts.push({ executableCode });
+    } else if (record.type === "code_execution_result") {
+      const codeExecutionResult: NonNullable<Part["codeExecutionResult"]> = {};
+      if (isString(record.outcome)) {
+        // SAFETY: The provider contract establishes the asserted representation at this boundary.
+        codeExecutionResult.outcome = record.outcome as Outcome;
+      }
+      if (isString(record.output)) codeExecutionResult.output = record.output;
+      if (id !== undefined) codeExecutionResult.id = id;
+      parts.push({ codeExecutionResult });
+    }
+  }
+  return parts;
+}
+
+function systemInstructionText(message: ChatMessage): string {
+  if (isString(message.content)) return message.content;
+  return (message.content ?? [])
+    .flatMap((part) => (part.type === "text" && isString(part.text) ? [part.text] : []))
+    .join("");
+}
+
+function enableServerSideToolInvocations(
+  tools: GeminiTool[] | undefined,
+  toolConfig: GenerateContentConfig["toolConfig"],
+): GenerateContentConfig["toolConfig"] {
+  if (tools === undefined) return toolConfig;
+  const hasFunctions = tools.some((tool) => (tool.functionDeclarations?.length ?? 0) > 0);
+  const hasBuiltIn = tools.some((tool) =>
+    Object.entries(tool).some(
+      ([key, value]) => key !== "functionDeclarations" && value !== undefined,
+    ),
+  );
+  if (!(hasFunctions && hasBuiltIn)) return toolConfig;
+  return { ...toolConfig, includeServerSideToolInvocations: true };
 }
 
 function parseJsonValue(value: string | Uint8Array): JsonValue {
@@ -465,22 +620,118 @@ function decodeToolContent<Value>(content: Value): JsonValue {
   }
 }
 
-function functionResponse(value: ChatMessage, namesById: Map<string, string>): Part {
-  const response = normalizeToolResponse(decodeToolContent(value.content));
+function geminiToolCallId(
+  functionCall: { id?: string },
+  responseId: string | undefined,
+  index: number,
+): string {
+  if (isString(functionCall.id) && functionCall.id.length > 0) return functionCall.id;
+  if (responseId !== undefined && responseId.length > 0) {
+    return `${SYNTHETIC_TOOL_CALL_ID_PREFIX}${responseId}_${String(index)}`;
+  }
+  return `${SYNTHETIC_TOOL_CALL_ID_PREFIX}${randomUUID().replaceAll("-", "")}`;
+}
+
+function shouldSendToolCallId(id: string | undefined, idCounts: Map<string, number>): boolean {
+  if (id === undefined || id.length === 0) return false;
+  if (id.startsWith(SYNTHETIC_TOOL_CALL_ID_PREFIX)) return false;
+  return (idCounts.get(id) ?? 0) === 1;
+}
+
+function supportsMultimodalFunctionResponses(model: string | undefined): boolean {
+  const match = GEMINI_MAJOR_VERSION.exec(model ?? "");
+  const major = match?.[1];
+  return major !== undefined && Number.parseInt(major, 10) >= 3;
+}
+
+function dataUriMimeType(dataUri: string): string {
+  return dataUri.slice("data:".length).split(",", 1)[0]?.split(";", 1)[0]?.toLowerCase() ?? "";
+}
+
+function toolBlockDataUri(block: JsonValue): string | undefined {
+  if (!isPlainObject(block)) return undefined;
+  const record = block;
+  if (record.type === "image_url") {
+    const source = record.image_url;
+    const url = isString(source)
+      ? source
+      : isObject(source)
+        ? parseJsonObject(source).url
+        : undefined;
+    return isString(url) && url.startsWith("data:") ? url : undefined;
+  }
+  if (record.type === "file") {
+    const source = record.file;
+    const data = isObject(source) ? parseJsonObject(source).file_data : undefined;
+    return isString(data) && data.startsWith("data:") ? data : undefined;
+  }
+  return undefined;
+}
+
+function extractFunctionResponseMedia(content: JsonValue[]) {
+  const response: JsonValue[] = [];
+  const media: FunctionResponsePart[] = [];
+  for (const block of content) {
+    const dataUri = toolBlockDataUri(block);
+    if (dataUri === undefined || !FUNCTION_RESPONSE_MIME_TYPES.has(dataUriMimeType(dataUri))) {
+      response.push(block);
+      continue;
+    }
+    const fieldName =
+      isPlainObject(block) && block.type === "image_url" ? "image_url.url" : "file.file_data";
+    const parsed = parseDataUrl(dataUri, fieldName);
+    const displayName = `attachment-${String(media.length + 1)}`;
+    media.push({
+      inlineData: {
+        data: parsed.data,
+        displayName,
+        mimeType: parsed.mimeType,
+      },
+    });
+    response.push({ $ref: displayName });
+  }
+  return { media, response };
+}
+
+function functionResponse(
+  value: ChatMessage,
+  namesById: Map<string, string>,
+  sentCallIds: Set<string>,
+  multimodal: boolean,
+): Part {
+  let decoded: JsonValue = decodeToolContent(value.content);
+  let media: FunctionResponsePart[] | undefined;
+  if (multimodal && Array.isArray(decoded)) {
+    const extracted = extractFunctionResponseMedia(decoded);
+    decoded = extracted.response;
+    media = extracted.media.length === 0 ? undefined : extracted.media;
+  }
+  const response = normalizeToolResponse(decoded);
   const id = value.toolCallId;
   const name = value.name ?? (id === undefined ? undefined : namesById.get(id)) ?? "unknown";
   return {
     functionResponse: {
-      ...includeWhen(!(id === undefined), { id }),
+      ...includeWhen(id !== undefined && sentCallIds.has(id), { id }),
       name,
       response,
+      ...includeWhen(media !== undefined, { parts: media }),
     },
   };
+}
+
+function insertByOrder<T>(items: T[], orders: number[], position: number, item: T): void {
+  let index = orders.findIndex((order) => order > position);
+  if (index === -1) index = items.length;
+  items.splice(index, 0, item);
+  orders.splice(index, 0, position);
 }
 
 function assistantParts(
   message: ChatMessage,
   namesById: Map<string, string>,
+  idCounts: Map<string, number>,
+  sentCallIds: Set<string>,
+  callOrder: Map<string, number>,
   provider: string,
 ): Part[] {
   const parts: Part[] = [];
@@ -491,8 +742,12 @@ function assistantParts(
       thought: true,
     });
   }
+  const replayedCode = codeExecutionParts(message);
+  parts.push(...replayedCode);
   const hasToolCalls = (message.toolCalls ?? []).length > 0;
-  const skipEmptyText = hasToolCalls && isString(message.content) && message.content.length === 0;
+  const skipEmptyText =
+    (replayedCode.length > 0 || hasToolCalls) &&
+    (message.content === null || (isString(message.content) && message.content.length === 0));
   const content = skipEmptyText ? [] : contentParts(message.content, provider);
   if (messageSignature !== undefined) {
     const signedPart = [...content].reverse().find((part) => part.text !== undefined);
@@ -502,11 +757,14 @@ function assistantParts(
 
   for (const [index, toolCall] of (message.toolCalls ?? []).entries()) {
     namesById.set(toolCall.id, toolCall.function.name);
+    callOrder.set(toolCall.id, callOrder.get(toolCall.id) ?? index);
+    const sentId = shouldSendToolCallId(toolCall.id, idCounts) ? toolCall.id : undefined;
+    if (sentId !== undefined) sentCallIds.add(sentId);
     const signature = thoughtSignature(toolCall.extraContent);
     parts.push({
       functionCall: {
         args: parseFunctionArguments(toolCall.function.arguments, toolCall.function.name, provider),
-        id: toolCall.id,
+        ...includeWhen(sentId !== undefined, { id: sentId }),
         name: toolCall.function.name,
       },
       ...includeWhen(!(signature === undefined && index !== 0), {
@@ -526,29 +784,50 @@ function pendingFunctionResponseParts(contents: Content[]): Part[] | undefined {
   return last.parts;
 }
 
-function convertMessages(messages: ChatMessage[], provider: string): ConvertedMessages {
+function convertMessages(
+  messages: ChatMessage[],
+  provider: string,
+  model?: string,
+): ConvertedMessages {
   const systemInstruction = messages
     .filter((message) => message.role === "developer" || message.role === "system")
-    .map(textContent)
+    .map(systemInstructionText)
     .filter((value) => value.length > 0)
-    .join("\n\n");
+    .join("\n");
   const namesById = new Map<string, string>();
   const contents: Content[] = [];
+  const idCounts = new Map<string, number>();
+  for (const message of messages) {
+    if (message.role !== "assistant") continue;
+    for (const toolCall of message.toolCalls ?? []) {
+      idCounts.set(toolCall.id, (idCounts.get(toolCall.id) ?? 0) + 1);
+    }
+  }
+  const multimodal = supportsMultimodalFunctionResponses(model);
+  let callOrder = new Map<string, number>();
+  let sentCallIds = new Set<string>();
+  let pendingOrder: number[] = [];
 
   for (const message of messages) {
     if (message.role === "developer" || message.role === "system") continue;
     if (message.role === "assistant") {
+      callOrder = new Map();
+      sentCallIds = new Set();
       contents.push({
-        parts: assistantParts(message, namesById, provider),
+        parts: assistantParts(message, namesById, idCounts, sentCallIds, callOrder, provider),
         role: "model",
       });
       continue;
     }
     if (message.role === "tool") {
-      const part = functionResponse(message, namesById);
+      const part = functionResponse(message, namesById, sentCallIds, multimodal);
       const pending = pendingFunctionResponseParts(contents);
-      if (pending !== undefined) pending.push(part);
-      else contents.push({ parts: [part], role: "user" });
+      const position = callOrder.get(message.toolCallId ?? "") ?? callOrder.size;
+      if (pending !== undefined) insertByOrder(pending, pendingOrder, position, part);
+      else {
+        contents.push({ parts: [part], role: "user" });
+        pendingOrder = [position];
+      }
       continue;
     }
     contents.push({ parts: contentParts(message.content, provider), role: "user" });
@@ -838,6 +1117,20 @@ function normalizeFinishReason(value: JsonValue | undefined, hasToolCalls: boole
   return normalized;
 }
 
+function tokensByModality(
+  ...lists: ({ modality?: string; tokenCount?: number }[] | undefined)[]
+): Map<string, number> {
+  const totals = new Map<string, number>();
+  for (const list of lists) {
+    for (const count of list ?? []) {
+      if (count.modality === undefined || !count.tokenCount) continue;
+      const key = count.modality;
+      totals.set(key, (totals.get(key) ?? 0) + count.tokenCount);
+    }
+  }
+  return totals;
+}
+
 function normalizeUsage(
   value: GenerateContentResponse["usageMetadata"],
 ): CompletionUsage | undefined {
@@ -847,14 +1140,33 @@ function normalizeUsage(
   const promptTokens = (value.promptTokenCount ?? 0) + (value.toolUsePromptTokenCount ?? 0);
   const completionTokens = (value.candidatesTokenCount ?? 0) + (value.thoughtsTokenCount ?? 0);
   const totalTokens = value.totalTokenCount ?? promptTokens + completionTokens;
-  const promptTokensDetails =
-    value.cachedContentTokenCount === undefined
-      ? undefined
-      : { cachedTokens: value.cachedContentTokenCount };
+  const outputModalities = tokensByModality(value.candidatesTokensDetails);
+  const audioTokens = outputModalities.get(MediaModality.AUDIO) ?? outputModalities.get("AUDIO");
+  const imageTokens = outputModalities.get(MediaModality.IMAGE) ?? outputModalities.get("IMAGE");
   const completionTokensDetails =
-    value.thoughtsTokenCount === undefined
+    value.thoughtsTokenCount === undefined && audioTokens === undefined && imageTokens === undefined
       ? undefined
-      : { reasoningTokens: value.thoughtsTokenCount };
+      : {
+          ...includeWhen(value.thoughtsTokenCount !== undefined, {
+            reasoningTokens: value.thoughtsTokenCount,
+          }),
+          ...includeWhen(audioTokens !== undefined, { audioTokens }),
+          ...includeWhen(imageTokens !== undefined, { imageTokens }),
+        };
+  const inputAudioTokens = tokensByModality(
+    value.promptTokensDetails,
+    value.toolUsePromptTokensDetails,
+  );
+  const promptAudio = inputAudioTokens.get(MediaModality.AUDIO) ?? inputAudioTokens.get("AUDIO");
+  const promptTokensDetails =
+    value.cachedContentTokenCount === undefined && promptAudio === undefined
+      ? undefined
+      : {
+          ...includeWhen(value.cachedContentTokenCount !== undefined, {
+            cachedTokens: value.cachedContentTokenCount,
+          }),
+          ...includeWhen(promptAudio !== undefined, { audioTokens: promptAudio }),
+        };
   return {
     completionTokens,
     promptTokens,
@@ -959,13 +1271,21 @@ function streamAudioDelta(audio: ChatCompletionAudio): ChatCompletionDeltaAudio 
   };
 }
 
-function completionParts(parts: Part[] | undefined, candidateIndex: number) {
-  let content = "";
+function completionParts(
+  parts: Part[] | undefined,
+  candidateIndex: number,
+  codeExecutionState = new CodeExecutionState(),
+  responseId?: string,
+) {
+  // An empty text part is still an answer: Gemini 3 answers a conversation
+  // that ends on an assistant turn with "" and STOP.
+  let content: string | null = null;
   let reasoning = "";
   let messageSignature: string | undefined;
   const audioBlobs: { data: Buffer; mimeType: string }[] = [];
   const images: ImageContent[] = [];
   const toolCalls: ToolCall[] = [];
+  const codeExecution: JsonObject[] = [];
 
   for (const part of parts ?? []) {
     if (part.thought === true) {
@@ -981,7 +1301,7 @@ function completionParts(parts: Part[] | undefined, candidateIndex: number) {
           arguments: JSON.stringify(part.functionCall.args ?? {}),
           name,
         },
-        id: part.functionCall.id ?? `call_${candidateIndex}_${index}`,
+        id: geminiToolCallId(part.functionCall, responseId, index),
         type: "function",
         ...includeWhen(!(signature === undefined), {
           extraContent: { google: { thoughtSignature: signature } },
@@ -993,19 +1313,22 @@ function completionParts(parts: Part[] | undefined, candidateIndex: number) {
     if (image !== undefined) images.push(image);
     const audioBlob = inlineAudioBlob(part);
     if (audioBlob !== undefined) audioBlobs.push(audioBlob);
-    if (isString(part.text)) content += part.text;
+    const codeItem = codeExecutionItem(part, codeExecutionState);
+    if (codeItem !== undefined) codeExecution.push(codeItem);
+    if (isString(part.text)) content = (content ?? "") + part.text;
     messageSignature = part.thoughtSignature ?? messageSignature;
   }
 
+  const messageExtraContent = mergeCodeExecution(
+    messageSignature === undefined ? undefined : { google: { thoughtSignature: messageSignature } },
+    codeExecution,
+  );
+
   return {
-    audio: inlineDataAudio(audioBlobs, content, true),
-    content: content.length === 0 ? null : content,
+    audio: inlineDataAudio(audioBlobs, content ?? "", true),
+    content,
     ...includeWhen(images.length > 0, { images }),
-    ...includeWhen(!(messageSignature === undefined), {
-      messageExtraContent: {
-        google: { thoughtSignature: messageSignature },
-      },
-    }),
+    ...includeWhen(!(messageExtraContent === undefined), { messageExtraContent }),
     ...includeWhen(!(reasoning.length === 0), { reasoning }),
     ...includeWhen(!(toolCalls.length === 0), { toolCalls }),
   };
@@ -1090,7 +1413,7 @@ function inlinedBatchRequest(entry: JsonObject, provider: string): InlinedReques
     ? // SAFETY: Batch JSONL messages are validated by convertMessages before SDK submission.
       (body.messages as (ChatMessage & JsonObject)[])
     : [];
-  const converted = convertMessages(messages, provider);
+  const converted = convertMessages(messages, provider, isString(body.model) ? body.model : "");
   const stop = body.stop;
   // SAFETY: The provider contract establishes the asserted representation at this boundary.
   const config = compactObject({
@@ -1111,6 +1434,8 @@ function inlinedBatchRequest(entry: JsonObject, provider: string): InlinedReques
 
 export class GeminiProvider extends BaseProvider {
   readonly metadata: ProviderMetadata;
+  protected override readonly readsCacheControlSideChannel = true;
+  private readonly cacheIdentity: GeminiCacheIdentity;
   private readonly client: GoogleGenAI;
   private readonly fileAuth: GeminiFileAuth;
   private readonly interactionsVersion: string | undefined;
@@ -1134,6 +1459,14 @@ export class GeminiProvider extends BaseProvider {
       ...includeWhen(!(apiBase === undefined), { apiBase }),
       ...includeWhen(!(apiKey === undefined), { apiKey }),
     };
+    const clientOptions = isJsonObject(options.clientOptions) ? options.clientOptions : undefined;
+    const clientBaseUrl = asRecord(clientOptions?.httpOptions)?.baseUrl;
+    this.cacheIdentity = geminiCacheIdentity({
+      apiKey,
+      baseUrl: apiBase ?? (isString(clientBaseUrl) ? clientBaseUrl : undefined),
+      location: isString(clientOptions?.location) ? clientOptions.location : undefined,
+      project: isString(clientOptions?.project) ? clientOptions.project : undefined,
+    });
     this.interactionsVersion = interactionsApiVersion(geminiClientOptions(options.clientOptions));
     this.metadata = completeProviderMetadata({
       capabilities: {
@@ -1161,14 +1494,38 @@ export class GeminiProvider extends BaseProvider {
       return Promise.reject(new UnsupportedParameterError("parallelToolCalls", this.providerName));
     }
     const request = this.completionRequest(params);
+    if (!Array.isArray(request.contents)) {
+      return Promise.reject(new TypeError("Gemini completion contents must be an array."));
+    }
+    // SAFETY: convertMessages always produces Content[]; completionRequest forwards that array.
+    const converted: GeminiContextCacheRequest = {
+      config: request.config ?? {},
+      contents: request.contents as Content[],
+      model: request.model,
+    };
 
     return this.execute(async () => {
+      const cacheUse = await prepareContextCache({
+        client: this.client,
+        converted,
+        convertMessages: (messages) => convertMessages(messages, this.providerName, params.model),
+        identity: this.cacheIdentity,
+        messages: params.messages,
+        providerName: this.providerName,
+      });
       if (params.stream === true) {
-        const stream = await this.client.models.generateContentStream(request);
-        return this.protectStream(this.normalizeStream(stream));
+        const stream = await openStreamWithContextCache(
+          (cached) => this.client.models.generateContentStream(cached),
+          cacheUse,
+        );
+        return this.protectStream(this.normalizeStream(stream, cacheUse));
       }
-      const response = await this.client.models.generateContent(request);
+      const response = await sendWithContextCache(
+        (cached) => this.client.models.generateContent(cached),
+        cacheUse,
+      );
       const result = this.normalizeCompletion(response, params.model);
+      reportCacheWrite(result.usage, cacheUse);
       assertStructuredOutputCompleted(params, result, this.providerName);
       return result;
     });
@@ -1254,7 +1611,10 @@ export class GeminiProvider extends BaseProvider {
       for await (const model of page) {
         models.push({
           created: 0,
-          id: model.name ?? "unknown",
+          id:
+            model.name === undefined || model.name.length === 0
+              ? "unknown"
+              : model.name.replace(MODEL_RESOURCE_PREFIX, ""),
           object: "model",
           ownedBy: "google",
           raw: model,
@@ -1426,9 +1786,12 @@ export class GeminiProvider extends BaseProvider {
   }
 
   private completionRequest(params: CompletionParams): GenerateContentParameters {
-    const converted = convertMessages(params.messages, this.providerName);
+    const converted = convertMessages(params.messages, this.providerName, params.model);
     const tools = convertFunctionTools(params.tools, this.providerName);
-    const toolConfig = convertToolChoice(params.toolChoice, this.providerName);
+    const toolConfig = enableServerSideToolInvocations(
+      tools,
+      convertToolChoice(params.toolChoice, this.providerName),
+    );
     const thinkingConfig = thinkingConfiguration(
       params.reasoningEffort,
       params.model,
@@ -1472,7 +1835,12 @@ export class GeminiProvider extends BaseProvider {
   ): ChatCompletion {
     const choices: ChatCompletion["choices"] = (response.candidates ?? []).map(
       (candidate, candidateIndex) => {
-        const normalized = completionParts(candidate.content?.parts, candidateIndex);
+        const normalized = completionParts(
+          candidate.content?.parts,
+          candidateIndex,
+          new CodeExecutionState(),
+          response.responseId,
+        );
         const finishReason = normalizeFinishReason(
           candidate.finishReason,
           normalized.toolCalls !== undefined,
@@ -1543,8 +1911,10 @@ export class GeminiProvider extends BaseProvider {
 
   private async *normalizeStream(
     stream: AsyncIterable<GenerateContentResponse>,
+    cacheUse?: ContextCacheUse,
   ): AsyncIterable<ChatCompletionChunk> {
     const state: StreamState = {
+      codeExecution: new CodeExecutionState(),
       created: unixTimestamp(),
       emittedRoles: new Set(),
       id: "gemini-stream",
@@ -1584,6 +1954,7 @@ export class GeminiProvider extends BaseProvider {
           const audioBlobs: { data: Buffer; mimeType: string }[] = [];
           const images: ImageContent[] = [];
           const toolCalls: ToolCallDelta[] = [];
+          const codeExecution: JsonObject[] = [];
 
           for (const part of candidate.content?.parts ?? []) {
             if (part.thought === true) {
@@ -1599,7 +1970,7 @@ export class GeminiProvider extends BaseProvider {
                   arguments: JSON.stringify(part.functionCall.args ?? {}),
                   name: part.functionCall.name ?? "unknown",
                 },
-                id: part.functionCall.id ?? `call_${choiceIndex}_${toolIndex}`,
+                id: geminiToolCallId(part.functionCall, response.responseId ?? state.id, toolIndex),
                 index: toolIndex,
                 type: "function",
                 ...includeWhen(!(signature === undefined), {
@@ -1612,17 +1983,21 @@ export class GeminiProvider extends BaseProvider {
             if (image !== undefined) images.push(image);
             const audioBlob = inlineAudioBlob(part);
             if (audioBlob !== undefined) audioBlobs.push(audioBlob);
+            const codeItem = codeExecutionItem(part, state.codeExecution);
+            if (codeItem !== undefined) codeExecution.push(codeItem);
             if (isString(part.text)) content += part.text;
             messageSignature = part.thoughtSignature ?? messageSignature;
           }
 
           if (content.length > 0) delta.content = content;
           if (reasoning.length > 0) delta.reasoning = reasoning;
-          if (messageSignature !== undefined) {
-            delta.extraContent = {
-              google: { thoughtSignature: messageSignature },
-            };
-          }
+          const extraContent = mergeCodeExecution(
+            messageSignature === undefined
+              ? undefined
+              : { google: { thoughtSignature: messageSignature } },
+            codeExecution,
+          );
+          if (extraContent !== undefined) delta.extraContent = extraContent;
           if (images.length > 0) delta.images = images;
           const audio = inlineDataAudio(audioBlobs, content, false);
           if (audio !== undefined) delta.audio = streamAudioDelta(audio);
@@ -1646,6 +2021,7 @@ export class GeminiProvider extends BaseProvider {
       }
 
       const usage = normalizeUsage(response.usageMetadata);
+      if (cacheUse !== undefined) reportCacheWrite(usage, cacheUse);
       yield {
         choices,
         created: state.created,

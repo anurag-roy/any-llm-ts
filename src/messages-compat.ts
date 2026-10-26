@@ -1,10 +1,10 @@
 import { includeWhen } from "./utils.js";
 import type { JsonValue } from "./types.js";
-import { parseJsonObject, parseJsonValue } from "./utils.js";
+import { isJsonObject, isJsonValue, parseJsonObject, parseJsonValue } from "./utils.js";
 import type { JsonObject } from "./types.js";
 import { isNumber, isObject, isString } from "./utils.js";
 import { InvalidRequestError } from "./errors.js";
-import { normalizeOutputConfig } from "./structured-output.js";
+import { isStructuredOutputFormat, normalizeOutputConfig } from "./structured-output.js";
 import type {
   CacheCreationTokenDetails,
   ChatCompletion,
@@ -26,6 +26,7 @@ import type {
   MessageStreamEvent,
   MessagesInputContentBlock,
   MessagesParams,
+  MessagesTextBlock,
   MessageUsage,
   PromptTokensDetails,
   TextContentPart,
@@ -173,13 +174,105 @@ function renderToolResultBlockAsText(block: JsonObject): string | undefined {
   return undefined;
 }
 
+function blockRecord(block: MessagesInputContentBlock): JsonObject {
+  return parseJsonObject(block);
+}
+
+function blockExtraContent(block: MessagesInputContentBlock): JsonObject | undefined {
+  const record = blockRecord(block);
+  const extra = record.extraContent ?? record.extra_content;
+  return isObject(extra) && !Array.isArray(extra) ? parseJsonObject(extra) : undefined;
+}
+
+function googleExtraContent(extraContent: JsonObject | undefined): JsonObject {
+  const google = extraContent?.google;
+  return isObject(google) && !Array.isArray(google) ? parseJsonObject(google) : {};
+}
+
+function mergeCacheControl(
+  existing: JsonObject | undefined,
+  marks: unknown[],
+): JsonObject | undefined {
+  const breakpoints = marks.filter(
+    (mark): mark is JsonObject => isObject(mark) && !Array.isArray(mark),
+  );
+  if (existing !== undefined) breakpoints.push(existing);
+  if (breakpoints.length === 0) return undefined;
+  const merged: JsonObject = { type: "ephemeral" };
+  if (breakpoints.some((mark) => mark.ttl === "1h")) merged.ttl = "1h";
+  else if (breakpoints.some((mark) => mark.ttl === "5m")) merged.ttl = "5m";
+  return merged;
+}
+
+function markCacheBreakpoint(message: ChatMessage, marks: unknown[]): void {
+  const extraContent = message.extraContent;
+  const existing = isObject(extraContent)
+    ? (extraContent.cache_control ?? extraContent.cacheControl)
+    : undefined;
+  const merged = mergeCacheControl(
+    isObject(existing) && !Array.isArray(existing) ? parseJsonObject(existing) : undefined,
+    marks,
+  );
+  if (merged === undefined) return;
+  message.extraContent = { ...extraContent, cache_control: merged };
+}
+
+function blockCacheControls(blocks: unknown[]): unknown[] {
+  return blocks.flatMap((block) => {
+    if (!isObject(block) || Array.isArray(block)) return [];
+    const record = parseJsonObject(block);
+    return [record.cacheControl, record.cache_control];
+  });
+}
+
+function serverToolUseToExecutableCode(block: JsonObject): JsonObject {
+  const toolInput =
+    isObject(block.input) && !Array.isArray(block.input) ? parseJsonObject(block.input) : {};
+  return {
+    code: isString(toolInput.code) ? toolInput.code : "",
+    id: isString(block.id) ? block.id : "",
+    language: isString(toolInput.language) ? toolInput.language : "PYTHON",
+    type: "executable_code",
+  };
+}
+
+function codeExecutionToolResultToItem(block: JsonObject): JsonObject {
+  const content =
+    isObject(block.content) && !Array.isArray(block.content) ? parseJsonObject(block.content) : {};
+  const failed = content.type === "code_execution_tool_result_error";
+  const outcome = failed || content.return_code !== 0 ? "OUTCOME_FAILED" : "OUTCOME_OK";
+  const output = failed
+    ? isString(content.error_code)
+      ? content.error_code
+      : ""
+    : `${isString(content.stdout) ? content.stdout : ""}${isString(content.stderr) ? content.stderr : ""}`;
+  return {
+    id: isString(block.tool_use_id)
+      ? block.tool_use_id
+      : isString(block.toolUseId)
+        ? block.toolUseId
+        : "",
+    outcome,
+    output,
+    type: "code_execution_result",
+  };
+}
+
 function assistantMessage(content: MessagesInputContentBlock[]): ChatMessage {
   const text: string[] = [];
   const reasoning: string[] = [];
   const toolCalls: NonNullable<ChatMessage["toolCalls"]> = [];
+  const google: JsonObject = {};
+  const codeExecution: JsonObject[] = [];
   let signature: string | undefined;
   for (const block of content) {
-    if (block.type === "text" && "text" in block && isString(block.text)) text.push(block.text);
+    if (block.type === "text" && "text" in block && isString(block.text)) {
+      text.push(block.text);
+      const googleExtra = googleExtraContent(blockExtraContent(block));
+      for (const [key, value] of Object.entries(googleExtra)) {
+        if (key !== "code_execution") google[key] = value;
+      }
+    }
     if (block.type === "thinking" && "thinking" in block && isString(block.thinking)) {
       reasoning.push(block.thinking);
       if ("signature" in block && isString(block.signature) && block.signature.length > 0) {
@@ -193,6 +286,7 @@ function assistantMessage(content: MessagesInputContentBlock[]): ChatMessage {
       isString(block.id) &&
       isString(block.name)
     ) {
+      const extraContent = blockExtraContent(block);
       toolCalls.push({
         function: {
           arguments: JSON.stringify("input" in block ? block.input : {}),
@@ -200,29 +294,45 @@ function assistantMessage(content: MessagesInputContentBlock[]): ChatMessage {
         },
         id: block.id,
         type: "function",
+        ...includeWhen(!(extraContent === undefined), { extraContent }),
       });
     }
+    if (block.type === "server_tool_use" && blockRecord(block).name === "code_execution") {
+      codeExecution.push(serverToolUseToExecutableCode(blockRecord(block)));
+    }
+    if (block.type === "code_execution_tool_result") {
+      codeExecution.push(codeExecutionToolResultToItem(blockRecord(block)));
+    }
   }
+  if (codeExecution.length > 0) google.code_execution = codeExecution;
+  const extraContent: JsonObject = {};
   const thinkingCount = content.filter((block) => block.type === "thinking").length;
+  if (isString(signature) && thinkingCount === 1) extraContent.anthropic = { signature };
+  if (Object.keys(google).length > 0) extraContent.google = google;
   return {
     content: text.length === 0 ? null : text.join(""),
     role: "assistant",
     ...includeWhen(!(reasoning.length === 0), { reasoning: reasoning.join("") }),
     ...includeWhen(!(toolCalls.length === 0), { toolCalls }),
-    ...includeWhen(isString(signature) && thinkingCount === 1, {
-      extraContent: { anthropic: { signature } },
-    }),
+    ...includeWhen(Object.keys(extraContent).length > 0, { extraContent }),
   };
 }
 
-function userMessages(content: MessagesInputContentBlock[]): ChatMessage[] {
+function userMessages(
+  content: MessagesInputContentBlock[],
+  cacheBreakpoints: boolean,
+): ChatMessage[] {
   const messages: ChatMessage[] = [];
   let parts: MessageContentPart[] = [];
+  let contentMarks: unknown[] = [];
   const heldParts: MessageContentPart[] = [];
   const flushUser = (): void => {
     if (parts.length === 0) return;
-    messages.push({ content: parts, role: "user" });
+    const message: ChatMessage = { content: parts, role: "user" };
+    if (cacheBreakpoints) markCacheBreakpoint(message, contentMarks);
+    messages.push(message);
     parts = [];
+    contentMarks = [];
   };
 
   for (const block of content) {
@@ -236,43 +346,70 @@ function userMessages(content: MessagesInputContentBlock[]): ChatMessage[] {
         if (toolText.length === 0) toolText = "Error";
         else if (!toolText.startsWith("Error:")) toolText = `Error: ${toolText}`;
       }
-      messages.push({
+      const toolMessage: ChatMessage = {
         content: toolText,
         role: "tool",
         toolCallId: block.toolUseId,
-      });
+      };
+      if (cacheBreakpoints) {
+        const toolContent = "content" in block ? block.content : undefined;
+        const nested = Array.isArray(toolContent) ? blockCacheControls(toolContent) : [];
+        markCacheBreakpoint(toolMessage, [
+          blockRecord(block).cacheControl,
+          blockRecord(block).cache_control,
+          ...nested,
+        ]);
+      }
+      messages.push(toolMessage);
       heldParts.push(...extraParts);
       continue;
     }
     if (block.type === "text" && "text" in block && isString(block.text)) {
       parts.push({ text: block.text, type: "text" });
+      contentMarks.push(blockRecord(block).cacheControl, blockRecord(block).cache_control);
       continue;
     }
     if (block.type === "image") {
       parts.push(convertImageBlock(parseJsonObject(block, "image block")));
+      contentMarks.push(blockRecord(block).cacheControl, blockRecord(block).cache_control);
       continue;
     }
     parts.push({ ...parseJsonObject(block, "message content block") });
+    contentMarks.push(blockRecord(block).cacheControl, blockRecord(block).cache_control);
   }
   if (heldParts.length > 0 || parts.length > 0) {
-    messages.push({ content: [...heldParts, ...parts], role: "user" });
+    const message: ChatMessage = { content: [...heldParts, ...parts], role: "user" };
+    if (cacheBreakpoints) markCacheBreakpoint(message, contentMarks);
+    messages.push(message);
   }
   return messages;
 }
 
-function toChatMessages(params: MessagesParams): ChatMessage[] {
+function toChatMessages(params: MessagesParams, cacheBreakpoints: boolean): ChatMessage[] {
   const messages: ChatMessage[] = [];
   const system = systemText(params.system);
-  if (system !== undefined && system.length > 0) messages.push({ content: system, role: "system" });
+  if (system !== undefined && system.length > 0) {
+    const systemMessage: ChatMessage = { content: system, role: "system" };
+    if (cacheBreakpoints && Array.isArray(params.system)) {
+      markCacheBreakpoint(systemMessage, blockCacheControls(params.system));
+    }
+    messages.push(systemMessage);
+  }
 
   for (const message of params.messages) {
     if (isString(message.content)) {
       messages.push({ content: message.content, role: message.role });
     } else if (message.role === "assistant") {
-      messages.push(assistantMessage(message.content));
+      const converted = assistantMessage(message.content);
+      if (cacheBreakpoints) markCacheBreakpoint(converted, blockCacheControls(message.content));
+      messages.push(converted);
     } else {
-      messages.push(...userMessages(message.content));
+      messages.push(...userMessages(message.content, cacheBreakpoints));
     }
+  }
+  const last = messages.at(-1);
+  if (cacheBreakpoints && params.cacheControl !== undefined && last !== undefined) {
+    markCacheBreakpoint(last, [params.cacheControl]);
   }
   return messages;
 }
@@ -295,6 +432,33 @@ function outputFormat(value: MessagesParams["outputFormat"]) {
     },
     type: "json_schema",
   };
+}
+
+const outputConfigEfforts = ["low", "medium", "high", "xhigh", "max"] as const;
+
+function isOutputConfigEffort(
+  value: JsonValue | undefined,
+): value is (typeof outputConfigEfforts)[number] {
+  return isString(value) && outputConfigEfforts.some((effort) => effort === value);
+}
+
+/** Return `output_config.effort` as a completion `reasoningEffort`, or undefined if unset. */
+export function outputConfigEffort(params: MessagesParams): CompletionParams["reasoningEffort"] {
+  if (
+    params.outputFormat === undefined ||
+    !isObject(params.outputFormat) ||
+    isStructuredOutputFormat(params.outputFormat)
+  ) {
+    return undefined;
+  }
+  const effort = params.outputFormat.effort;
+  if (effort === undefined) return undefined;
+  if (!isOutputConfigEffort(effort)) {
+    throw new InvalidRequestError(
+      `output_config effort ${JSON.stringify(effort)} is not one of ${outputConfigEfforts.join(", ")}.`,
+    );
+  }
+  return effort;
 }
 
 function reasoningEffort(
@@ -321,22 +485,48 @@ function toolChoice(
   return "auto";
 }
 
-export function messagesToCompletionParams(params: MessagesParams): CompletionParams {
-  const effort = reasoningEffort(params.thinking);
+function isAnthropicMessagesTool(tool: JsonObject): boolean {
+  return "name" in tool || "type" in tool || "inputSchema" in tool || "input_schema" in tool;
+}
+
+function convertMessagesTools(
+  tools: NonNullable<MessagesParams["tools"]>,
+): NonNullable<CompletionParams["tools"]> {
+  return tools.map((tool) => {
+    const record = parseJsonObject(tool);
+    if (!isAnthropicMessagesTool(record)) return record;
+    const parameters = isObject(record.inputSchema)
+      ? parseJsonObject(record.inputSchema)
+      : isObject(record.input_schema)
+        ? parseJsonObject(record.input_schema)
+        : {};
+    return {
+      function: {
+        name: isString(record.name) ? record.name : "",
+        parameters,
+        ...includeWhen(isString(record.description), { description: record.description }),
+      },
+      type: "function" as const,
+    };
+  });
+}
+
+export function messagesToCompletionParams(
+  params: MessagesParams,
+  options: { cacheBreakpoints?: boolean } = {},
+): CompletionParams {
+  const cacheBreakpoints = options.cacheBreakpoints === true;
+  const thinkingType = params.thinking?.type;
+  const configEffort = outputConfigEffort(params);
+  const effort =
+    thinkingType === "disabled" ? "none" : (configEffort ?? reasoningEffort(params.thinking));
   const format = outputFormat(params.outputFormat);
   const selectedToolChoice =
     params.toolChoice === undefined ? undefined : toolChoice(params.toolChoice);
   const disableParallel = params.toolChoice?.disableParallelToolUse === true;
-  const tools = params.tools?.map((tool) => ({
-    function: {
-      name: tool.name,
-      parameters: tool.inputSchema,
-      ...includeWhen(!(tool.description === undefined), { description: tool.description }),
-    },
-    type: "function" as const,
-  }));
+  const tools = params.tools === undefined ? undefined : convertMessagesTools(params.tools);
   return {
-    messages: toChatMessages(params),
+    messages: toChatMessages(params, cacheBreakpoints),
     model: params.model,
     maxTokens: params.maxTokens,
     ...includeWhen(!(effort === undefined), { reasoningEffort: effort }),
@@ -452,25 +642,137 @@ function toolInput(value: string): JsonValue {
   }
 }
 
+function codeExecutionItems(extraContent: JsonObject | undefined): JsonObject[] {
+  const items = googleExtraContent(extraContent).code_execution;
+  if (!Array.isArray(items)) return [];
+  return items.flatMap((item) =>
+    isObject(item) && !Array.isArray(item) ? [parseJsonObject(item)] : [],
+  );
+}
+
+function executableCodeBlock(item: JsonObject): MessageContentBlock {
+  return {
+    id: isString(item.id) ? item.id : "",
+    input: {
+      code: isString(item.code) ? item.code : "",
+      language: isString(item.language) ? item.language : "PYTHON",
+    },
+    name: "code_execution",
+    type: "server_tool_use",
+  };
+}
+
+function inlineOutput(item: JsonObject): JsonObject {
+  return {
+    data: isString(item.data) ? item.data : "",
+    mime_type: isString(item.mime_type)
+      ? item.mime_type
+      : isString(item.mimeType)
+        ? item.mimeType
+        : "",
+  };
+}
+
+function codeExecutionResultBlock(item: JsonObject, outputs: JsonObject[]): MessageContentBlock {
+  const ok = item.outcome === "OUTCOME_OK";
+  const output = isString(item.output) ? item.output : "";
+  const result: JsonObject = {
+    content: [],
+    return_code: ok ? 0 : 1,
+    stderr: ok ? "" : output,
+    stdout: ok ? output : "",
+    type: "code_execution_result",
+  };
+  if (outputs.length > 0) result.inline_outputs = outputs;
+  return {
+    content: result,
+    tool_use_id: isString(item.id) ? item.id : "",
+    type: "code_execution_tool_result",
+  };
+}
+
+function codeExecutionBlocks(extraContent: JsonObject | undefined): MessageContentBlock[] {
+  const items = codeExecutionItems(extraContent);
+  const outputsById = new Map<string, JsonObject[]>();
+  let lastOutputs: JsonObject[] | undefined;
+  for (const item of items) {
+    if (item.type === "code_execution_result") {
+      const id = isString(item.id) ? item.id : "";
+      lastOutputs = [];
+      outputsById.set(id, lastOutputs);
+    }
+  }
+  for (const item of items) {
+    if (item.type !== "code_execution_output") continue;
+    const id = isString(item.id) ? item.id : "";
+    const target = outputsById.get(id) ?? lastOutputs;
+    if (target !== undefined) target.push(inlineOutput(item));
+  }
+  const blocks: MessageContentBlock[] = [];
+  for (const item of items) {
+    if (item.type === "executable_code") blocks.push(executableCodeBlock(item));
+    else if (item.type === "code_execution_result") {
+      blocks.push(
+        codeExecutionResultBlock(item, outputsById.get(isString(item.id) ? item.id : "") ?? []),
+      );
+    }
+  }
+  return blocks;
+}
+
+function textBlock(text: string, thoughtSignature: JsonValue | undefined): MessagesTextBlock {
+  if (isString(thoughtSignature) && thoughtSignature.length > 0) {
+    return {
+      extraContent: { google: { thoughtSignature } },
+      text,
+      type: "text",
+    };
+  }
+  return { text, type: "text" };
+}
+
+function toolUseBlock(
+  id: string,
+  name: string,
+  input: JsonValue,
+  extraContent: JsonObject | undefined,
+): MessageContentBlock {
+  return {
+    id,
+    input,
+    name,
+    type: "tool_use",
+    ...includeWhen(!(extraContent === undefined), { extraContent }),
+  };
+}
+
 export function completionToMessageResponse(completion: ChatCompletion): MessageResponse {
   const choice = completion.choices[0];
   const content: MessageContentBlock[] = [];
+  const google = googleExtraContent(choice?.message.extraContent);
+  let textSignature: JsonValue | undefined = google.thoughtSignature ?? google.thought_signature;
   if (choice?.message.reasoning !== undefined && choice.message.reasoning !== null) {
     content.push({ thinking: choice.message.reasoning, type: "thinking" });
   }
+  content.push(...codeExecutionBlocks(choice?.message.extraContent));
   const text = choice === undefined ? "" : textFromChatContent(choice.message.content);
-  if (text.length > 0) content.push({ text, type: "text" });
+  if (text.length > 0) {
+    content.push(textBlock(text, textSignature));
+    textSignature = undefined;
+  }
   const refusal = refusalText(choice?.message.refusal);
   if (refusal !== undefined) content.push({ text: refusal, type: "text" });
   for (const call of choice?.message.toolCalls ?? []) {
-    content.push({
-      id: call.id,
-      input: toolInput(call.function.arguments),
-      name: call.function.name,
-      type: "tool_use",
-    });
+    content.push(
+      toolUseBlock(
+        call.id,
+        call.function.name,
+        toolInput(call.function.arguments),
+        call.extraContent,
+      ),
+    );
   }
-  if (content.length === 0) content.push({ text: "", type: "text" });
+  if (content.length === 0) content.push(textBlock("", textSignature));
   return {
     content,
     id: completion.id,
@@ -489,22 +791,45 @@ interface StreamState {
   cacheCreation?: CacheCreationTokenDetails;
   cacheCreationInputTokens?: number;
   cacheReadInputTokens?: number;
+  codeResultIds: Set<string>;
   inputTokens: number;
   outputTokens: number;
+  pendingCodeResult?: { item: JsonObject; outputs: JsonObject[] };
   started: boolean;
   stopReason: MessageStopReason | null;
   toolBlockIndexes: Map<number, number>;
 }
 
-function closeBlock(state: StreamState): ContentBlockStopEvent[] {
-  if (state.blockType === undefined) return [];
-  const indexes =
-    state.toolBlockIndexes.size === 0
-      ? [state.blockIndex]
-      : [...state.toolBlockIndexes.values()].sort((left, right) => left - right);
-  state.toolBlockIndexes.clear();
-  delete state.blockType;
-  return indexes.map((index) => ({ index, type: "content_block_stop" }));
+function pendingCodeResultEvents(
+  state: StreamState,
+): (ContentBlockStartEvent | ContentBlockStopEvent)[] {
+  if (state.pendingCodeResult === undefined) return [];
+  const pending = state.pendingCodeResult;
+  delete state.pendingCodeResult;
+  state.blockIndex += 1;
+  return [
+    {
+      contentBlock: codeExecutionResultBlock(pending.item, pending.outputs),
+      index: state.blockIndex,
+      type: "content_block_start",
+    },
+    { index: state.blockIndex, type: "content_block_stop" },
+  ];
+}
+
+function closeBlock(state: StreamState): (ContentBlockStartEvent | ContentBlockStopEvent)[] {
+  const events: (ContentBlockStartEvent | ContentBlockStopEvent)[] = [];
+  if (state.blockType !== undefined) {
+    const indexes =
+      state.toolBlockIndexes.size === 0
+        ? [state.blockIndex]
+        : [...state.toolBlockIndexes.values()].sort((left, right) => left - right);
+    state.toolBlockIndexes.clear();
+    delete state.blockType;
+    events.push(...indexes.map((index) => ({ index, type: "content_block_stop" as const })));
+  }
+  events.push(...pendingCodeResultEvents(state));
+  return events;
 }
 
 function openBlock(
@@ -532,12 +857,7 @@ function toolDeltaEvents(state: StreamState, call: ToolCallDelta): MessageStream
     state.blockType = "tool_use";
     state.toolBlockIndexes.set(call.index, state.blockIndex);
     events.push({
-      contentBlock: {
-        id: call.id,
-        input: {},
-        name: call.function?.name ?? "",
-        type: "tool_use",
-      },
+      contentBlock: toolUseBlock(call.id, call.function?.name ?? "", {}, call.extraContent),
       index: state.blockIndex,
       type: "content_block_start",
     });
@@ -607,6 +927,32 @@ function chunkEvents(chunk: ChatCompletionChunk, state: StreamState): MessageStr
       type: "content_block_delta",
     });
   }
+  for (const item of codeExecutionItems(choice.delta.extraContent)) {
+    const itemId = isString(item.id) ? item.id : "";
+    if (item.type === "code_execution_output") {
+      const pending = state.pendingCodeResult;
+      if (
+        pending !== undefined &&
+        (itemId === (isString(pending.item.id) ? pending.item.id : "") ||
+          !state.codeResultIds.has(itemId))
+      ) {
+        pending.outputs.push(inlineOutput(item));
+      }
+    } else if (item.type === "executable_code") {
+      events.push(...closeBlock(state));
+      state.blockIndex += 1;
+      events.push({
+        contentBlock: executableCodeBlock(item),
+        index: state.blockIndex,
+        type: "content_block_start",
+      });
+      events.push({ index: state.blockIndex, type: "content_block_stop" });
+    } else if (item.type === "code_execution_result") {
+      events.push(...closeBlock(state));
+      state.pendingCodeResult = { item, outputs: [] };
+      state.codeResultIds.add(itemId);
+    }
+  }
   if (choice.delta.content !== undefined && choice.delta.content !== null) {
     events.push(...openBlock(state, "text", { text: "", type: "text" }));
     if (choice.delta.content.length > 0) {
@@ -662,6 +1008,7 @@ async function* messageEventsFromCompletionStream(
 ): AsyncIterable<MessageStreamEvent> {
   const state: StreamState = {
     blockIndex: -1,
+    codeResultIds: new Set(),
     inputTokens: 0,
     outputTokens: 0,
     started: false,
@@ -788,4 +1135,109 @@ export function messagesContainerRequest(value: MessageContainer | string): Json
       })),
     }),
   };
+}
+
+const ANTHROPIC_SERVER_TOOL_ID_PREFIX = "srvtoolu_";
+
+function blockId(block: JsonObject, key: "id" | "tool_use_id"): string | undefined {
+  if (key === "id") return isString(block.id) ? block.id : undefined;
+  if (isString(block.tool_use_id)) return block.tool_use_id;
+  if (isString(block.toolUseId)) return block.toolUseId;
+  return undefined;
+}
+
+function isForeignCodeExecution(block: JsonValue): block is JsonObject {
+  if (!isJsonObject(block)) return false;
+  const record = block;
+  let id: string | undefined;
+  if (record.type === "server_tool_use" && record.name === "code_execution")
+    id = blockId(record, "id");
+  else if (record.type === "code_execution_tool_result") id = blockId(record, "tool_use_id");
+  else return false;
+  return !(isString(id) && id.startsWith(ANTHROPIC_SERVER_TOOL_ID_PREFIX));
+}
+
+function codeExecutionAsText(use: JsonObject | undefined, result: JsonObject | undefined): string {
+  const parts: string[] = [];
+  if (use !== undefined) {
+    const toolInput =
+      isObject(use.input) && !Array.isArray(use.input) ? parseJsonObject(use.input) : {};
+    const language = (isString(toolInput.language) ? toolInput.language : "python").toLowerCase();
+    parts.push(
+      `Code execution (${language}):\n\`\`\`${language}\n${isString(toolInput.code) ? toolInput.code : ""}\n\`\`\``,
+    );
+  }
+  if (result !== undefined) {
+    const content =
+      isObject(result.content) && !Array.isArray(result.content)
+        ? parseJsonObject(result.content)
+        : {};
+    const output =
+      content.type === "code_execution_tool_result_error"
+        ? `Error: ${isString(content.error_code) ? content.error_code : ""}`
+        : `${isString(content.stdout) ? content.stdout : ""}${isString(content.stderr) ? content.stderr : ""}`;
+    parts.push(`Output:\n${output}`);
+  }
+  return parts.join("\n");
+}
+
+function hasBridgeSideChannel(block: JsonValue): boolean {
+  if (!isJsonObject(block)) return false;
+  return "extra_content" in block || "extraContent" in block || isForeignCodeExecution(block);
+}
+
+function prepareNativeBlocks(blocks: JsonValue[]): JsonValue[] | undefined {
+  if (!blocks.some((block) => hasBridgeSideChannel(block))) return undefined;
+  const results = new Map<string, JsonObject>();
+  for (const block of blocks) {
+    if (!isForeignCodeExecution(block) || block.type !== "code_execution_tool_result") continue;
+    const id = blockId(block, "tool_use_id");
+    if (id !== undefined) results.set(id, block);
+  }
+  const useIds = new Set(
+    blocks.flatMap((block) => {
+      if (!isForeignCodeExecution(block) || block.type !== "server_tool_use") return [];
+      const id = blockId(block, "id");
+      return id === undefined ? [] : [id];
+    }),
+  );
+  const prepared: JsonValue[] = [];
+  for (const block of blocks) {
+    if (!isJsonObject(block)) {
+      prepared.push(block);
+      continue;
+    }
+    const record = block;
+    if (isForeignCodeExecution(record) && record.type === "server_tool_use") {
+      const id = blockId(record, "id");
+      prepared.push({
+        text: codeExecutionAsText(record, id === undefined ? undefined : results.get(id)),
+        type: "text",
+      });
+    } else if (isForeignCodeExecution(record)) {
+      const id = blockId(record, "tool_use_id");
+      if (id === undefined || !useIds.has(id)) {
+        prepared.push({ text: codeExecutionAsText(undefined, record), type: "text" });
+      }
+    } else {
+      const stripped: JsonObject = {};
+      for (const [key, value] of Object.entries(record)) {
+        if (key === "extra_content" || key === "extraContent") continue;
+        if (value === undefined || isJsonValue(value)) stripped[key] = value;
+      }
+      prepared.push(stripped);
+    }
+  }
+  return prepared;
+}
+
+export function prepareBlocksForNativeMessages<Message extends { content?: unknown }>(
+  messages: Message[],
+): Message[] {
+  return messages.map((message) => {
+    if (!Array.isArray(message.content) || !message.content.every(isJsonValue)) return message;
+    const blocks = prepareNativeBlocks(message.content);
+    if (blocks === undefined) return message;
+    return { ...message, content: blocks };
+  });
 }

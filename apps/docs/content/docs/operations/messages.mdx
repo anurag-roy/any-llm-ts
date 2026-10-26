@@ -6,8 +6,18 @@ description: Use a normalized Messages-shaped API across native and compatible p
 `messages()` accepts Messages-style content blocks, tools, thinking controls, and stream events.
 Anthropic-family adapters use their native Messages protocol. Other compatible providers translate
 the request through chat completions and translate the result back into `MessageResponse`.
-`metadata.messagesNative` is true only for providers that call a real Anthropic Messages endpoint
-(`anthropic`, `azureanthropic`, `vertexaianthropic`, `meta`, and `otari`).
+`metadata.messagesNative` is true for providers that can call a real Anthropic Messages endpoint
+(`anthropic`, `azureanthropic`, `vertexaianthropic`, `bedrock`, `meta`, and `otari`). Bedrock
+serves only Claude model ids natively (`anthropic.` in the id, including cross-region and
+inference-profile forms). Use `AnyLLM.servesMessagesNatively(provider, model)` when the answer
+depends on the model. Other Bedrock models, and Claude requests with `outputFormat`, still use
+the Completions bridge. On the native Claude path, Bedrock keeps only the betas AWS documents,
+moves a top-level `cacheControl` onto the last cacheable block, adds
+`thinking-display-updates-2026-08-18` when `thinking.display` is `"updates"`, and refuses
+`container`. Native Anthropic and Meta calls strip the Messages bridge `extraContent` side-channel
+and render another provider's code-execution blocks as text, so a conversation that switches from
+Gemini to Claude does not send fields or ids Anthropic never issued. Gemini and Vertex AI read
+`cacheControl` breakpoints from that side-channel; other compatibility providers do not.
 
 ```ts
 import { messages } from "any-llm-ts";
@@ -77,6 +87,8 @@ Compatibility streams emit the standard message-start, content-block, message-de
 message-stop lifecycle. Native-only beta and context-management options reject on adapters that
 cannot preserve their semantics.
 
-Anthropic and Otari can stream schema-constrained Messages events together with `outputFormat`.
-Other providers reject that combination because structured Messages parsing needs a complete
-response.
+A typed `outputFormat` (one with `parse`) still cannot stream except on Anthropic and Otari,
+because parsing needs a finished message. A raw `output_config` dict streams as JSON text through
+the Completions bridge, with its schema sent as `responseFormat`. Providers that cannot stream a
+`responseFormat` still refuse at the completion layer. Meta's native Messages path refuses any
+`outputFormat` combined with `stream`.

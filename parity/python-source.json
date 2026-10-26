@@ -1,7 +1,7 @@
 {
   "source": {
     "repository": "mozilla-ai/any-llm",
-    "commit": "18ed82b8ae89db560bf0b1ec8bccb752fc0e2b5d"
+    "commit": "14b25952739703497fefcd5df7fc0690410b4b2b"
   },
   "providers": [
     "anthropic",
@@ -26,6 +26,7 @@
     "huggingface",
     "inception",
     "kenari",
+    "liner",
     "llama",
     "llamacpp",
     "llamafile",
@@ -58,7 +59,15 @@
     "xai",
     "zai"
   ],
-  "messagesNative": ["anthropic", "azureanthropic", "meta", "otari", "vertexaianthropic"],
+  "messagesNative": [
+    "anthropic",
+    "azureanthropic",
+    "bedrock",
+    "deepseek",
+    "meta",
+    "otari",
+    "vertexaianthropic"
+  ],
   "verifiedProviders": [
     "anthropic",
     "azureopenai",
@@ -92,6 +101,7 @@
     "responses",
     "messages",
     "embedding",
+    "imageEdit",
     "uploadFile",
     "listFiles",
     "retrieveFile",
@@ -148,6 +158,7 @@
       "huggingface",
       "inception",
       "kenari",
+      "liner",
       "llama",
       "llamacpp",
       "llamafile",
@@ -210,6 +221,7 @@
       "voyage"
     ],
     "files": ["anthropic", "azureopenai", "gemini", "openai"],
+    "imageEdit": ["openai"],
     "imageGeneration": ["azureopenai", "neosantara", "openai", "otari"],
     "listModels": [
       "anthropic",
@@ -282,6 +294,7 @@
       "huggingface",
       "inception",
       "kenari",
+      "liner",
       "llama",
       "llamacpp",
       "llamafile",
@@ -398,9 +411,10 @@
       "xai",
       "zai"
     ],
-    "rerank": ["cohere", "otari", "together", "voyage"],
+    "rerank": ["cohere", "fireworks", "otari", "together", "voyage"],
     "responses": [
       "azureopenai",
+      "deepseek",
       "fireworks",
       "gemini",
       "gmi",
@@ -436,6 +450,7 @@
       "huggingface",
       "inception",
       "kenari",
+      "liner",
       "llama",
       "llamacpp",
       "lmstudio",
@@ -474,6 +489,7 @@
       "cohere",
       "dashscope",
       "deepinfra",
+      "deepseek",
       "edenai",
       "fireworks",
       "gemini",

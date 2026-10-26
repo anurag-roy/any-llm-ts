@@ -21,6 +21,7 @@ import type {
   CompletionParams,
   ProviderMetadata,
   ProviderOptions,
+  ReasoningEffort,
 } from "../src/index.js";
 
 const fakeMetadata: ProviderMetadata = completeProviderMetadata({
@@ -86,7 +87,14 @@ describe("AnyLLM registry and facade", () => {
     expect(AnyLLM.getProviderMetadata("openai").capabilities.completion).toBe(true);
     expect(AnyLLM.getAllProviderMetadata().length).toBe(AnyLLM.getSupportedProviders().length);
     expect(AnyLLM.getProviderMetadata("anthropic").messagesNative).toBe(true);
+    expect(AnyLLM.getProviderMetadata("bedrock").messagesNative).toBe(true);
     expect(AnyLLM.getProviderMetadata("openai").messagesNative).toBe(false);
+    expect(AnyLLM.getProviderMetadata("deepseek").messagesNative).toBe(true);
+    expect(AnyLLM.getProviderMetadata("openai").capabilities.imageEdit).toBe(true);
+    expect(
+      AnyLLM.servesMessagesNatively("bedrock", "us.anthropic.claude-haiku-4-5-20251001-v1:0"),
+    ).toBe(true);
+    expect(AnyLLM.servesMessagesNatively("bedrock", "amazon.nova-lite-v1:0")).toBe(false);
   });
 
   it("treats cascadia, llamacpp, and vllm API keys as optional and honors their env vars", () => {
@@ -375,6 +383,50 @@ describe("AnyLLM registry and facade", () => {
     });
   });
 
+  it.each<[string, ReasoningEffort | undefined, ReasoningEffort | undefined]>([
+    ["deepseek-ai/DeepSeek-V4.1-Flash", "medium", "high"],
+    ["deepseek-ai/DeepSeek-V4.1-Flash", "minimal", "low"],
+    ["deepseek/deepseek-v4.1-flash", "xhigh", "high"],
+    ["deepseek-v4-1-flash", "low", "low"],
+    ["accounts/fireworks/models/deepseek-v4p1-flash", "max", "max"],
+    ["deepseek-v4.1-flash:thinking", "high", "high"],
+    ["deepseek-ai/DeepSeek-V4.1-Flash", "auto", "auto"],
+    ["deepseek-ai/DeepSeek-V4.1-Flash", undefined, undefined],
+    ["deepseek-ai/DeepSeek-V4-Pro", "medium", "high"],
+    ["deepseek-v4-flash", "xhigh", "high"],
+    ["deepseek-ai/DeepSeek-V4-Pro", "low", "low"],
+    ["deepseek-v40-preview", "medium", "medium"],
+    ["deepseek-ai/DeepSeek-V3.2", "medium", "medium"],
+    ["gpt-5", "medium", "medium"],
+  ])("maps completion reasoningEffort %s on %s to %s", async (model, requested, sent) => {
+    const provider = new FakeProvider();
+    const params: CompletionParams = {
+      messages: [{ content: "Hi", role: "user" }],
+      model,
+    };
+    if (requested !== undefined) params.reasoningEffort = requested;
+    await AnyLLM.fromProvider(provider).completion(params);
+    expect(provider.requests[0]?.reasoningEffort).toBe(sent);
+  });
+
+  it.each([
+    ["deepseek-ai/DeepSeek-V4.1-Flash", "high"],
+    ["deepseek-ai/DeepSeek-V4-Pro", "high"],
+    ["Qwen/Qwen3-235B-A22B", "medium"],
+  ] as const)(
+    "maps Messages effort on %s to %s through the Completions bridge",
+    async (model, sent) => {
+      const provider = new FakeProvider();
+      await AnyLLM.fromProvider(provider).messages({
+        maxTokens: 100,
+        messages: [{ content: "Hello", role: "user" }],
+        model,
+        outputFormat: { effort: "medium" },
+      });
+      expect(provider.requests[0]?.reasoningEffort).toBe(sent);
+    },
+  );
+
   it("uses default unsupported-operation implementations", async () => {
     const llm = AnyLLM.fromProvider(new FakeProvider());
     await expect(llm.embedding({ input: "hello", model: "embedding" })).rejects.toBeInstanceOf(
@@ -387,6 +439,9 @@ describe("AnyLLM registry and facade", () => {
     await expect(llm.imageGeneration({ model: "image", prompt: "hello" })).rejects.toBeInstanceOf(
       UnsupportedOperationError,
     );
+    await expect(
+      llm.imageEdit({ image: new Uint8Array([1]), model: "image", prompt: "hello" }),
+    ).rejects.toBeInstanceOf(UnsupportedOperationError);
     await expect(llm.transcription({ file: new Blob(), model: "audio" })).rejects.toBeInstanceOf(
       UnsupportedOperationError,
     );

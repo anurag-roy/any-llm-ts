@@ -42,10 +42,10 @@ console.log(response.choices[0]?.message.parsed?.city);
 
 Use `responseFormat` for completions and Responses, and `outputFormat` for Messages. Typed parsing
 returns a complete JSON value, so it is non-streaming. Anthropic and Otari can still stream
-schema-constrained Messages events when `outputFormat` is set; those streams are unparsed events
-rather than `ParsedMessageResponse`. `LengthFinishReasonError` and
-`ContentFilterFinishReasonError` preserve the partial normalized completion when parsing cannot
-finish for those reasons.
+schema-constrained Messages events when a typed `outputFormat` is set; those streams are unparsed
+events rather than `ParsedMessageResponse`. A raw `outputFormat` dict streams as JSON text on the
+Messages bridge. `LengthFinishReasonError` and `ContentFilterFinishReasonError` preserve the
+partial normalized completion when parsing cannot finish for those reasons.
 
 ## Provider-compatible formats
 
@@ -74,6 +74,10 @@ const response = await llm.completion({
 For Anthropic, `responseFormat.type` must be `json_schema`, and the schema must be available at
 `responseFormat.json_schema.schema`. The adapter translates it to Anthropic's structured-output
 configuration.
+
+DeepSeek's chat API accepts only `text` and `json_object`. A `json_schema` format becomes JSON
+mode: the schema is written into the last user message, or a generic JSON instruction is used when
+the schema is omitted. A missing or non-object `json_schema` object is rejected before the call.
 
 For Anthropic Claude models on Bedrock, the adapter emulates `json_schema` output by forcing a
 private tool call and returning that tool's JSON input as normal assistant content. This works for

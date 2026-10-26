@@ -106,13 +106,23 @@ const response = await gemini.completion({
 
 `toolChoice` supports `auto`, `required`, `none`, `validated`, and a named function choice. Native
 built-ins can be requested with `{ type: "google_search" }`, `{ type: "code_execution" }`, or
-`{ type: "url_context" }`.
+`{ type: "url_context" }`. Combining a built-in with function tools sets
+`includeServerSideToolInvocations` so Gemini does not reject the mix.
+
+Code execution parts land on `message.extraContent.google.code_execution` (and on streamed
+`delta.extraContent`) as `executable_code`, `code_execution_result`, and produced-file
+`code_execution_output` items. Pass that assistant message back unchanged to replay the parts;
+ids the adapter synthesized are not sent to Gemini. Through `messages()` those items become
+`server_tool_use` / `code_execution_tool_result` blocks.
 
 Gemini thought signatures are preserved at
 `toolCall.extraContent.google.thoughtSignature`. Pass the returned tool call back unchanged in the
 next assistant message so the adapter can return the signature to Gemini. The adapter adds Google's
 documented validator-bypass sentinel only when an older or manually constructed first function call
 has no signature. Omit `parallelToolCalls`; Gemini does not implement that normalized request flag.
+
+Anthropic-style `cacheControl` breakpoints become Gemini context caches. See
+[Prompt caching](/docs/guides/prompt-caching).
 
 ## Images, files, and audio
 

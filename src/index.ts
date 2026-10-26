@@ -1,4 +1,5 @@
 export { AnyLLM } from "./any-llm.js";
+export { ChatCompletionAccumulator, accumulateChunks } from "./streaming.js";
 export {
   cancelBatch,
   completion,
@@ -6,6 +7,7 @@ export {
   deleteFile,
   downloadFile,
   embedding,
+  imageEdit,
   imageGeneration,
   listModels,
   listBatches,
@@ -27,6 +29,7 @@ export type {
   DirectDownloadFileParams,
   DirectEmbeddingParams,
   DirectFileResourceParams,
+  DirectImageEditParams,
   DirectImageGenerationParams,
   DirectListBatchesParams,
   DirectListFilesParams,
@@ -70,7 +73,7 @@ export type { AnthropicProviderConfig } from "./providers/anthropic.js";
 export { AzureProvider } from "./providers/azure.js";
 export type { AzureInferenceClientLike } from "./providers/azure.js";
 export { AzureAnthropicProvider } from "./providers/azureanthropic.js";
-export { BedrockProvider } from "./providers/bedrock.js";
+export { BedrockProvider, isAnthropicBedrockModel } from "./providers/bedrock.js";
 export type {
   BedrockClientLike,
   BedrockControlClientLike,
@@ -78,6 +81,7 @@ export type {
   BedrockProviderClients,
   BedrockS3ClientLike,
 } from "./providers/bedrock.js";
+export { FireworksProvider } from "./providers/fireworks.js";
 export { CohereProvider } from "./providers/cohere.js";
 export { GeminiProvider } from "./providers/gemini.js";
 export type { GeminiProviderConfig } from "./providers/gemini.js";
@@ -87,6 +91,9 @@ export type {
   HuggingFaceInferenceClientLike,
   HuggingFaceProviderClients,
 } from "./providers/huggingface.js";
+export { DeepseekProvider } from "./providers/deepseek.js";
+export type { DeepseekProviderClients } from "./providers/deepseek.js";
+export { LinerProvider } from "./providers/liner.js";
 export { MistralProvider } from "./providers/mistral.js";
 export { TogetherProvider } from "./providers/together.js";
 export { MetaProvider } from "./providers/meta.js";
