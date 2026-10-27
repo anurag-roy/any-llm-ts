@@ -801,11 +801,210 @@ describe("Messages compatibility API", () => {
     await expect(async () => {
       for await (const event of failed) failedEvents.push(event);
     }).rejects.toThrow("stream failed");
-    expect(failedEvents.map((event) => event.type)).toEqual([
-      "message_start",
+    expect(failedEvents.map((event) => event.type)).toEqual(["message_start", "message_delta"]);
+  });
+
+  it("holds text that arrives mid tool-call until the tool block stops", async () => {
+    const events: MessageStreamEvent[] = [];
+    for await (const event of completionStreamToMessageEvents(
+      (async function* () {
+        yield chunk({
+          toolCalls: [
+            {
+              function: { arguments: '{"ci', name: "get_weather" },
+              id: "call_a",
+              index: 0,
+            },
+          ],
+        });
+        yield chunk({ content: "Checking." });
+        yield chunk({
+          toolCalls: [{ function: { arguments: 'ty":"Oslo"}' }, index: 0 }],
+        });
+        yield chunk({ content: " Done." });
+        yield chunk({}, "tool_calls");
+      })(),
+    )) {
+      events.push(event);
+    }
+    const blockEvents = events.filter(
+      (event) =>
+        event.type === "content_block_start" ||
+        event.type === "content_block_delta" ||
+        event.type === "content_block_stop",
+    );
+    expect(
+      blockEvents.map((event) => [event.type, "index" in event ? event.index : undefined]),
+    ).toEqual([
+      ["content_block_start", 0],
+      ["content_block_delta", 0],
+      ["content_block_delta", 0],
+      ["content_block_stop", 0],
+      ["content_block_start", 1],
+      ["content_block_delta", 1],
+      ["content_block_stop", 1],
+    ]);
+    expect(
+      events
+        .filter(
+          (event) =>
+            event.type === "content_block_delta" &&
+            "index" in event &&
+            event.index === 1 &&
+            event.delta.type === "text_delta",
+        )
+        .map((event) =>
+          event.type === "content_block_delta" && event.delta.type === "text_delta"
+            ? event.delta.text
+            : "",
+        ),
+    ).toEqual(["Checking. Done."]);
+    expect(events.at(-2)).toMatchObject({ delta: { stopReason: "tool_use" } });
+  });
+
+  it("emits held text when the stream ends without a finish reason", async () => {
+    const events: MessageStreamEvent[] = [];
+    for await (const event of completionStreamToMessageEvents(
+      (async function* () {
+        yield chunk({
+          toolCalls: [
+            {
+              function: { arguments: "{}", name: "get_weather" },
+              id: "call_a",
+              index: 0,
+            },
+          ],
+        });
+        yield chunk({ content: "Checking." });
+      })(),
+    )) {
+      events.push(event);
+    }
+    expect(events.slice(-6).map((event) => event.type)).toEqual([
+      "content_block_stop",
       "content_block_start",
+      "content_block_delta",
       "content_block_stop",
       "message_delta",
+      "message_stop",
+    ]);
+    expect(events.at(-4)).toMatchObject({
+      delta: { text: "Checking.", type: "text_delta" },
+      index: 1,
+    });
+  });
+
+  it("drops an unknown tool-argument fragment instead of filing it under text", async () => {
+    const events: MessageStreamEvent[] = [];
+    for await (const event of completionStreamToMessageEvents(
+      (async function* () {
+        yield chunk({ content: "Hi" });
+        yield chunk({
+          toolCalls: [{ function: { arguments: "{}" }, index: 3 }],
+        });
+      })(),
+    )) {
+      events.push(event);
+    }
+    expect(
+      events.some(
+        (event) =>
+          event.type === "content_block_delta" &&
+          "delta" in event &&
+          event.delta.type === "input_json_delta",
+      ),
+    ).toBe(false);
+  });
+
+  it("omits an empty text block beside a non-streaming tool call", () => {
+    const response = completionToMessageResponse({
+      choices: [
+        {
+          finishReason: "tool_calls",
+          index: 0,
+          message: {
+            content: "",
+            role: "assistant",
+            toolCalls: [
+              {
+                function: { arguments: '{"city":"Paris"}', name: "get_weather" },
+                id: "call_a",
+                type: "function",
+              },
+            ],
+          },
+        },
+      ],
+      created: 0,
+      id: "chatcmpl-1",
+      model: "deepseek-v4",
+      object: "chat.completion",
+      provider: "messages-fake",
+    });
+    expect(response.content).toHaveLength(1);
+    expect(response.content[0]).toMatchObject({
+      id: "call_a",
+      input: { city: "Paris" },
+      type: "tool_use",
+    });
+  });
+
+  it("converts empty assistant text beside tool_use to null content", () => {
+    expect(
+      messagesToCompletionParams({
+        maxTokens: 32,
+        messages: [
+          {
+            content: [
+              { text: "", type: "text" },
+              {
+                id: "call_a",
+                input: { city: "Paris" },
+                name: "get_weather",
+                type: "tool_use",
+              },
+            ],
+            role: "assistant",
+          },
+        ],
+        model: "model-a",
+      }).messages[0],
+    ).toMatchObject({
+      content: null,
+      toolCalls: [{ function: { arguments: '{"city":"Paris"}' } }],
+    });
+  });
+
+  it("keeps empty assistant text when there are no tool calls", () => {
+    expect(
+      messagesToCompletionParams({
+        maxTokens: 32,
+        messages: [{ content: [{ text: "", type: "text" }], role: "assistant" }],
+        model: "model-a",
+      }).messages[0],
+    ).toMatchObject({ content: "", role: "assistant" });
+    expect(
+      messagesToCompletionParams({
+        maxTokens: 32,
+        messages: [{ content: [{ text: "", type: "text" }], role: "assistant" }],
+        model: "model-a",
+      }).messages[0],
+    ).not.toHaveProperty("toolCalls");
+  });
+
+  it("opens no Messages text block for empty streamed content", async () => {
+    const events: MessageStreamEvent[] = [];
+    for await (const event of completionStreamToMessageEvents(
+      (async function* () {
+        yield chunk({ content: "" });
+      })(),
+    )) {
+      events.push(event);
+    }
+    expect(events.map((event) => event.type)).toEqual([
+      "message_start",
+      "message_delta",
+      "message_stop",
     ]);
   });
 

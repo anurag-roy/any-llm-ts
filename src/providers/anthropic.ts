@@ -12,7 +12,7 @@ import { readFile } from "node:fs/promises";
 
 import Anthropic from "@anthropic-ai/sdk";
 
-import { BatchNotCompleteError, MissingApiKeyError } from "../errors.js";
+import { BatchNotCompleteError, MissingApiKeyError, UnsupportedParameterError } from "../errors.js";
 import { normalizeOutputConfig } from "../structured-output.js";
 import type {
   Batch,
@@ -301,14 +301,74 @@ function convertToolChoice(value: CompletionParams["toolChoice"]): AnthropicTool
   return undefined;
 }
 
-function reasoningConfiguration(params: CompletionParams) {
+const BUDGET_THINKING_MODEL_PREFIXES = [
+  "claude-3",
+  "claude-opus-4-0",
+  "claude-opus-4-1",
+  "claude-opus-4-5",
+  "claude-opus-4-2025",
+  "claude-opus-4@",
+  "claude-sonnet-4-0",
+  "claude-sonnet-4-5",
+  "claude-sonnet-4-2025",
+  "claude-sonnet-4@",
+  "claude-haiku-4-5",
+] as const;
+const thinkingBudgetsByReasoningEffort = {
+  high: 24_576,
+  low: 2_048,
+  max: 32_768,
+  medium: 8_192,
+  minimal: 1_024,
+  xhigh: 32_768,
+} as const;
+const anthropicEffortByReasoningEffort = {
+  high: "high",
+  low: "low",
+  max: "max",
+  medium: "medium",
+  minimal: "low",
+  xhigh: "xhigh",
+} as const;
+const BUDGET_THINKING_EFFORT_MODEL_PREFIX = "claude-opus-4-5";
+const MIN_THINKING_BUDGET = 1_024;
+
+function usesBudgetThinking(model: string): boolean {
+  const id = model.toLowerCase();
+  return BUDGET_THINKING_MODEL_PREFIXES.some((prefix) => id.startsWith(prefix));
+}
+
+function reasoningConfiguration(params: CompletionParams, providerName: string, maxTokens: number) {
   if (params.reasoningEffort === "none") {
     return { thinking: { type: "disabled" } };
   }
   if (params.reasoningEffort === undefined || params.reasoningEffort === "auto") return {};
-  const effort = params.reasoningEffort === "minimal" ? "low" : params.reasoningEffort;
+  if (usesBudgetThinking(params.model)) {
+    const budget = Math.min(
+      thinkingBudgetsByReasoningEffort[params.reasoningEffort],
+      maxTokens - MIN_THINKING_BUDGET,
+    );
+    if (budget < MIN_THINKING_BUDGET) {
+      throw new UnsupportedParameterError(
+        `reasoningEffort with maxTokens below ${2 * MIN_THINKING_BUDGET}`,
+        providerName,
+        `${params.model} needs a thinking budget of at least ${MIN_THINKING_BUDGET} tokens plus room for the answer. Set maxTokens to at least ${2 * MIN_THINKING_BUDGET}.`,
+      );
+    }
+    const thinking = { budget_tokens: budget, type: "enabled" as const };
+    if (!params.model.toLowerCase().startsWith(BUDGET_THINKING_EFFORT_MODEL_PREFIX)) {
+      return { thinking };
+    }
+    const effort = anthropicEffortByReasoningEffort[params.reasoningEffort];
+    return {
+      output_config: {
+        effort: effort === "low" || effort === "medium" || effort === "high" ? effort : "high",
+      },
+      thinking,
+    };
+  }
   return {
-    output_config: { effort },
+    output_config: { effort: anthropicEffortByReasoningEffort[params.reasoningEffort] },
     thinking: { type: "adaptive" },
   };
 }
@@ -1158,7 +1218,7 @@ export class AnthropicProvider extends BaseProvider {
   private completionRequest(params: CompletionParams) {
     const convertedMessages = convertMessages(params.messages);
     const maxTokens = params.maxTokens ?? params.maxCompletionTokens ?? 8_192;
-    const reasoning = reasoningConfiguration(params);
+    const reasoning = reasoningConfiguration(params, this.providerName, maxTokens);
     const structuredOutput = structuredOutputConfiguration(params.responseFormat);
     const outputConfig = {
       ...(parseOptionalJsonObject(structuredOutput.output_config) ?? {}),
