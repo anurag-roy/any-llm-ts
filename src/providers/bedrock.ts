@@ -731,6 +731,13 @@ function completionRequest(params: CompletionParams) {
     params.reasoningEffort !== "auto" &&
     params.reasoningEffort !== "none"
   ) {
+    if (!isAnthropicBedrockModel(params.model) && !params.model.startsWith("arn:")) {
+      throw new UnsupportedParameterError(
+        "reasoningEffort",
+        "bedrock",
+        "reasoningEffort is only translated for Anthropic Claude models on Bedrock. For other models, pass the model's own reasoning field in additionalModelRequestFields.",
+      );
+    }
     additionalModelRequestFields.reasoning_config = {
       budget_tokens: reasoningBudgets[params.reasoningEffort],
       type: "enabled",

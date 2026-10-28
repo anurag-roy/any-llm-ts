@@ -309,8 +309,10 @@ function assistantMessage(content: MessagesInputContentBlock[]): ChatMessage {
   const thinkingCount = content.filter((block) => block.type === "thinking").length;
   if (isString(signature) && thinkingCount === 1) extraContent.anthropic = { signature };
   if (Object.keys(google).length > 0) extraContent.google = google;
+  const joinedText = text.join("");
   return {
-    content: text.length === 0 ? null : text.join(""),
+    content:
+      text.length > 0 && (joinedText.length > 0 || toolCalls.length === 0) ? joinedText : null,
     role: "assistant",
     ...includeWhen(!(reasoning.length === 0), { reasoning: reasoning.join("") }),
     ...includeWhen(!(toolCalls.length === 0), { toolCalls }),
@@ -795,9 +797,11 @@ interface StreamState {
   inputTokens: number;
   outputTokens: number;
   pendingCodeResult?: { item: JsonObject; outputs: JsonObject[] };
+  pendingText: string;
   started: boolean;
   stopReason: MessageStopReason | null;
   toolBlockIndexes: Map<number, number>;
+  toolCallBlocks: Map<number, number>;
 }
 
 function pendingCodeResultEvents(
@@ -817,8 +821,28 @@ function pendingCodeResultEvents(
   ];
 }
 
-function closeBlock(state: StreamState): (ContentBlockStartEvent | ContentBlockStopEvent)[] {
-  const events: (ContentBlockStartEvent | ContentBlockStopEvent)[] = [];
+function pendingTextEvents(state: StreamState): MessageStreamEvent[] {
+  if (state.pendingText.length === 0) return [];
+  const text = state.pendingText;
+  state.pendingText = "";
+  state.blockIndex += 1;
+  return [
+    {
+      contentBlock: { text: "", type: "text" },
+      index: state.blockIndex,
+      type: "content_block_start",
+    },
+    {
+      delta: { text, type: "text_delta" },
+      index: state.blockIndex,
+      type: "content_block_delta",
+    },
+    { index: state.blockIndex, type: "content_block_stop" },
+  ];
+}
+
+function closeBlock(state: StreamState): MessageStreamEvent[] {
+  const events: MessageStreamEvent[] = [];
   if (state.blockType !== undefined) {
     const indexes =
       state.toolBlockIndexes.size === 0
@@ -828,6 +852,7 @@ function closeBlock(state: StreamState): (ContentBlockStartEvent | ContentBlockS
     delete state.blockType;
     events.push(...indexes.map((index) => ({ index, type: "content_block_stop" as const })));
   }
+  events.push(...pendingTextEvents(state));
   events.push(...pendingCodeResultEvents(state));
   return events;
 }
@@ -836,9 +861,9 @@ function openBlock(
   state: StreamState,
   type: NonNullable<StreamState["blockType"]>,
   contentBlock: MessageContentBlock,
-): (ContentBlockStartEvent | ContentBlockStopEvent)[] {
+): MessageStreamEvent[] {
   if (state.blockType === type) return [];
-  const events: (ContentBlockStartEvent | ContentBlockStopEvent)[] = closeBlock(state);
+  const events = closeBlock(state);
   state.blockIndex += 1;
   state.blockType = type;
   events.push({
@@ -851,11 +876,12 @@ function openBlock(
 
 function toolDeltaEvents(state: StreamState, call: ToolCallDelta): MessageStreamEvent[] {
   const events: MessageStreamEvent[] = [];
-  if (call.id !== undefined && !state.toolBlockIndexes.has(call.index)) {
+  if (isString(call.id) && call.id.length > 0 && !state.toolCallBlocks.has(call.index)) {
     if (state.blockType !== "tool_use") events.push(...closeBlock(state));
     state.blockIndex += 1;
     state.blockType = "tool_use";
     state.toolBlockIndexes.set(call.index, state.blockIndex);
+    state.toolCallBlocks.set(call.index, state.blockIndex);
     events.push({
       contentBlock: toolUseBlock(call.id, call.function?.name ?? "", {}, call.extraContent),
       index: state.blockIndex,
@@ -863,11 +889,14 @@ function toolDeltaEvents(state: StreamState, call: ToolCallDelta): MessageStream
     });
   }
   if (call.function?.arguments !== undefined && call.function.arguments.length > 0) {
-    events.push({
-      delta: { partialJson: call.function.arguments, type: "input_json_delta" },
-      index: state.toolBlockIndexes.get(call.index) ?? state.blockIndex,
-      type: "content_block_delta",
-    });
+    const blockIndex = state.toolCallBlocks.get(call.index);
+    if (blockIndex !== undefined) {
+      events.push({
+        delta: { partialJson: call.function.arguments, type: "input_json_delta" },
+        index: blockIndex,
+        type: "content_block_delta",
+      });
+    }
   }
   return events;
 }
@@ -953,9 +982,15 @@ function chunkEvents(chunk: ChatCompletionChunk, state: StreamState): MessageStr
       state.codeResultIds.add(itemId);
     }
   }
-  if (choice.delta.content !== undefined && choice.delta.content !== null) {
-    events.push(...openBlock(state, "text", { text: "", type: "text" }));
-    if (choice.delta.content.length > 0) {
+  if (
+    choice.delta.content !== undefined &&
+    choice.delta.content !== null &&
+    choice.delta.content.length > 0
+  ) {
+    if (state.blockType === "tool_use") {
+      state.pendingText += choice.delta.content;
+    } else {
+      events.push(...openBlock(state, "text", { text: "", type: "text" }));
       events.push({
         delta: { text: choice.delta.content, type: "text_delta" },
         index: state.blockIndex,
@@ -1011,9 +1046,11 @@ async function* messageEventsFromCompletionStream(
     codeResultIds: new Set(),
     inputTokens: 0,
     outputTokens: 0,
+    pendingText: "",
     started: false,
     stopReason: null,
     toolBlockIndexes: new Map(),
+    toolCallBlocks: new Map(),
   };
   try {
     for await (const chunk of stream) {

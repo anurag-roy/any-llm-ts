@@ -740,6 +740,102 @@ describe("Anthropic provider", () => {
     expect(usage).toEqual({ completionTokens: 5, promptTokens: 13, totalTokens: 18 });
   });
 
+  it.each([
+    "claude-haiku-4-5",
+    "claude-haiku-4-5-20251001",
+    "claude-sonnet-4-5",
+    "claude-opus-4-1-20250805",
+    "claude-opus-4@20250514",
+    "claude-sonnet-4@20250514",
+    "claude-sonnet-4-20250514",
+    "claude-3-7-sonnet-latest",
+  ])("uses budget thinking on %s, which has no adaptive thinking", async (model) => {
+    const create = vi.fn().mockResolvedValue(anthropicResponse());
+    const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
+    await provider.completion({
+      maxTokens: 16_000,
+      messages: [{ content: "Hello", role: "user" }],
+      model,
+      reasoningEffort: "low",
+    });
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ thinking: { budget_tokens: 2_048, type: "enabled" } }),
+    );
+    expect(create.mock.calls[0]?.[0]).not.toHaveProperty("output_config");
+  });
+
+  it.each([
+    ["claude-opus-4-5", "low", "low"],
+    ["claude-opus-4-5-20251101", "medium", "medium"],
+    ["claude-opus-4-5@20251101", "high", "high"],
+    ["claude-opus-4-5", "max", "high"],
+  ] as const)(
+    "sends budget thinking on %s with mapped effort %s",
+    async (model, reasoningEffort, expectedEffort) => {
+      const create = vi.fn().mockResolvedValue(anthropicResponse());
+      const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
+      await provider.completion({
+        maxTokens: 64_000,
+        messages: [{ content: "Hello", role: "user" }],
+        model,
+        reasoningEffort,
+      });
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          output_config: { effort: expectedEffort },
+          thinking: expect.objectContaining({ type: "enabled" }),
+        }),
+      );
+    },
+  );
+
+  it("caps the thinking budget so the answer still has room under maxTokens", async () => {
+    const create = vi.fn().mockResolvedValue(anthropicResponse());
+    const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
+    await provider.completion({
+      messages: [{ content: "Hello", role: "user" }],
+      model: "claude-haiku-4-5",
+      reasoningEffort: "high",
+    });
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        max_tokens: 8_192,
+        thinking: { budget_tokens: 7_168, type: "enabled" },
+      }),
+    );
+  });
+
+  it("refuses budget thinking when maxTokens cannot hold the minimum budget and an answer", async () => {
+    const provider = new AnthropicProvider({}, fakeAnthropic());
+    expect(() =>
+      provider.completion({
+        maxTokens: 2_000,
+        messages: [{ content: "Hello", role: "user" }],
+        model: "claude-haiku-4-5",
+        reasoningEffort: "low",
+      }),
+    ).toThrow(/reasoningEffort with maxTokens below 2048/u);
+  });
+
+  it.each(["claude-opus-4-6", "claude-sonnet-4-6", "claude-opus-4-7", "claude-sonnet-5"])(
+    "keeps adaptive thinking on newer model %s",
+    async (model) => {
+      const create = vi.fn().mockResolvedValue(anthropicResponse());
+      const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
+      await provider.completion({
+        messages: [{ content: "Hello", role: "user" }],
+        model,
+        reasoningEffort: "low",
+      });
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          output_config: { effort: "low" },
+          thinking: { type: "adaptive" },
+        }),
+      );
+    },
+  );
+
   it("maps JSON schema output, adaptive effort, and parallel tool choice", async () => {
     const create = vi.fn().mockResolvedValue(anthropicResponse());
     const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));

@@ -556,9 +556,84 @@ describe("Bedrock provider", () => {
         model: "model",
       }),
     ).toThrow(InvalidRequestError);
+    for (const model of ["xai.grok-4-fast", "deepseek.v3-v1:0", "openai.gpt-oss-120b-1:0"]) {
+      expect(() =>
+        bedrock.completion({
+          messages: [{ content: "hi", role: "user" }],
+          model,
+          reasoningEffort: "low",
+        }),
+      ).toThrow(/reasoningEffort/u);
+    }
     await expect(bedrock.completion({ messages: [], model: "model" })).rejects.toThrow(
       /cannot be empty/u,
     );
+  });
+
+  it.each(["xai.grok-4-fast", "deepseek.v3-v1:0", "openai.gpt-oss-120b-1:0"])(
+    "refuses Claude reasoning_config for non-Claude model %s",
+    (model) => {
+      expect(() =>
+        provider().completion({
+          messages: [{ content: "hi", role: "user" }],
+          model,
+          reasoningEffort: "low",
+        }),
+      ).toThrow(/reasoningEffort/u);
+    },
+  );
+
+  it.each([
+    "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/a1b2c3d4e5f6",
+    "arn:aws:bedrock:us-east-1:123456789012:provisioned-model/a1b2c3d4e5f6",
+    "arn:aws:bedrock:us-east-1:123456789012:imported-model/a1b2c3d4e5f6",
+  ])("keeps Claude reasoning_config for opaque ARN %s", async (model) => {
+    const send = vi.fn().mockResolvedValue({
+      output: { message: { content: [{ text: "ok" }], role: "assistant" } },
+      stopReason: "end_turn",
+    });
+    await provider(send).completion({
+      messages: [{ content: "hi", role: "user" }],
+      model,
+      reasoningEffort: "low",
+    });
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    const command = send.mock.calls[0]?.[0] as ConverseCommand;
+    expect(command.input.additionalModelRequestFields).toEqual({
+      reasoning_config: { budget_tokens: 2_048, type: "enabled" },
+    });
+  });
+
+  it.each(["none", "auto"] as const)(
+    "sends no reasoning_config to a non-Claude model when reasoningEffort is %s",
+    async (reasoningEffort) => {
+      const send = vi.fn().mockResolvedValue({
+        output: { message: { content: [{ text: "ok" }], role: "assistant" } },
+        stopReason: "end_turn",
+      });
+      await provider(send).completion({
+        messages: [{ content: "hi", role: "user" }],
+        model: "xai.grok-4-fast",
+        reasoningEffort,
+      });
+      // SAFETY: This test double implements the provider surface exercised by this test.
+      const command = send.mock.calls[0]?.[0] as ConverseCommand;
+      expect(command.input.additionalModelRequestFields).toBeUndefined();
+    },
+  );
+
+  it("sends no reasoning_config to a non-Claude model when reasoningEffort is omitted", async () => {
+    const send = vi.fn().mockResolvedValue({
+      output: { message: { content: [{ text: "ok" }], role: "assistant" } },
+      stopReason: "end_turn",
+    });
+    await provider(send).completion({
+      messages: [{ content: "hi", role: "user" }],
+      model: "xai.grok-4-fast",
+    });
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    const command = send.mock.calls[0]?.[0] as ConverseCommand;
+    expect(command.input.additionalModelRequestFields).toBeUndefined();
   });
 
   it("normalizes Converse streaming events with stable tool indices", async () => {
