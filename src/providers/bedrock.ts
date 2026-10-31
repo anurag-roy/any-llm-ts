@@ -665,7 +665,31 @@ function structuredOutputTool(responseFormat: JsonObject) {
   };
 }
 
-function toolConfiguration(params: CompletionParams) {
+function replayedToolConfig(messages: BedrockMessage[]) {
+  const names = new Set<string>();
+  for (const message of messages) {
+    for (const block of message.content) {
+      if ("toolUse" in block) names.add(block.toolUse.name);
+    }
+  }
+  if (names.size === 0) return undefined;
+  return {
+    tools: [...names].map((name) => ({
+      toolSpec: {
+        description: " ",
+        inputSchema: {
+          json: {
+            properties: {},
+            type: "object",
+          },
+        },
+        name,
+      },
+    })),
+  };
+}
+
+function toolConfiguration(params: CompletionParams, messages: BedrockMessage[]) {
   const tools = configuredTools(params);
   if (params.responseFormat !== undefined) {
     if (!params.model.includes("anthropic.")) {
@@ -699,7 +723,7 @@ function toolConfiguration(params: CompletionParams) {
       tools,
     };
   }
-  if (tools.length === 0) return undefined;
+  if (tools.length === 0) return replayedToolConfig(messages);
   const toolChoice =
     params.toolChoice === "required"
       ? { any: {} }
@@ -743,7 +767,7 @@ function completionRequest(params: CompletionParams) {
       type: "enabled",
     };
   }
-  const toolConfig = toolConfiguration(params);
+  const toolConfig = toolConfiguration(params, converted.messages);
   return compactObject({
     ...params.providerOptions,
     ...converted,
