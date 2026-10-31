@@ -86,10 +86,15 @@ export { CohereProvider } from "./providers/cohere.js";
 export { GeminiProvider } from "./providers/gemini.js";
 export type { GeminiProviderConfig } from "./providers/gemini.js";
 export { GitHubProvider } from "./providers/github.js";
-export { HuggingFaceProvider } from "./providers/huggingface.js";
+export {
+  HUGGINGFACE_OPENRESPONSES_URL,
+  HuggingFaceProvider,
+  huggingfaceSdkOptions,
+} from "./providers/huggingface.js";
 export type {
   HuggingFaceInferenceClientLike,
   HuggingFaceProviderClients,
+  HuggingFaceSdkOptions,
 } from "./providers/huggingface.js";
 export { DeepseekProvider } from "./providers/deepseek.js";
 export type { DeepseekProviderClients } from "./providers/deepseek.js";

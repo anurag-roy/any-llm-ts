@@ -1,7 +1,12 @@
 import OpenAI from "openai";
 import { describe, expect, it, vi } from "vitest";
 
-import { HuggingFaceProvider, MissingApiKeyError } from "../src/index.js";
+import {
+  HUGGINGFACE_OPENRESPONSES_URL,
+  HuggingFaceProvider,
+  huggingfaceSdkOptions,
+  MissingApiKeyError,
+} from "../src/index.js";
 import type {
   ChatCompletionChunk,
   HuggingFaceInferenceClientLike,
@@ -24,6 +29,32 @@ function fakeClients(
 describe("Hugging Face provider", () => {
   it("requires an HF token", () => {
     expect(() => new HuggingFaceProvider()).toThrow(MissingApiKeyError);
+  });
+
+  it("bills Inference Providers usage to an organization on both clients", () => {
+    const sdk = huggingfaceSdkOptions({
+      apiKey: "test-api-key",
+      clientOptions: { billTo: "my-org", huggingFace: { timeout: 10 }, openAI: { timeout: 10 } },
+    });
+    expect(sdk.inference).toMatchObject({ billTo: "my-org", timeout: 10 });
+    expect(sdk.responses).toMatchObject({
+      apiKey: "test-api-key",
+      baseURL: HUGGINGFACE_OPENRESPONSES_URL,
+      defaultHeaders: { "X-HF-Bill-To": "my-org" },
+      timeout: 10,
+    });
+    expect(sdk.inference).not.toHaveProperty("bill_to");
+    expect(sdk.responses).not.toHaveProperty("billTo");
+  });
+
+  it("bills the token account when billTo is omitted", () => {
+    const sdk = huggingfaceSdkOptions({ apiKey: "test-api-key" });
+    expect(sdk.inference).not.toHaveProperty("billTo");
+    expect(sdk.responses).not.toHaveProperty("defaultHeaders");
+    expect(sdk.responses).toMatchObject({
+      apiKey: "test-api-key",
+      baseURL: HUGGINGFACE_OPENRESPONSES_URL,
+    });
   });
 
   it("uses the official inference client and normalizes empty tool arguments", async () => {

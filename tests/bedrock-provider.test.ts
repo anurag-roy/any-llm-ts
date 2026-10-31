@@ -32,6 +32,7 @@ import type {
   BedrockS3ClientLike,
   ChatCompletion,
   ChatCompletionChunk,
+  ChatMessage,
 } from "../src/index.js";
 
 type BedrockTestCommand =
@@ -83,6 +84,27 @@ function job(status = "Completed", overrides: JsonObject = {}) {
     totalRecordCount: 3,
     ...overrides,
   };
+}
+
+function replayedSearch(repeat = false): ChatMessage[] {
+  const turns: ChatMessage[] = [{ content: "find it", role: "user" }];
+  for (let index = 0; index < (repeat ? 2 : 1); index += 1) {
+    const callId = `call_${index}`;
+    turns.push({
+      content: null,
+      role: "assistant",
+      toolCalls: [
+        {
+          function: { arguments: "{}", name: "web_search" },
+          id: callId,
+          type: "function",
+        },
+      ],
+    });
+    turns.push({ content: "results", role: "tool", toolCallId: callId });
+  }
+  turns.push({ content: "Answer now.", role: "user" });
+  return turns;
 }
 
 async function* events<Value>(...values: Value[]): AsyncIterable<Value> {
@@ -278,6 +300,67 @@ describe("Bedrock provider", () => {
       { function: { name: "get_weather" }, id: "tool-123" },
     ]);
     expect(result.choices[0]?.finishReason).toBe("tool_calls");
+  });
+
+  it("declares replayed tools when a request passes none", async () => {
+    const send = vi.fn().mockResolvedValue({
+      output: { message: { content: [{ text: "Here it is." }] } },
+      stopReason: "end_turn",
+    });
+    await provider(send).completion({
+      messages: replayedSearch(true),
+      model: "nvidia.nemotron-super-3-120b",
+    });
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    const command = send.mock.calls[0]?.[0] as ConverseCommand;
+    expect(command.input.toolConfig).toEqual({
+      tools: [
+        {
+          toolSpec: {
+            description: " ",
+            inputSchema: { json: { properties: {}, type: "object" } },
+            name: "web_search",
+          },
+        },
+      ],
+    });
+  });
+
+  it("keeps the passed tools over replayed ones", async () => {
+    const send = vi.fn().mockResolvedValue({
+      output: { message: { content: [{ text: "Sunny." }] } },
+      stopReason: "end_turn",
+    });
+    await provider(send).completion({
+      messages: replayedSearch(),
+      model: "nvidia.nemotron-super-3-120b",
+      tools: [
+        {
+          function: { name: "get_weather" },
+          type: "function",
+        },
+      ],
+    });
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    const command = send.mock.calls[0]?.[0] as ConverseCommand;
+    expect(command.input.toolConfig).toMatchObject({
+      tools: [{ toolSpec: { name: "get_weather" } }],
+    });
+    expect(command.input.toolConfig?.tools).toHaveLength(1);
+  });
+
+  it("sends no toolConfig without tools or tool calls", async () => {
+    const send = vi.fn().mockResolvedValue({
+      output: { message: { content: [{ text: "hi" }] } },
+      stopReason: "end_turn",
+    });
+    await provider(send).completion({
+      messages: [{ content: "hi", role: "user" }],
+      model: "nvidia.nemotron-super-3-120b",
+    });
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    const command = send.mock.calls[0]?.[0] as ConverseCommand;
+    expect(command.input.toolConfig).toBeUndefined();
   });
 
   it("joins every text block before a tool call", async () => {

@@ -80,6 +80,19 @@ You can pass OpenAI SDK constructor fields through `clientOptions`, including
 `azureADTokenProvider` for Entra ID. `apiKey`, `azureADToken`, and `azureADTokenProvider` are
 mutually exclusive.
 
+## Hugging Face billing
+
+Team and Enterprise organizations can pay for Inference Providers usage instead of the token's
+own account. Pass the organization name (or resource-group id) as `clientOptions.billTo`. Completions
+send it to `@huggingface/inference` as `billTo`; Responses send the `X-HF-Bill-To` header on the
+OpenResponses client.
+
+```ts
+const huggingface = AnyLLM.create("huggingface", {
+  clientOptions: { billTo: "my-org" },
+});
+```
+
 ## Inspect effective metadata
 
 ```ts
