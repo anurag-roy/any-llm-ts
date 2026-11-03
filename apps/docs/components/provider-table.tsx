@@ -12,6 +12,7 @@ const capabilityColumns = [
   ["vision", "Vision"],
   ["pdfInput", "PDF"],
   ["reasoning", "Reasoning"],
+  ["videoGeneration", "Video"],
 ] as const;
 
 export function ProviderTable() {

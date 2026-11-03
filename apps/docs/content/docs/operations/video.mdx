@@ -1,0 +1,76 @@
+---
+title: Video generation
+description: Start a video job, poll it, and download the finished clip.
+---
+
+Video generation is slow, so every provider returns a **job** first rather than a video.
+
+1. `videoGeneration()` starts the job and returns a `VideoJob`, usually `queued` or `in_progress`.
+2. `retrieveVideo()` reads the job again. `pollVideo()` does that until the job is `completed` or `failed`.
+3. `downloadVideo()` returns the finished video as bytes, whether the provider handed back a URL or inline data.
+
+```ts
+import { downloadVideo, pollVideo, videoGeneration } from "any-llm-ts";
+
+const job = await videoGeneration({
+  model: "together:ByteDance/Seedance-2.0",
+  prompt: "A yellow rubber duck sits on a wooden table while sunlight slowly moves across it.",
+  seconds: 5,
+  size: "1280x720",
+});
+
+const finished = await pollVideo({
+  provider: "together",
+  videoId: job.id,
+  pollInterval: 10,
+  timeout: 900,
+});
+if (finished.status === "failed") {
+  throw new Error(finished.error?.message ?? "video generation failed");
+}
+
+const [output] = finished.outputs;
+if (output === undefined) throw new Error("completed job has no outputs");
+const video = await downloadVideo({ provider: "together", output });
+console.log(`${video.byteLength} bytes of ${output.mimeType ?? "video/mp4"}`);
+```
+
+A failed job is returned, not thrown, so its `error` can be read. After `timeout` seconds (default 600; `null` waits forever) `pollVideo()` throws an `Error`.
+
+The same call works against Gemini by changing the model string and dropping `seconds`, which Omni Flash does not take:
+
+```ts
+const job = await videoGeneration({
+  model: "gemini:gemini-omni-1.1-flash",
+  prompt: "A yellow rubber duck sits on a wooden table while sunlight slowly moves across it.",
+  size: "1280x720",
+});
+```
+
+## Providers
+
+| Provider | Notes |
+| -------- | ----- |
+| Gemini | Gemini Omni Flash through the Interactions API. `size` maps to a `16:9` or `9:16` aspect ratio and a `360p` / `720p` / `1080p` / `4k` resolution, so the short side must be 360, 720, 1080, or 2160 pixels and the video cannot be square. `seconds` and `negativePrompt` raise `UnsupportedParameterError`. Files API URIs download with the API key. |
+| Together | `POST /v2/videos` and `GET /v2/videos/{id}` for models such as `ByteDance/Seedance-2.0`. `size` maps to `width` / `height`, `seconds` to a string, and `firstFrame` / `lastFrame` to `frame_images`. Together-only options such as `fps` go in `providerOptions`. Seedance renders fixed resolutions only (for example `864x496`, `1280x720`, `1920x1080`, and their portrait twins); any other `WIDTHxHEIGHT` is sent, but the job then fails with `unsupportedModelResolution`. |
+
+All other providers reject video generation with `UnsupportedOperationError`. OpenAI is among them: the Videos API was removed with no replacement.
+
+## Frames and references
+
+```ts
+const job = await videoGeneration({
+  model: "gemini:gemini-omni-1.1-flash",
+  prompt: "A smooth cinematic transition from sunrise to a starry night.",
+  firstFrame: "https://example.com/sunrise.png",
+  lastFrame: "data:image/png;base64,....",
+  referenceImages: ["https://example.com/style.png"],
+});
+```
+
+Images are URLs, provider file URIs, or `data:` URLs with base64 content.
+
+<Callout title="Capability flags are endpoint-level guidance">
+  A `true` `videoGeneration` flag does not guarantee that every model offered by the provider
+  implements the operation. Validate the selected model against the provider's own documentation.
+</Callout>

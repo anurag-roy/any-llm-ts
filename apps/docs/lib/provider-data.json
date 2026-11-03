@@ -17,6 +17,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://docs.anthropic.com/en/api/",
@@ -106,6 +107,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://www.atlascloud.ai/docs",
@@ -166,6 +168,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://learn.microsoft.com/azure/foundry/foundry-models/concepts/models-sold-directly-by-azure",
@@ -225,6 +228,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://learn.microsoft.com/azure/ai-foundry/model-inference/concepts/models",
@@ -284,6 +288,7 @@
       "rerank": false,
       "responses": true,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://learn.microsoft.com/azure/foundry/openai/api-version-lifecycle",
@@ -343,6 +348,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://aws.amazon.com/bedrock/",
@@ -402,6 +408,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://cascadia.to",
@@ -462,6 +469,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://inference-docs.cerebras.ai/",
@@ -523,6 +531,7 @@
       "rerank": true,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://docs.cohere.com/",
@@ -582,6 +591,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope",
@@ -642,6 +652,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://docs.databricks.com/aws/en/machine-learning/model-serving/score-foundation-models",
@@ -701,6 +712,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://deepinfra.com/docs/openai_api",
@@ -762,6 +774,7 @@
       "rerank": false,
       "responses": true,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://platform.deepseek.com/",
@@ -821,6 +834,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://docs.edenai.co/",
@@ -882,6 +896,7 @@
       "rerank": true,
       "responses": true,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://docs.fireworks.ai/api-reference/introduction",
@@ -941,6 +956,7 @@
       "rerank": false,
       "responses": true,
       "streaming": true,
+      "videoGeneration": true,
       "vision": true
     },
     "documentationUrl": "https://ai.google.dev/gemini-api/docs",
@@ -1001,6 +1017,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://docs.github.com/en/github-models",
@@ -1060,6 +1077,7 @@
       "rerank": false,
       "responses": true,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://docs.gmicloud.ai/inference-engine/llm-api",
@@ -1120,6 +1138,7 @@
       "rerank": false,
       "responses": true,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://console.groq.com/docs/openai",
@@ -1180,6 +1199,7 @@
       "rerank": false,
       "responses": true,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://huggingface.co/docs/huggingface.js/inference/README",
@@ -1239,6 +1259,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://docs.inceptionlabs.ai/",
@@ -1299,6 +1320,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://kenari.id/docs",
@@ -1360,6 +1382,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://liner.com/developers/docs",
@@ -1419,6 +1442,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://www.llama.com/products/llama-api/",
@@ -1479,6 +1503,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://github.com/ggml-org/llama.cpp",
@@ -1539,6 +1564,7 @@
       "rerank": false,
       "responses": false,
       "streaming": false,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://github.com/Mozilla-Ocho/llamafile",
@@ -1598,6 +1624,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://lmstudio.ai/docs/developer/openai-compat",
@@ -1659,6 +1686,7 @@
       "rerank": false,
       "responses": true,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://dev.meta.ai/docs",
@@ -1718,6 +1746,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://platform.minimax.io/docs/api-reference/text-openai-api",
@@ -1779,6 +1808,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://docs.mistral.ai/api/",
@@ -1838,6 +1868,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://platform.moonshot.ai/docs/api/chat",
@@ -1898,6 +1929,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://any-llm.ai",
@@ -1958,6 +1990,7 @@
       "rerank": false,
       "responses": true,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://studio.nebius.com/api-reference/",
@@ -2018,6 +2051,7 @@
       "rerank": false,
       "responses": true,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://docs.neosantara.xyz/",
@@ -2078,6 +2112,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://docs.ollama.com/api/openai-compatibility",
@@ -2138,6 +2173,7 @@
       "rerank": false,
       "responses": true,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://platform.openai.com/docs/api-reference",
@@ -2228,6 +2264,7 @@
       "rerank": false,
       "responses": true,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://openrouter.ai/docs/api-reference/overview",
@@ -2288,6 +2325,7 @@
       "rerank": true,
       "responses": true,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://mozilla-ai.github.io/otari/",
@@ -2335,7 +2373,7 @@
       "audioTranscription": false,
       "batch": false,
       "completion": true,
-      "embedding": false,
+      "embedding": true,
       "files": false,
       "imageEdit": false,
       "imageGeneration": false,
@@ -2347,6 +2385,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://docs.ovhcloud.com/en/guides/public-cloud/ai-machine-learning/ai-endpoints-getting-started",
@@ -2387,7 +2426,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
-    "tier": "community"
+    "tier": "verified"
   },
   {
     "capabilities": {
@@ -2407,6 +2446,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://docs.perplexity.ai/api-reference/chat-completions-post",
@@ -2467,6 +2507,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://portkey.ai/docs/api-reference/inference-api/introduction",
@@ -2527,6 +2568,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://developer.qiniu.com/aitokenapi",
@@ -2587,6 +2629,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://docs.requesty.ai/",
@@ -2647,6 +2690,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://aws.amazon.com/sagemaker/",
@@ -2706,6 +2750,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://docs.sambanova.ai/cloud/docs/api-reference/overview",
@@ -2766,6 +2811,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://developers.telnyx.com/docs/inference/getting-started",
@@ -2827,6 +2873,7 @@
       "rerank": true,
       "responses": false,
       "streaming": true,
+      "videoGeneration": true,
       "vision": true
     },
     "documentationUrl": "https://docs.together.ai/reference/",
@@ -2886,6 +2933,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://cloud.google.com/vertex-ai/docs",
@@ -2945,6 +2993,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/use-claude",
@@ -3004,6 +3053,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://docs.vllm.ai/en/latest/serving/openai_compatible_server/",
@@ -3064,6 +3114,7 @@
       "rerank": true,
       "responses": false,
       "streaming": false,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://docs.voyageai.com/",
@@ -3123,6 +3174,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://www.ibm.com/watsonx",
@@ -3182,6 +3234,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://docs.x.ai/docs/api-reference",
@@ -3242,6 +3295,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://docs.z.ai/guides/develop/openai/introduction",

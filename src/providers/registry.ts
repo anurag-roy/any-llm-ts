@@ -69,6 +69,7 @@ const conservativeCapabilities: ProviderCapabilities = {
   rerank: false,
   responses: false,
   streaming: true,
+  videoGeneration: false,
   vision: false,
 };
 
@@ -341,7 +342,7 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
   },
   {
     apiBase: "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
-    capabilities: capabilities({ reasoning: false, vision: false }),
+    capabilities: capabilities({ embedding: true, reasoning: false, vision: false }),
     documentationUrl:
       "https://docs.ovhcloud.com/en/guides/public-cloud/ai-machine-learning/ai-endpoints-getting-started",
     envApiBase: "OVHCLOUD_API_BASE",
@@ -649,6 +650,7 @@ addBuiltIn("gemini", {
       pdfInput: true,
       reasoning: true,
       responses: true,
+      videoGeneration: true,
       vision: true,
     }),
     documentationUrl: "https://ai.google.dev/gemini-api/docs",
@@ -710,6 +712,7 @@ addBuiltIn("together", {
       embedding: true,
       reasoning: true,
       rerank: true,
+      videoGeneration: true,
       vision: true,
     }),
     documentationUrl: "https://docs.together.ai/reference/",

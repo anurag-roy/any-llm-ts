@@ -112,6 +112,7 @@ export const openAICapabilities: ProviderCapabilities = {
   rerank: false,
   responses: true,
   streaming: true,
+  videoGeneration: false,
   vision: true,
 };
 

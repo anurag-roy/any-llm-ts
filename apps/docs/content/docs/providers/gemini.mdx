@@ -1,6 +1,6 @@
 ---
 title: Gemini
-description: Use Google's native Gemini API for completions, streaming, tools, thinking, multimodal input, embeddings, Responses, Files, and model discovery.
+description: Use Google's native Gemini API for completions, streaming, tools, thinking, multimodal input, embeddings, Responses, Files, video generation, and model discovery.
 ---
 
 The `gemini` adapter uses Google's official `@google/genai` SDK. It translates the common
@@ -222,18 +222,24 @@ console.log(response.output_text);
 Set `stream: true` to receive the OpenAI Responses event lifecycle. Vertex AI keeps Responses
 disabled; it never imports the Interactions path.
 
+## Video generation
+
+Gemini Omni Flash renders video through the same Interactions API, as a background job. `size`
+must be `16:9` or `9:16` with a short side of 360, 720, 1080, or 2160 pixels. `seconds` and
+`negativePrompt` are rejected. See [Video generation](/docs/operations/video).
+
 ## Capability boundary
 
 The adapter advertises completions, streaming, thinking, image and PDF input, embeddings, model
-listing, batch jobs, Files (upload, list, retrieve, delete), and text-only Responses. Batch
-creation accepts `/v1/chat/completions` JSONL input, translates each record into an inline Google
-batch request, and normalizes inline results through the same completion converter.
+listing, batch jobs, Files (upload, list, retrieve, delete), text-only Responses, and video
+generation. Batch creation accepts `/v1/chat/completions` JSONL input, translates each record into
+an inline Google batch request, and normalizes inline results through the same completion converter.
 
 See the [Files](/docs/operations/files) page for Gemini upload, list, retrieve, and delete.
 
 `messages()` is available through the common Messages compatibility layer. Image generation,
 moderation, speech, and transcription remain outside this adapter's current public surface. Vertex
-AI does not inherit Files or Responses. Vertex completions for Model Garden partner IDs
+AI does not inherit Files, Responses, or video generation. Vertex completions for Model Garden partner IDs
 (`qwen`, `openai/gpt-oss-`, `deepseek-ai`, `llama`, `meta/llama`, `minimaxai/`, `moonshotai/`,
 `zai-org/`) go to Vertex's OpenAI-compatible endpoint. IDs starting with `mistral` or `codestral`
 go to the `mistralai` publisher's `rawPredict` endpoints. Gemini models stay on `generateContent`.

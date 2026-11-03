@@ -1,7 +1,7 @@
 {
   "source": {
     "repository": "mozilla-ai/any-llm",
-    "commit": "b6c4e19a5c21f72778f10e3d03df9e015d8824dc"
+    "commit": "c844dd8a09347450c4271528d934631476dbe823"
   },
   "providers": [
     "anthropic",
@@ -89,6 +89,7 @@
     "openai",
     "openrouter",
     "otari",
+    "ovhcloud",
     "portkey",
     "sambanova",
     "together",
@@ -112,6 +113,10 @@
     "speech",
     "moderation",
     "rerank",
+    "videoGeneration",
+    "retrieveVideo",
+    "pollVideo",
+    "downloadVideo",
     "listModels",
     "createBatch",
     "retrieveBatch",
@@ -211,6 +216,7 @@
       "openai",
       "openrouter",
       "otari",
+      "ovhcloud",
       "qiniu",
       "requesty",
       "sagemaker",
@@ -412,6 +418,7 @@
       "zai"
     ],
     "rerank": ["cohere", "fireworks", "otari", "together", "voyage"],
+    "videoGeneration": ["gemini", "together"],
     "responses": [
       "azureopenai",
       "deepseek",

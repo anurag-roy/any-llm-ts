@@ -63,6 +63,7 @@ const azureCapabilities: ProviderCapabilities = {
   rerank: false,
   responses: false,
   streaming: true,
+  videoGeneration: false,
   vision: false,
 };
 

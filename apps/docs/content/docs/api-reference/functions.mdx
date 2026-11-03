@@ -44,6 +44,10 @@ function listFiles(params: DirectListFilesParams): Promise<FilePage>;
 function retrieveFile(params: DirectFileResourceParams): Promise<FileMetadata>;
 function deleteFile(params: DirectFileResourceParams): Promise<FileDeleted>;
 function downloadFile(params: DirectDownloadFileParams): Promise<FileDownload>;
+function videoGeneration(params: DirectVideoGenerationParams): Promise<VideoJob>;
+function retrieveVideo(params: DirectRetrieveVideoParams): Promise<VideoJob>;
+function pollVideo(params: DirectPollVideoParams): Promise<VideoJob>;
+function downloadVideo(params: DirectDownloadVideoParams): Promise<Uint8Array>;
 ```
 
 ## Direct provider options

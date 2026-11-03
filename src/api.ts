@@ -48,6 +48,10 @@ import type {
   Transcription,
   TranscriptionParams,
   UploadFileParams,
+  PollVideoOptions,
+  VideoGenerationParams,
+  VideoJob,
+  VideoOutput,
 } from "./types.js";
 
 export interface DirectProviderOptions extends ProviderOptions {
@@ -339,4 +343,66 @@ export interface DirectDownloadFileParams extends DownloadFileParams, DirectProv
 export function downloadFile(params: DirectDownloadFileParams): Promise<FileDownload> {
   const { apiBase, apiKey, clientOptions, provider, ...request } = params;
   return client(provider, directOptions(apiBase, apiKey, clientOptions)).downloadFile(request);
+}
+
+export interface DirectVideoGenerationParams extends VideoGenerationParams, DirectProviderOptions {}
+
+export async function videoGeneration(params: DirectVideoGenerationParams): Promise<VideoJob> {
+  const { apiBase, apiKey, clientOptions, provider, ...request } = params;
+  const target = resolveTarget(request.model, provider);
+  return client(target.provider, directOptions(apiBase, apiKey, clientOptions)).videoGeneration({
+    ...request,
+    model: target.model,
+  });
+}
+
+export interface DirectRetrieveVideoParams extends DirectProviderOptions {
+  provider: string;
+  videoId: string;
+  providerOptions?: JsonObject;
+}
+
+export function retrieveVideo(params: DirectRetrieveVideoParams): Promise<VideoJob> {
+  const { apiBase, apiKey, clientOptions, provider, providerOptions, videoId } = params;
+  return client(provider, directOptions(apiBase, apiKey, clientOptions)).retrieveVideo(
+    videoId,
+    providerOptions,
+  );
+}
+
+export interface DirectPollVideoParams extends PollVideoOptions, DirectProviderOptions {
+  provider: string;
+  videoId: string;
+}
+
+export function pollVideo(params: DirectPollVideoParams): Promise<VideoJob> {
+  const {
+    apiBase,
+    apiKey,
+    clientOptions,
+    pollInterval,
+    provider,
+    providerOptions,
+    timeout,
+    videoId,
+  } = params;
+  return client(provider, directOptions(apiBase, apiKey, clientOptions)).pollVideo(videoId, {
+    ...includeWhen(!(pollInterval === undefined), { pollInterval }),
+    ...includeWhen(!(providerOptions === undefined), { providerOptions }),
+    ...includeWhen(!(timeout === undefined), { timeout }),
+  });
+}
+
+export interface DirectDownloadVideoParams extends DirectProviderOptions {
+  output: VideoOutput;
+  provider: string;
+  providerOptions?: JsonObject;
+}
+
+export function downloadVideo(params: DirectDownloadVideoParams): Promise<Uint8Array> {
+  const { apiBase, apiKey, clientOptions, output, provider, providerOptions } = params;
+  return client(provider, directOptions(apiBase, apiKey, clientOptions)).downloadVideo(
+    output,
+    providerOptions,
+  );
 }

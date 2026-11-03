@@ -74,7 +74,10 @@ import type {
   ToolCall,
   ToolCallDelta,
   UploadFileParams,
+  VideoGenerationParams,
+  VideoJob,
 } from "../types.js";
+import { downloadVideoUrl } from "../video.js";
 import {
   compactObject,
   getEnvironmentVariable,
@@ -97,6 +100,7 @@ import {
   type GeminiInteractionCreateParams,
 } from "./gemini-interactions.js";
 import { convertInteractionStream } from "./gemini-interactions-stream.js";
+import { convertInteractionToVideoJob, convertVideoParams } from "./gemini-video.js";
 import {
   deleteGeminiFile,
   downloadGeminiFile,
@@ -189,6 +193,7 @@ const geminiCapabilities: ProviderCapabilities = {
   rerank: false,
   responses: true,
   streaming: true,
+  videoGeneration: true,
   vision: true,
 };
 
@@ -1472,6 +1477,7 @@ export class GeminiProvider extends BaseProvider {
       capabilities: {
         ...geminiCapabilities,
         responses: this.providerName === "gemini",
+        videoGeneration: this.providerName === "gemini",
       },
       documentationUrl: config.documentationUrl ?? "https://ai.google.dev/gemini-api/docs",
       envApiBase: config.envApiBase ?? "GOOGLE_GEMINI_BASE_URL",
@@ -1729,6 +1735,69 @@ export class GeminiProvider extends BaseProvider {
     );
   }
 
+  override videoGeneration(params: VideoGenerationParams): Promise<VideoJob> {
+    if (!this.metadata.capabilities.videoGeneration) return super.videoGeneration(params);
+    return this.execute(async () => {
+      const created = await this.interactionsCreate({
+        ...convertVideoParams(params, this.providerName, this.interactionsVersion),
+        ...(params.providerOptions ?? {}),
+      });
+      if (isAsyncIterable(created)) {
+        throw new TypeError("Gemini video generation returned a stream.");
+      }
+      return convertInteractionToVideoJob(created, params.model);
+    });
+  }
+
+  override retrieveVideo(videoId: string, providerOptions: JsonObject = {}): Promise<VideoJob> {
+    if (!this.metadata.capabilities.videoGeneration)
+      return super.retrieveVideo(videoId, providerOptions);
+    return this.execute(async () => {
+      const request = {
+        ...providerOptions,
+        ...includeWhen(this.interactionsVersion !== undefined, {
+          api_version: this.interactionsVersion,
+        }),
+      };
+      return convertInteractionToVideoJob(await this.interactionsGet(videoId, request), "");
+    });
+  }
+
+  override downloadVideo(url: string, providerOptions: JsonObject = {}): Promise<Uint8Array> {
+    if (this.providerName !== "gemini") return super.downloadVideo(url, providerOptions);
+    let hostname: string | undefined;
+    try {
+      hostname = new URL(url).hostname;
+    } catch {
+      hostname = undefined;
+    }
+    if (hostname !== "generativelanguage.googleapis.com") {
+      return super.downloadVideo(url, providerOptions);
+    }
+    return this.execute(async () => {
+      // SAFETY: The GenAI client optionally exposes files.download; tests inject the same surface.
+      const client = this.client as { files?: { download?: unknown } };
+      const files = client.files;
+      if (isObject(files) && isFunction(files.download)) {
+        // SAFETY: isFunction established callability; tests and the GenAI SDK share this download contract.
+        const download = files.download as (
+          request: { file: string } & JsonObject,
+        ) => Promise<ArrayBuffer | Buffer | Uint8Array>;
+        const bytes = await download({ file: url, ...providerOptions });
+        if (bytes instanceof Uint8Array) return bytes;
+        if (bytes instanceof ArrayBuffer) return new Uint8Array(bytes);
+        throw new TypeError("Gemini files.download did not return video bytes.");
+      }
+      return downloadVideoUrl(url, {
+        headers: {
+          ...includeWhen(isString(this.fileAuth.apiKey), {
+            "x-goog-api-key": this.fileAuth.apiKey,
+          }),
+        },
+      });
+    });
+  }
+
   override retrieveBatchResults(
     batchId: string,
     providerOptions: JsonObject = {},
@@ -1767,6 +1836,21 @@ export class GeminiProvider extends BaseProvider {
       });
       return { results };
     });
+  }
+
+  private interactionsGet(videoId: string, params: JsonObject = {}): Promise<GeminiInteraction> {
+    // SAFETY: The GenAI client optionally exposes interactions.get; tests inject the same surface.
+    const client = this.client as { interactions?: { get?: unknown } };
+    const interactions = client.interactions;
+    if (!isObject(interactions) || !isFunction(interactions.get)) {
+      throw new TypeError("Gemini Interactions API is not available on this client.");
+    }
+    // SAFETY: isFunction established callability; tests and the GenAI SDK share this get contract.
+    const get = interactions.get as (
+      id: string,
+      request?: JsonObject,
+    ) => Promise<GeminiInteraction>;
+    return get(videoId, params);
   }
 
   private interactionsCreate(

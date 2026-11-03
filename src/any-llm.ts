@@ -3,6 +3,7 @@ import type { JsonValue } from "./types.js";
 import type { JsonObject } from "./types.js";
 import {
   InvalidModelSyntaxError,
+  InvalidRequestError,
   UnsupportedOperationError,
   UnsupportedParameterError,
 } from "./errors.js";
@@ -54,7 +55,12 @@ import type {
   Transcription,
   TranscriptionParams,
   UploadFileParams,
+  PollVideoOptions,
+  VideoGenerationParams,
+  VideoJob,
+  VideoOutput,
 } from "./types.js";
+import { decodeVideoData, delay } from "./video.js";
 import {
   completionResponseFormat,
   isStructuredOutputFormat,
@@ -359,6 +365,45 @@ export class AnyLLM {
 
   downloadFile(params: DownloadFileParams): Promise<FileDownload> {
     return this.adapter.downloadFile(params);
+  }
+
+  videoGeneration(params: VideoGenerationParams): Promise<VideoJob> {
+    if (!this.metadata.capabilities.videoGeneration) {
+      return Promise.reject(new UnsupportedOperationError("video generation", this.provider));
+    }
+    return this.adapter.videoGeneration(params);
+  }
+
+  retrieveVideo(videoId: string, providerOptions?: JsonObject): Promise<VideoJob> {
+    if (!this.metadata.capabilities.videoGeneration) {
+      return Promise.reject(new UnsupportedOperationError("video generation", this.provider));
+    }
+    return this.adapter.retrieveVideo(videoId, providerOptions);
+  }
+
+  async pollVideo(videoId: string, options: PollVideoOptions = {}): Promise<VideoJob> {
+    const pollInterval = options.pollInterval ?? 5;
+    const timeout = options.timeout === undefined ? 600 : options.timeout;
+    const deadline = timeout === null ? undefined : Date.now() + timeout * 1_000;
+    let job = await this.retrieveVideo(videoId, options.providerOptions);
+    while (!job.done) {
+      if (deadline !== undefined && Date.now() >= deadline) {
+        throw new Error(`Video job ${videoId} is still ${job.status} after ${timeout} seconds.`);
+      }
+      await delay(pollInterval * 1_000);
+      job = await this.retrieveVideo(videoId, options.providerOptions);
+    }
+    return job;
+  }
+
+  downloadVideo(output: VideoOutput, providerOptions?: JsonObject): Promise<Uint8Array> {
+    if (output.b64Data !== undefined) return Promise.resolve(decodeVideoData(output.b64Data));
+    if (output.url === undefined) {
+      return Promise.reject(
+        new InvalidRequestError("Video output has neither a URL nor inline data to download."),
+      );
+    }
+    return this.adapter.downloadVideo(output.url, providerOptions);
   }
 
   messages<T>(params: StructuredMessagesParams<T>): Promise<ParsedMessageResponse<T>>;

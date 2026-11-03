@@ -60,6 +60,7 @@ const sagemakerCapabilities: ProviderCapabilities = {
   rerank: false,
   responses: false,
   streaming: true,
+  videoGeneration: false,
   vision: true,
 };
 

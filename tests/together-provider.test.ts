@@ -68,7 +68,7 @@ describe("Together provider", () => {
   it("uses the native adapter and advertises embeddings and batches", () => {
     expect(createProvider("together", { apiKey: "secret" })).toBeInstanceOf(TogetherProvider);
     expect(AnyLLM.getProviderMetadata("together")).toMatchObject({
-      capabilities: { batch: true, embedding: true, rerank: true },
+      capabilities: { batch: true, embedding: true, rerank: true, videoGeneration: true },
       promptCacheKeySupport: "supported",
     });
   });

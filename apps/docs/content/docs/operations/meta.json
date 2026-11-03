@@ -7,6 +7,7 @@
     "responses",
     "batches-and-reranking",
     "files",
-    "images-audio-and-moderation"
+    "images-audio-and-moderation",
+    "video"
   ]
 }

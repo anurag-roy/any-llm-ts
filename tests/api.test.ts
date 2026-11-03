@@ -8,6 +8,7 @@ import {
   createBatch,
   deleteFile,
   downloadFile,
+  downloadVideo,
   embedding,
   imageGeneration,
   listBatches,
@@ -20,9 +21,12 @@ import {
   retrieveBatch,
   retrieveBatchResults,
   retrieveFile,
+  retrieveVideo,
+  pollVideo,
   speech,
   transcription,
   uploadFile,
+  videoGeneration,
 } from "../src/index.js";
 import type {
   Batch,
@@ -48,6 +52,8 @@ import type {
   SpeechParams,
   Transcription,
   TranscriptionParams,
+  VideoGenerationParams,
+  VideoJob,
 } from "../src/index.js";
 
 const metadata: ProviderMetadata = completeProviderMetadata({
@@ -66,6 +72,7 @@ const metadata: ProviderMetadata = completeProviderMetadata({
     rerank: false,
     responses: true,
     streaming: true,
+    videoGeneration: true,
     vision: false,
   },
   documentationUrl: "https://example.com",
@@ -173,6 +180,26 @@ class ApiProvider extends BaseProvider {
 
   override retrieveBatchResults(_batchId: string): Promise<BatchResult> {
     return Promise.resolve({ results: [{ customId: "request-1" }] });
+  }
+
+  override videoGeneration(params: VideoGenerationParams): Promise<VideoJob> {
+    return Promise.resolve({
+      done: false,
+      id: "vid-1",
+      model: params.model,
+      outputs: [],
+      status: "queued",
+    });
+  }
+
+  override retrieveVideo(videoId: string): Promise<VideoJob> {
+    return Promise.resolve({
+      done: true,
+      id: videoId,
+      model: "video",
+      outputs: [{ mimeType: "video/mp4", url: "https://cdn.example/v.mp4" }],
+      status: "completed",
+    });
   }
 
   override rerank(params: RerankParams): Promise<RerankResponse> {
@@ -321,6 +348,31 @@ describe("stateless operation helpers", () => {
         { index: 1, relevanceScore: 0.9 },
       ],
     });
+  });
+
+  it("delegates video generation, retrieve, poll, and download", async () => {
+    await expect(
+      videoGeneration({
+        model: "api-fake:ByteDance/Seedance-2.0",
+        prompt: "A yellow rubber duck sits on a wooden table.",
+        size: "1280x720",
+      }),
+    ).resolves.toMatchObject({ id: "vid-1", model: "ByteDance/Seedance-2.0", status: "queued" });
+    await expect(retrieveVideo({ provider: "api-fake", videoId: "vid-1" })).resolves.toMatchObject({
+      done: true,
+      id: "vid-1",
+    });
+    await expect(
+      pollVideo({ pollInterval: 0, provider: "api-fake", videoId: "vid-1" }),
+    ).resolves.toMatchObject({
+      status: "completed",
+    });
+    await expect(
+      downloadVideo({
+        output: { b64Data: "dmlkZW8=" },
+        provider: "api-fake",
+      }),
+    ).resolves.toEqual(new TextEncoder().encode("video"));
   });
 
   it("delegates Files helpers to the selected provider", async () => {
