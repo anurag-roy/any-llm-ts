@@ -700,6 +700,8 @@ export interface ListFilesParams {
 
 export interface FileResourceParams {
   fileId: string;
+  /** OpenAI and Azure OpenAI Code Interpreter container that produced this file. */
+  containerId?: string;
   providerOptions?: JsonObject;
 }
 
