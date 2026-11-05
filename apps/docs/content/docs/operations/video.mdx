@@ -49,9 +49,9 @@ const job = await videoGeneration({
 
 ## Providers
 
-| Provider | Notes |
-| -------- | ----- |
-| Gemini | Gemini Omni Flash through the Interactions API. `size` maps to a `16:9` or `9:16` aspect ratio and a `360p` / `720p` / `1080p` / `4k` resolution, so the short side must be 360, 720, 1080, or 2160 pixels and the video cannot be square. `seconds` and `negativePrompt` raise `UnsupportedParameterError`. Files API URIs download with the API key. |
+| Provider | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Gemini   | Gemini Omni Flash through the Interactions API. `size` maps to a `16:9` or `9:16` aspect ratio and a `360p` / `720p` / `1080p` / `4k` resolution, so the short side must be 360, 720, 1080, or 2160 pixels and the video cannot be square. `seconds` and `negativePrompt` raise `UnsupportedParameterError`. Files API URIs download with the API key.                                                                                                                            |
 | Together | `POST /v2/videos` and `GET /v2/videos/{id}` for models such as `ByteDance/Seedance-2.0`. `size` maps to `width` / `height`, `seconds` to a string, and `firstFrame` / `lastFrame` to `frame_images`. Together-only options such as `fps` go in `providerOptions`. Seedance renders fixed resolutions only (for example `864x496`, `1280x720`, `1920x1080`, and their portrait twins); any other `WIDTHxHEIGHT` is sent, but the job then fails with `unsupportedModelResolution`. |
 
 All other providers reject video generation with `UnsupportedOperationError`. OpenAI is among them: the Videos API was removed with no replacement.

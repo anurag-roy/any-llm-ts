@@ -146,8 +146,8 @@ Native fields such as `uri`, `downloadUri`, `source`, `sha256Hash`, and `error` 
 | ------------------------------------------------------------------------------------ | -------------- |
 | `uploadFile({ file, filename?, mimeType?, purpose?, expiresIn?, providerOptions? })` | `FileMetadata` |
 | `listFiles({ limit?, cursor?, purpose?, providerOptions? })`                         | `FilePage`     |
-| `retrieveFile({ fileId, containerId?, providerOptions? })`                            | `FileMetadata` |
-| `downloadFile({ fileId, chunkSize?, containerId?, providerOptions? })`                | `FileDownload` |
+| `retrieveFile({ fileId, containerId?, providerOptions? })`                           | `FileMetadata` |
+| `downloadFile({ fileId, chunkSize?, containerId?, providerOptions? })`               | `FileDownload` |
 | `deleteFile({ fileId, providerOptions? })`                                           | `FileDeleted`  |
 
 These are instance methods. Reuse the client configured for the originating provider account; file

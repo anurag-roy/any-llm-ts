@@ -1,6 +1,6 @@
 ---
 title: Images, audio, and moderation
-description: Use compatible image generation, transcription, speech, and moderation endpoints.
+description: Use compatible image generation, image edit, transcription, speech, and moderation endpoints.
 ---
 
 These operations are available on adapters whose capability metadata marks them as supported.
@@ -21,9 +21,28 @@ const image = await imageGeneration({
 console.log(image.data[0]?.url ?? image.data[0]?.b64Json);
 ```
 
+## Image edit
+
+```ts
+import { imageEdit } from "any-llm-ts";
+
+const edited = await imageEdit({
+  provider: "openai",
+  model: "gpt-image-1",
+  image: "./robot.png",
+  prompt: "Make the robot hold a TypeScript book",
+});
+
+console.log(edited.data[0]?.url ?? edited.data[0]?.b64Json);
+```
+
+`image` accepts a filesystem path, bytes, a `Blob`, or a `(filename, content[, mimeType])` tuple.
+Pass an array when the provider accepts multiple reference images.
+
 Gemini image models generate and edit through `generateContent` instead of OpenAI's Images API.
 Pass a Nano Banana or `*-image-*` model, map `size` to an aspect ratio Gemini accepts, and read
-`b64Json` plus optional `usage`. Vertex AI does not implement this path.
+`b64Json` plus optional `usage`. Gemini rejects `responseFormat: "url"` because it returns image
+bytes. Vertex AI does not implement this path.
 
 ## Audio transcription
 

@@ -83,15 +83,19 @@ mutually exclusive.
 ## Hugging Face billing
 
 Team and Enterprise organizations can pay for Inference Providers usage instead of the token's
-own account. Pass the organization name (or resource-group id) as `clientOptions.billTo`. Completions
-send it to `@huggingface/inference` as `billTo`; Responses send the `X-HF-Bill-To` header on the
-OpenResponses client.
+own account. Pass the organization name (or resource-group id) as `clientOptions.billTo`.
+Completions send it to `@huggingface/inference` as `billTo`. Responses send `X-HF-Bill-To` on the
+OpenResponses client, merged with any existing `clientOptions.openAI.defaultHeaders`.
 
 ```ts
 const huggingface = AnyLLM.create("huggingface", {
   clientOptions: { billTo: "my-org" },
 });
 ```
+
+Omit `billTo` to keep billing on the token's own account. Hugging Face only honors the header for
+an organization the token's user belongs to and which is allowed to be billed for Inference
+Providers.
 
 ## Inspect effective metadata
 
