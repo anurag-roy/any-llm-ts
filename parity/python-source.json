@@ -1,7 +1,7 @@
 {
   "source": {
     "repository": "mozilla-ai/any-llm",
-    "commit": "0c3e8a7bdf2b7aa626d854aa8d3942c9bcd6f326"
+    "commit": "6c266c6a7d0da061b0fc6742d7b17f9000bc757a"
   },
   "providers": [
     "anthropic",
@@ -51,6 +51,7 @@
     "sambanova",
     "telnyx",
     "together",
+    "tokenhub",
     "vertexai",
     "vertexaianthropic",
     "vllm",
@@ -188,6 +189,7 @@
       "sambanova",
       "telnyx",
       "together",
+      "tokenhub",
       "vertexai",
       "vertexaianthropic",
       "vllm",
@@ -227,8 +229,8 @@
       "voyage"
     ],
     "files": ["anthropic", "azureopenai", "gemini", "openai"],
-    "imageEdit": ["openai"],
-    "imageGeneration": ["azureopenai", "neosantara", "openai", "otari"],
+    "imageEdit": ["gemini", "openai"],
+    "imageGeneration": ["azureopenai", "gemini", "neosantara", "openai", "otari"],
     "listModels": [
       "anthropic",
       "atlascloud",
@@ -271,6 +273,7 @@
       "sambanova",
       "telnyx",
       "together",
+      "tokenhub",
       "vertexai",
       "vllm",
       "watsonx",
@@ -325,6 +328,7 @@
       "sambanova",
       "telnyx",
       "together",
+      "tokenhub",
       "vertexai",
       "vertexaianthropic",
       "vllm",
@@ -367,7 +371,6 @@
       "gemini",
       "meta",
       "neosantara",
-      "ollama",
       "openai",
       "openrouter",
       "otari",
@@ -481,6 +484,7 @@
       "sambanova",
       "telnyx",
       "together",
+      "tokenhub",
       "vertexai",
       "vertexaianthropic",
       "vllm",

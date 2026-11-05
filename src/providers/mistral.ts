@@ -147,6 +147,7 @@ export class MistralProvider extends OpenAIProvider {
         name: "mistral",
         quirks: {
           finishReasonMap: { model_length: "length" },
+          maxCompletionTokensAsMaxTokens: true,
           trimReasoningAtResponseTag: true,
         },
       },

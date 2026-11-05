@@ -946,8 +946,8 @@
       "completion": true,
       "embedding": true,
       "files": true,
-      "imageEdit": false,
-      "imageGeneration": false,
+      "imageEdit": true,
+      "imageGeneration": true,
       "listModels": true,
       "messages": true,
       "moderation": false,
@@ -2107,7 +2107,7 @@
       "listModels": true,
       "messages": true,
       "moderation": false,
-      "pdfInput": true,
+      "pdfInput": false,
       "reasoning": true,
       "rerank": false,
       "responses": false,
@@ -2914,6 +2914,67 @@
       "libraryVersion": "0.8.0"
     },
     "tier": "verified"
+  },
+  {
+    "capabilities": {
+      "audioSpeech": false,
+      "audioTranscription": false,
+      "batch": false,
+      "completion": true,
+      "embedding": false,
+      "files": false,
+      "imageEdit": false,
+      "imageGeneration": false,
+      "listModels": true,
+      "messages": true,
+      "moderation": false,
+      "pdfInput": false,
+      "reasoning": false,
+      "rerank": false,
+      "responses": false,
+      "streaming": true,
+      "videoGeneration": false,
+      "vision": false
+    },
+    "documentationUrl": "https://tokenhub.com/docs",
+    "name": "tokenhub",
+    "requiresApiKey": true,
+    "apiBase": "https://us-api.tokenhub.com/v1",
+    "envApiBase": "TOKENHUB_API_BASE",
+    "envApiKey": "TOKENHUB_API_KEY",
+    "supportsCompletionN": true,
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "TokenHub",
+    "fileOperations": [],
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "tokenhub",
+    "messagesNative": false,
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.8.0"
+    },
+    "tier": "community"
   },
   {
     "capabilities": {

@@ -56,6 +56,7 @@ import {
   iterateClosing,
   mapAsyncIterable,
   notifyCompletionDispatch,
+  resolveOutputTokenLimit,
   resolvedMaxRetries,
   timeoutRequestOptions,
   unixTimestamp,
@@ -196,7 +197,7 @@ function assistantContent(message: ChatMessage): JsonObject[] {
   for (const toolCall of message.toolCalls ?? []) {
     let input: JsonValue;
     try {
-      input = parseJsonValue(JSON.parse(toolCall.function.arguments), "tool arguments");
+      input = parseJsonValue(JSON.parse(toolCall.function.arguments || "{}"), "tool arguments");
     } catch {
       input = { arguments: toolCall.function.arguments };
     }
@@ -210,20 +211,58 @@ function assistantContent(message: ChatMessage): JsonObject[] {
   return blocks;
 }
 
+function systemCacheControl(part: {
+  cacheControl?: JsonValue;
+  type: string;
+}): JsonObject | undefined {
+  if (isJsonObject(part.cacheControl)) return part.cacheControl;
+  if ("cache_control" in part && isJsonObject(part.cache_control)) return part.cache_control;
+  return undefined;
+}
+
+function systemTextBlocks(content: Exclude<ChatMessage["content"], string | null>): JsonObject[] {
+  return content.flatMap((part) => {
+    if (part.type !== "text" || !("text" in part) || !isString(part.text)) return [];
+    const cacheControl = systemCacheControl(part);
+    return [
+      {
+        text: part.text,
+        type: "text",
+        ...includeWhen(cacheControl !== undefined, { cache_control: cacheControl }),
+      },
+    ];
+  });
+}
+
+function systemFromContent(content: ChatMessage["content"]): JsonObject[] | string | undefined {
+  if (content === null) return undefined;
+  if (isString(content)) return content;
+  return systemTextBlocks(content);
+}
+
+function asSystemBlocks(value: JsonObject[] | string): JsonObject[] {
+  if (isString(value)) return value.length === 0 ? [] : [{ text: value, type: "text" }];
+  return [...value];
+}
+
+function appendSystemContent(
+  system: JsonObject[] | string | undefined,
+  content: ChatMessage["content"],
+): JsonObject[] | string | undefined {
+  const next = systemFromContent(content);
+  if (next === undefined) return system;
+  if (system === undefined) return next;
+  if (isString(system) && isString(next)) return `${system}\n${next}`;
+  return [...asSystemBlocks(system), ...asSystemBlocks(next)];
+}
+
 function convertMessages(messages: ChatMessage[]) {
-  const system = messages
-    .filter((message) => message.role === "developer" || message.role === "system")
-    .map((message) =>
-      isString(message.content)
-        ? message.content
-        : (message.content ?? [])
-            .flatMap((part): string[] =>
-              part.type === "text" && "text" in part && isString(part.text) ? [part.text] : [],
-            )
-            .join("\n"),
-    )
-    .filter((entry) => entry.length > 0)
-    .join("\n\n");
+  let system: JsonObject[] | string | undefined;
+  for (const message of messages) {
+    if (message.role === "developer" || message.role === "system") {
+      system = appendSystemContent(system, message.content);
+    }
+  }
 
   const converted = messages.flatMap((message): JsonObject[] => {
     if (message.role === "developer" || message.role === "system") return [];
@@ -253,7 +292,8 @@ function convertMessages(messages: ChatMessage[]) {
       },
     ];
   });
-  return system.length === 0 ? { messages: converted } : { messages: converted, system };
+  const emptySystem = system === undefined || system.length === 0;
+  return emptySystem ? { messages: converted } : { messages: converted, system };
 }
 
 function convertTools(tools: CompletionParams["tools"]) {
@@ -1218,7 +1258,7 @@ export class AnthropicProvider extends BaseProvider {
 
   private completionRequest(params: CompletionParams) {
     const convertedMessages = convertMessages(params.messages);
-    const maxTokens = params.maxTokens ?? params.maxCompletionTokens ?? 8_192;
+    const maxTokens = resolveOutputTokenLimit(params) ?? 8_192;
     const reasoning = reasoningConfiguration(params, this.providerName, maxTokens);
     const structuredOutput = structuredOutputConfiguration(params.responseFormat);
     const outputConfig = {

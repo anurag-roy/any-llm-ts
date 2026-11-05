@@ -155,7 +155,10 @@ describe("Anthropic provider", () => {
       metadata: { user_id: "123" },
       model: "claude-test",
       stop_sequences: ["END"],
-      system: "You are concise.\n\nUse tools",
+      system: [
+        { text: "You are concise.", type: "text" },
+        { text: "Use tools", type: "text" },
+      ],
       output_config: { effort: "high" },
       service_tier: "auto",
       thinking: { type: "adaptive" },
@@ -244,6 +247,61 @@ describe("Anthropic provider", () => {
     ]);
     expect(request.messages[1].content).toEqual([
       { text: "I will check the weather.", type: "text" },
+    ]);
+  });
+
+  it("joins string system messages and promotes developer text to system", async () => {
+    const create = vi.fn().mockResolvedValue(anthropicResponse());
+    const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
+    await provider.completion({
+      messages: [
+        { content: "First part.", role: "system" },
+        { content: "Second part.", role: "developer" },
+        { content: "Hello", role: "user" },
+      ],
+      model: "claude-test",
+    });
+    expect(parseJsonObject(create.mock.calls[0]?.[0]).system).toBe("First part.\nSecond part.");
+  });
+
+  it("combines mixed string and text-block system messages into text blocks", async () => {
+    const create = vi.fn().mockResolvedValue(anthropicResponse());
+    const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
+    await provider.completion({
+      messages: [
+        { content: "First part.", role: "system" },
+        {
+          content: [{ cacheControl: { type: "ephemeral" }, text: "Second part.", type: "text" }],
+          role: "system",
+        },
+        { content: "Hello", role: "user" },
+      ],
+      model: "claude-test",
+    });
+    expect(parseJsonObject(create.mock.calls[0]?.[0]).system).toEqual([
+      { text: "First part.", type: "text" },
+      { cache_control: { type: "ephemeral" }, text: "Second part.", type: "text" },
+    ]);
+  });
+
+  it("replays streamed tool calls that accumulated empty arguments as empty input", async () => {
+    const create = vi.fn().mockResolvedValue(anthropicResponse());
+    const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
+    await provider.completion({
+      messages: [
+        { content: "What time is it?", role: "user" },
+        {
+          content: null,
+          role: "assistant",
+          toolCalls: [
+            { function: { arguments: "", name: "get_time" }, id: "toolu_1", type: "function" },
+          ],
+        },
+      ],
+      model: "claude-test",
+    });
+    expect(parseJsonObject(create.mock.calls[0]?.[0]).messages[1].content).toEqual([
+      { id: "toolu_1", input: {}, name: "get_time", type: "tool_use" },
     ]);
   });
 

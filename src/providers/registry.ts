@@ -312,7 +312,6 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
     apiBase: "http://localhost:11434/v1",
     capabilities: capabilities({
       embedding: true,
-      pdfInput: true,
       reasoning: true,
       vision: true,
     }),
@@ -430,6 +429,13 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
     envApiBase: "TELNYX_API_BASE",
     envApiKey: "TELNYX_API_KEY",
     name: "telnyx",
+  },
+  {
+    apiBase: "https://us-api.tokenhub.com/v1",
+    documentationUrl: "https://tokenhub.com/docs",
+    envApiBase: "TOKENHUB_API_BASE",
+    envApiKey: "TOKENHUB_API_KEY",
+    name: "tokenhub",
   },
   {
     apiBase: "http://localhost:8000/v1",
@@ -647,6 +653,8 @@ addBuiltIn("gemini", {
     capabilities: capabilities({
       batch: true,
       embedding: true,
+      imageEdit: true,
+      imageGeneration: true,
       pdfInput: true,
       reasoning: true,
       responses: true,

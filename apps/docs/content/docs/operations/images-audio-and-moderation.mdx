@@ -21,6 +21,10 @@ const image = await imageGeneration({
 console.log(image.data[0]?.url ?? image.data[0]?.b64Json);
 ```
 
+Gemini image models generate and edit through `generateContent` instead of OpenAI's Images API.
+Pass a Nano Banana or `*-image-*` model, map `size` to an aspect ratio Gemini accepts, and read
+`b64Json` plus optional `usage`. Vertex AI does not implement this path.
+
 ## Audio transcription
 
 ```ts

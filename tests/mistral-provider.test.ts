@@ -279,6 +279,27 @@ describe("Mistral prompt cache key", () => {
     });
     expect(create.mock.calls[0]?.[0]).toMatchObject({ prompt_cache_key: "tenant-1" });
   });
+
+  it("sends maxCompletionTokens as Mistral max_tokens", async () => {
+    const create = vi.fn().mockResolvedValue({
+      choices: [{ finish_reason: "stop", index: 0, message: { content: "ok", role: "assistant" } }],
+      created: 1,
+      id: "chat-1",
+      model: "mistral-small-latest",
+    });
+    const provider = new MistralProvider({ apiKey: "secret" });
+    Object.defineProperty(provider, "client", {
+      value: { chat: { completions: { create } } },
+    });
+    await provider.completion({
+      maxCompletionTokens: 64,
+      maxTokens: 32,
+      messages: [{ content: "Hello", role: "user" }],
+      model: "mistral-small-latest",
+    });
+    expect(create.mock.calls[0]?.[0]).toMatchObject({ max_tokens: 64 });
+    expect(create.mock.calls[0]?.[0]).not.toHaveProperty("max_completion_tokens");
+  });
 });
 
 describe("Mistral empty assistant messages", () => {

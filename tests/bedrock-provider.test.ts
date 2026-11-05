@@ -189,7 +189,6 @@ describe("Bedrock provider", () => {
       reasoningEffort: "high",
       stop: "END",
       temperature: 0,
-      toolChoice: "required",
       tools: [
         {
           function: {
@@ -222,7 +221,6 @@ describe("Bedrock provider", () => {
       performanceConfig: { latency: "optimized" },
       system: [{ text: "Be concise." }, { text: "Use tools." }],
       toolConfig: {
-        toolChoice: { any: {} },
         tools: [{ toolSpec: { name: "weather" } }],
       },
     });
@@ -269,6 +267,160 @@ describe("Bedrock provider", () => {
         totalTokens: 18,
       },
     });
+  });
+
+  it("sends required toolChoice as Converse any without reasoning", async () => {
+    const send = vi.fn(async (_command: BedrockTestCommand) => ({
+      output: { message: { content: [{ text: "ok" }] } },
+      stopReason: "end_turn",
+    }));
+    const bedrock = provider(send);
+    await bedrock.completion({
+      messages: [{ content: "Hello", role: "user" }],
+      model: "anthropic.claude-test",
+      toolChoice: "required",
+      tools: [
+        {
+          function: { name: "weather" },
+          type: "function",
+        },
+      ],
+    });
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    const command = send.mock.calls[0]?.[0] as ConverseCommand;
+    expect(command.input.toolConfig).toMatchObject({
+      toolChoice: { any: {} },
+      tools: [{ toolSpec: { name: "weather" } }],
+    });
+  });
+
+  it("rejects forced toolChoice together with manual reasoningEffort", () => {
+    const bedrock = provider();
+    expect(() =>
+      bedrock.completion({
+        messages: [{ content: "Hello", role: "user" }],
+        model: "anthropic.claude-test",
+        reasoningEffort: "high",
+        toolChoice: "required",
+        tools: [{ function: { name: "weather" }, type: "function" }],
+      }),
+    ).toThrow(/toolChoice with reasoningEffort/u);
+  });
+
+  it("sends tool-result content parts as Converse toolResult blocks", async () => {
+    const send = vi.fn(async (_command: BedrockTestCommand) => ({
+      output: { message: { content: [{ text: "ok" }] } },
+      stopReason: "end_turn",
+    }));
+    const bedrock = provider(send);
+    const png = `data:image/png;base64,${Buffer.from("chart bytes").toString("base64")}`;
+    await bedrock.completion({
+      messages: [
+        { content: "plot it", role: "user" },
+        {
+          content: null,
+          role: "assistant",
+          toolCalls: [{ function: { arguments: "{}", name: "plot" }, id: "t1", type: "function" }],
+        },
+        {
+          content: [
+            { text: "done", type: "text" },
+            { image_url: { url: png }, type: "image_url" },
+          ],
+          role: "tool",
+          toolCallId: "t1",
+        },
+      ],
+      model: "anthropic.claude-test",
+    });
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    const command = send.mock.calls[0]?.[0] as ConverseCommand;
+    expect(parseJsonObjectArray(command.input.messages)[2]).toMatchObject({
+      content: [
+        {
+          toolResult: {
+            content: [
+              { text: "done" },
+              {
+                image: {
+                  format: "png",
+                  source: { bytes: new Uint8Array(Buffer.from("chart bytes")) },
+                },
+              },
+            ],
+            toolUseId: "t1",
+          },
+        },
+      ],
+      role: "user",
+    });
+  });
+
+  it("omits empty stop sequences and preserves system text parts", async () => {
+    const send = vi.fn(async (_command: BedrockTestCommand) => ({
+      output: { message: { content: [{ text: "ok" }] } },
+      stopReason: "end_turn",
+    }));
+    const bedrock = provider(send);
+    await bedrock.completion({
+      messages: [
+        { content: [{ text: "Be terse.", type: "text" }], role: "system" },
+        { content: "Hello", role: "user" },
+      ],
+      model: "anthropic.claude-test",
+      stop: [],
+    });
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    const command = send.mock.calls[0]?.[0] as ConverseCommand;
+    expect(command.input.system).toEqual([{ text: "Be terse." }]);
+    expect(command.input.inferenceConfig?.stopSequences).toBeUndefined();
+  });
+
+  it("withholds tools when toolChoice is none unless history must replay them", async () => {
+    const send = vi.fn(async (_command: BedrockTestCommand) => ({
+      output: { message: { content: [{ text: "ok" }] } },
+      stopReason: "end_turn",
+    }));
+    const bedrock = provider(send);
+    const tools = [{ function: { name: "lookup" }, type: "function" as const }];
+    await bedrock.completion({
+      messages: [{ content: "Look up the answer", role: "user" }],
+      model: "anthropic.claude-test",
+      toolChoice: "none",
+      tools,
+    });
+    const withheld = send.mock.calls[0]?.[0];
+    if (!(withheld instanceof ConverseCommand)) {
+      throw new Error("expected a ConverseCommand");
+    }
+    expect(withheld.input.toolConfig).toBeUndefined();
+
+    await bedrock.completion({
+      messages: [
+        { content: "Look up the answer", role: "user" },
+        {
+          content: null,
+          role: "assistant",
+          toolCalls: [
+            { function: { arguments: "{}", name: "lookup" }, id: "t1", type: "function" },
+          ],
+        },
+        { content: "The answer", role: "tool", toolCallId: "t1" },
+      ],
+      model: "anthropic.claude-test",
+      toolChoice: "none",
+      tools,
+    });
+    const replayed = send.mock.calls[1]?.[0];
+    if (!(replayed instanceof ConverseCommand)) {
+      throw new Error("expected a ConverseCommand");
+    }
+    expect(replayed.input.toolConfig).toMatchObject({
+      tools: [{ toolSpec: { name: "lookup" } }],
+    });
+    expect(
+      replayed.input.toolConfig === undefined ? undefined : replayed.input.toolConfig.toolChoice,
+    ).toBeUndefined();
   });
 
   it("keeps assistant text when a non-streaming turn also calls a tool", async () => {

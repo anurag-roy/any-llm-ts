@@ -432,6 +432,14 @@ export interface ImageEditParams {
   user?: string;
 }
 
+export interface ImageUsage {
+  inputTokens: number;
+  inputTokensDetails: { imageTokens: number; textTokens: number };
+  outputTokens: number;
+  outputTokensDetails: { imageTokens: number; textTokens: number };
+  totalTokens: number;
+}
+
 export interface ImageGenerationResponse {
   created: number;
   data: {
@@ -439,8 +447,10 @@ export interface ImageGenerationResponse {
     revisedPrompt?: string;
     url?: string;
   }[];
+  outputFormat?: "jpeg" | "png" | "webp";
   provider: string;
   raw?: unknown;
+  usage?: ImageUsage;
 }
 
 /** Lifecycle of a video job. Providers' own words (`pending`, `processing`, `success`) map onto these. */

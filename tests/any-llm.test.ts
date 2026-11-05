@@ -91,6 +91,29 @@ describe("AnyLLM registry and facade", () => {
     expect(AnyLLM.getProviderMetadata("openai").messagesNative).toBe(false);
     expect(AnyLLM.getProviderMetadata("deepseek").messagesNative).toBe(true);
     expect(AnyLLM.getProviderMetadata("openai").capabilities.imageEdit).toBe(true);
+    expect(AnyLLM.getProviderMetadata("gemini").capabilities.imageGeneration).toBe(true);
+    expect(AnyLLM.getProviderMetadata("vertexai").capabilities.imageGeneration).toBe(false);
+    expect(AnyLLM.getProviderMetadata("tokenhub")).toMatchObject({
+      apiBase: "https://us-api.tokenhub.com/v1",
+      capabilities: {
+        completion: true,
+        embedding: false,
+        imageGeneration: false,
+        listModels: true,
+        messages: true,
+        pdfInput: false,
+        reasoning: false,
+        streaming: true,
+        vision: false,
+      },
+      documentationUrl: "https://tokenhub.com/docs",
+      envApiBase: "TOKENHUB_API_BASE",
+      envApiKey: "TOKENHUB_API_KEY",
+      name: "tokenhub",
+      requiresApiKey: true,
+    });
+    expect(AnyLLM.getProviderMetadata("ollama").capabilities.pdfInput).toBe(false);
+    expect(() => AnyLLM.create("tokenhub")).toThrow(/TOKENHUB_API_KEY/u);
     expect(
       AnyLLM.servesMessagesNatively("bedrock", "us.anthropic.claude-haiku-4-5-20251001-v1:0"),
     ).toBe(true);
