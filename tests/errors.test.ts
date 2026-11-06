@@ -146,6 +146,15 @@ describe("provider error normalization", () => {
       normalizeProviderError(new Error("Maximum context token length exceeded"), "test"),
     ).toBeInstanceOf(ContextLengthExceededError);
     expect(
+      normalizeProviderError(new Error("prompt is too long: 200000 tokens"), "anthropic"),
+    ).toBeInstanceOf(ContextLengthExceededError);
+    expect(
+      normalizeProviderError(
+        new Error("The input token count exceeds the maximum number of tokens allowed."),
+        "gemini",
+      ),
+    ).toBeInstanceOf(ContextLengthExceededError);
+    expect(
       normalizeProviderError({ code: "content_filter", message: "Blocked" }, "test"),
     ).toBeInstanceOf(ContentFilterError);
   });

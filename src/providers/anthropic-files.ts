@@ -364,6 +364,7 @@ export async function retrieveAnthropicFile(
   params: FileResourceParams,
   providerName: string,
 ): Promise<FileMetadata> {
+  if (params.containerId !== undefined) rejectUnsupported(["container_id"], providerName);
   validateFileId(params.fileId, providerName);
   const request = fileRequestOptions(client, { ...params.providerOptions }, providerName);
   const result = await request.client.files.retrieveMetadata(
@@ -379,6 +380,7 @@ export async function deleteAnthropicFile(
   params: FileResourceParams,
   providerName: string,
 ): Promise<FileDeleted> {
+  if (params.containerId !== undefined) rejectUnsupported(["container_id"], providerName);
   validateFileId(params.fileId, providerName);
   const request = fileRequestOptions(client, { ...params.providerOptions }, providerName);
   const result = await request.client.files.delete(
@@ -449,6 +451,7 @@ export async function downloadAnthropicFile(
   providerName: string,
   conversion: { unifiedExceptions?: boolean } = {},
 ): Promise<FileDownload> {
+  if (params.containerId !== undefined) rejectUnsupported(["container_id"], providerName);
   validateFileId(params.fileId, providerName);
   const chunkSize = params.chunkSize ?? 65_536;
   validatePositiveInteger(chunkSize, "chunk_size", providerName);

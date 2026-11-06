@@ -61,6 +61,9 @@ import type {
   FinishReason,
   FunctionTool,
   ImageContent,
+  ImageEditParams,
+  ImageGenerationParams,
+  ImageGenerationResponse,
   ListBatchesParams,
   ListFilesParams,
   Model,
@@ -70,11 +73,15 @@ import type {
   Response,
   ResponsesParams,
   ResponseStreamEvent,
+  SpeechParams,
   Tool,
   ToolCall,
   ToolCallDelta,
   UploadFileParams,
+  VideoGenerationParams,
+  VideoJob,
 } from "../types.js";
+import { downloadVideoUrl } from "../video.js";
 import {
   compactObject,
   getEnvironmentVariable,
@@ -85,6 +92,7 @@ import {
   isJsonValue,
   iterateClosing,
   parseJsonValue as validateJsonValue,
+  resolveOutputTokenLimit,
   resolvedMaxRetries,
 } from "../utils.js";
 import { BaseProvider } from "./base.js";
@@ -97,6 +105,14 @@ import {
   type GeminiInteractionCreateParams,
 } from "./gemini-interactions.js";
 import { convertInteractionStream } from "./gemini-interactions-stream.js";
+import { convertSpeechParams, speechBytes } from "./gemini-speech.js";
+import { convertInteractionToVideoJob, convertVideoParams } from "./gemini-video.js";
+import {
+  convertResponsesToImages,
+  editRequest,
+  generationRequest,
+  type GeminiImageRequest,
+} from "./gemini-image.js";
 import {
   deleteGeminiFile,
   downloadGeminiFile,
@@ -173,14 +189,14 @@ const maxThinkingBudgetByModel: [string, number][] = [
 ];
 
 const geminiCapabilities: ProviderCapabilities = {
-  audioSpeech: false,
+  audioSpeech: true,
   audioTranscription: false,
   batch: true,
   completion: true,
   embedding: true,
   files: false,
-  imageEdit: false,
-  imageGeneration: false,
+  imageEdit: true,
+  imageGeneration: true,
   listModels: true,
   messages: true,
   moderation: false,
@@ -189,6 +205,7 @@ const geminiCapabilities: ProviderCapabilities = {
   rerank: false,
   responses: true,
   streaming: true,
+  videoGeneration: true,
   vision: true,
 };
 
@@ -680,15 +697,12 @@ function extractFunctionResponseMedia(content: JsonValue[]) {
     const fieldName =
       isPlainObject(block) && block.type === "image_url" ? "image_url.url" : "file.file_data";
     const parsed = parseDataUrl(dataUri, fieldName);
-    const displayName = `attachment-${String(media.length + 1)}`;
     media.push({
       inlineData: {
         data: parsed.data,
-        displayName,
         mimeType: parsed.mimeType,
       },
     });
-    response.push({ $ref: displayName });
   }
   return { media, response };
 }
@@ -1471,7 +1485,11 @@ export class GeminiProvider extends BaseProvider {
     this.metadata = completeProviderMetadata({
       capabilities: {
         ...geminiCapabilities,
+        audioSpeech: this.providerName === "gemini",
+        imageEdit: this.providerName === "gemini",
+        imageGeneration: this.providerName === "gemini",
         responses: this.providerName === "gemini",
+        videoGeneration: this.providerName === "gemini",
       },
       documentationUrl: config.documentationUrl ?? "https://ai.google.dev/gemini-api/docs",
       envApiBase: config.envApiBase ?? "GOOGLE_GEMINI_BASE_URL",
@@ -1557,10 +1575,8 @@ export class GeminiProvider extends BaseProvider {
   }
 
   override async embedding(params: EmbeddingParams): Promise<EmbeddingResponse> {
-    if (
-      !isString(params.input) &&
-      !(Array.isArray(params.input) && params.input.every((value) => isString(value)))
-    ) {
+    const input = params.input;
+    if (!isString(input) && !(Array.isArray(input) && input.every((value) => isString(value)))) {
       throw new TypeError("Gemini embeddings require a string or an array of strings.");
     }
     const { encodingFormat, providerOptions } = resolveEncodingFormat(
@@ -1569,9 +1585,12 @@ export class GeminiProvider extends BaseProvider {
       this.providerName,
     );
     return this.execute(async () => {
-      // SAFETY: The provider contract establishes the asserted representation at this boundary.
+      const contents =
+        this.providerName === "gemini" && Array.isArray(input)
+          ? input.map((text) => ({ parts: [{ text }] }))
+          : input;
       const response = await this.client.models.embedContent({
-        contents: params.input as string | string[],
+        contents,
         model: params.model,
         config: {
           ...includeWhen(!(params.dimensions === undefined), {
@@ -1729,6 +1748,121 @@ export class GeminiProvider extends BaseProvider {
     );
   }
 
+  override async imageGeneration(params: ImageGenerationParams): Promise<ImageGenerationResponse> {
+    if (!this.metadata.capabilities.imageGeneration) return super.imageGeneration(params);
+    return this.execute(async () => {
+      const { count, request } = generationRequest(params, this.providerName);
+      return await this.generateImages(request, count);
+    });
+  }
+
+  override async imageEdit(params: ImageEditParams): Promise<ImageGenerationResponse> {
+    if (!this.metadata.capabilities.imageEdit) return super.imageEdit(params);
+    return this.execute(async () => {
+      const { count, request } = await editRequest(params, this.providerName);
+      return await this.generateImages(request, count);
+    });
+  }
+
+  private async generateImages(
+    request: GeminiImageRequest,
+    count: number,
+  ): Promise<ImageGenerationResponse> {
+    const controller = new AbortController();
+    const config = { ...request.config, abortSignal: controller.signal };
+    try {
+      const responses = await Promise.all(
+        Array.from({ length: count }, () =>
+          this.client.models.generateContent({
+            config,
+            contents: request.contents,
+            model: request.model,
+          }),
+        ),
+      );
+      return convertResponsesToImages(responses, this.providerName);
+    } catch (error) {
+      controller.abort();
+      throw error;
+    }
+  }
+
+  override speech(params: SpeechParams): Promise<Uint8Array> {
+    if (!this.metadata.capabilities.audioSpeech) return super.speech(params);
+    return this.execute(async () => {
+      const request = convertSpeechParams(params, this.providerName);
+      const response = await this.client.models.generateContent({
+        config: request.config,
+        contents: request.contents,
+        model: request.model,
+      });
+      return speechBytes(response, request, this.providerName);
+    });
+  }
+
+  override videoGeneration(params: VideoGenerationParams): Promise<VideoJob> {
+    if (!this.metadata.capabilities.videoGeneration) return super.videoGeneration(params);
+    return this.execute(async () => {
+      const created = await this.interactionsCreate({
+        ...convertVideoParams(params, this.providerName, this.interactionsVersion),
+        ...(params.providerOptions ?? {}),
+      });
+      if (isAsyncIterable(created)) {
+        throw new TypeError("Gemini video generation returned a stream.");
+      }
+      return convertInteractionToVideoJob(created, params.model);
+    });
+  }
+
+  override retrieveVideo(videoId: string, providerOptions: JsonObject = {}): Promise<VideoJob> {
+    if (!this.metadata.capabilities.videoGeneration)
+      return super.retrieveVideo(videoId, providerOptions);
+    return this.execute(async () => {
+      const request = {
+        ...providerOptions,
+        ...includeWhen(this.interactionsVersion !== undefined, {
+          api_version: this.interactionsVersion,
+        }),
+      };
+      return convertInteractionToVideoJob(await this.interactionsGet(videoId, request), "");
+    });
+  }
+
+  override downloadVideo(url: string, providerOptions: JsonObject = {}): Promise<Uint8Array> {
+    if (this.providerName !== "gemini") return super.downloadVideo(url, providerOptions);
+    let hostname: string | undefined;
+    try {
+      hostname = new URL(url).hostname;
+    } catch {
+      hostname = undefined;
+    }
+    if (hostname !== "generativelanguage.googleapis.com") {
+      return super.downloadVideo(url, providerOptions);
+    }
+    return this.execute(async () => {
+      // SAFETY: The GenAI client optionally exposes files.download; tests inject the same surface.
+      const client = this.client as { files?: { download?: unknown } };
+      const files = client.files;
+      if (isObject(files) && isFunction(files.download)) {
+        // SAFETY: isFunction established callability; tests and the GenAI SDK share this download contract.
+        const download = files.download as (
+          request: { file: string } & JsonObject,
+        ) => Promise<ArrayBuffer | Buffer | Uint8Array>;
+        const bytes = await download({ file: url, ...providerOptions });
+        if (bytes instanceof Uint8Array) return bytes;
+        if (bytes instanceof ArrayBuffer) return new Uint8Array(bytes);
+        throw new TypeError("Gemini files.download did not return video bytes.");
+      }
+      return downloadVideoUrl(url, {
+        headers: {
+          ...includeWhen(isString(this.fileAuth.apiKey), {
+            "x-goog-api-key": this.fileAuth.apiKey,
+          }),
+        },
+      });
+    });
+  }
+
   override retrieveBatchResults(
     batchId: string,
     providerOptions: JsonObject = {},
@@ -1769,6 +1903,21 @@ export class GeminiProvider extends BaseProvider {
     });
   }
 
+  private interactionsGet(videoId: string, params: JsonObject = {}): Promise<GeminiInteraction> {
+    // SAFETY: The GenAI client optionally exposes interactions.get; tests inject the same surface.
+    const client = this.client as { interactions?: { get?: unknown } };
+    const interactions = client.interactions;
+    if (!isObject(interactions) || !isFunction(interactions.get)) {
+      throw new TypeError("Gemini Interactions API is not available on this client.");
+    }
+    // SAFETY: isFunction established callability; tests and the GenAI SDK share this get contract.
+    const get = interactions.get as (
+      id: string,
+      request?: JsonObject,
+    ) => Promise<GeminiInteraction>;
+    return get(videoId, params);
+  }
+
   private interactionsCreate(
     params: GeminiInteractionCreateParams,
   ): Promise<AsyncIterable<unknown> | GeminiInteraction> {
@@ -1803,7 +1952,7 @@ export class GeminiProvider extends BaseProvider {
       candidateCount: params.n,
       frequencyPenalty: params.frequencyPenalty,
       logprobs: params.topLogprobs,
-      maxOutputTokens: params.maxCompletionTokens ?? params.maxTokens,
+      maxOutputTokens: resolveOutputTokenLimit(params),
       presencePenalty: params.presencePenalty,
       responseLogprobs: params.logprobs,
       seed: params.seed,

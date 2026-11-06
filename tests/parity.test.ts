@@ -57,6 +57,7 @@ describe("Python source parity contract", () => {
         "rerank",
         "responses",
         "streaming",
+        "videoGeneration",
         "vision",
       ]);
       expect(Object.values(metadata.capabilities).every((value) => isBoolean(value))).toBe(true);

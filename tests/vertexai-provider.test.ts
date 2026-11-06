@@ -127,23 +127,45 @@ describe("Vertex AI provider", () => {
 
     expect(embedding.provider).toBe("vertexai");
     expect(batch.provider).toBe("vertexai");
+
+    await provider.embedding({
+      input: ["first", "second"],
+      model: "text-embedding-005",
+    });
+    expect(sdk.models.embedContent.mock.calls[1]?.[0].contents).toEqual(["first", "second"]);
   });
 
   it("is registered as a supported provider", () => {
     expect(AnyLLM.getSupportedProviders()).toContain("vertexai");
     expect(AnyLLM.getProviderMetadata("vertexai")).toMatchObject({
-      capabilities: { files: false, responses: false },
+      capabilities: {
+        files: false,
+        imageEdit: false,
+        imageGeneration: false,
+        responses: false,
+        videoGeneration: false,
+      },
       fileOperations: [],
       name: "vertexai",
       requiresApiKey: false,
     });
   });
 
-  it("does not expose Gemini Interactions Responses", async () => {
+  it("does not expose Gemini Interactions Responses or image generation", async () => {
     const sdk = fakeVertexAI();
     const provider = new VertexAIProvider({}, sdk.client);
     await expect(
       provider.responses({ input: "Hello", model: "gemini-2.5-flash" }),
+    ).rejects.toBeInstanceOf(UnsupportedOperationError);
+    await expect(
+      provider.imageGeneration({ model: "gemini-nano-banana-2.1", prompt: "a cat" }),
+    ).rejects.toBeInstanceOf(UnsupportedOperationError);
+    await expect(
+      provider.imageEdit({
+        image: new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+        model: "gemini-nano-banana-2.1",
+        prompt: "make it green",
+      }),
     ).rejects.toBeInstanceOf(UnsupportedOperationError);
   });
 

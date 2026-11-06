@@ -594,13 +594,12 @@ describe("Gemini provider", () => {
     });
     const part = sdk.models.generateContent.mock.calls[0]?.[0].contents[2].parts[0];
     expect(part.functionResponse.response).toEqual({
-      result: [{ text: "photo", type: "text" }, { $ref: "attachment-1" }],
+      result: [{ text: "photo", type: "text" }],
     });
     expect(part.functionResponse.parts).toEqual([
       {
         inlineData: {
           data: png.slice(png.indexOf(",") + 1),
-          displayName: "attachment-1",
           mimeType: "image/png",
         },
       },
@@ -1871,7 +1870,7 @@ describe("Gemini provider", () => {
         outputDimensionality: 2,
         taskType: "RETRIEVAL_DOCUMENT",
       },
-      contents: ["hello", "world"],
+      contents: [{ parts: [{ text: "hello" }] }, { parts: [{ text: "world" }] }],
       model: "gemini-embedding-001",
     });
     expect(embedding).toMatchObject({
@@ -2189,6 +2188,8 @@ describe("Gemini provider", () => {
       capabilities: {
         completion: true,
         embedding: true,
+        imageEdit: true,
+        imageGeneration: true,
         listModels: true,
         reasoning: true,
         responses: true,
@@ -2201,7 +2202,14 @@ describe("Gemini provider", () => {
     });
     expect(AnyLLM.getSupportedProviders()).toContain("gemini");
     expect(AnyLLM.getProviderMetadata("gemini")).toMatchObject({
-      capabilities: { batch: true, embedding: true, responses: true, vision: true },
+      capabilities: {
+        batch: true,
+        embedding: true,
+        imageEdit: true,
+        imageGeneration: true,
+        responses: true,
+        vision: true,
+      },
       name: "gemini",
     });
   });

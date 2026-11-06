@@ -4,6 +4,7 @@ import type { JsonObject } from "../types.js";
 import { isFunction, isJsonObject, isNumber, isObject, isString } from "../utils.js";
 import { InferenceClient } from "@huggingface/inference";
 import OpenAI from "openai";
+import type { ClientOptions } from "openai";
 
 import { MissingApiKeyError, UnsupportedParameterError } from "../errors.js";
 import type {
@@ -18,6 +19,9 @@ import { OpenAIProvider } from "./openai.js";
 
 type Fetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
+export const HUGGINGFACE_OPENRESPONSES_URL = "https://evalstate-openresponses.hf.space/v1";
+const HF_BILL_TO_HEADER = "X-HF-Bill-To";
+
 export type HuggingFaceInferenceClientLike = Pick<
   InferenceClient,
   "chatCompletion" | "chatCompletionStream"
@@ -26,6 +30,67 @@ export type HuggingFaceInferenceClientLike = Pick<
 export interface HuggingFaceProviderClients {
   inference?: HuggingFaceInferenceClientLike;
   responses?: OpenAI;
+}
+
+export interface HuggingFaceSdkOptions {
+  inference: {
+    billTo?: string;
+    endpointUrl?: string;
+    fetch: Fetch;
+  };
+  responses: {
+    apiKey: string;
+    baseURL: string;
+    defaultHeaders?: JsonObject;
+    fetch: Fetch;
+  };
+}
+
+function huggingFaceBillTo(clientOptions: ProviderOptions["clientOptions"]): string | undefined {
+  if (!isObject(clientOptions) || !("billTo" in clientOptions)) return undefined;
+  return isString(clientOptions.billTo) && clientOptions.billTo.length > 0
+    ? clientOptions.billTo
+    : undefined;
+}
+
+/** Split Hugging Face constructor options so `billTo` reaches both SDK clients. */
+export function huggingfaceSdkOptions(options: ProviderOptions): HuggingFaceSdkOptions {
+  const apiKey = options.apiKey ?? getEnvironmentVariable("HF_TOKEN");
+  if (apiKey === undefined) throw new MissingApiKeyError("huggingface", "HF_TOKEN");
+  const apiBase = options.apiBase ?? getEnvironmentVariable("HUGGINGFACE_API_BASE");
+  const nested = options.clientOptions;
+  const configuredFetch =
+    isObject(nested) && "fetch" in nested && isFunction(nested.fetch) ? nested.fetch : undefined;
+  // SAFETY: isFunction verifies callability; Fetch supplies the transport's parameter contract.
+  const fetchImplementation = configuredFetch ? (configuredFetch as Fetch) : globalThis.fetch;
+  const openAIOptions = isObject(nested) && "openAI" in nested ? nested.openAI : undefined;
+  const huggingFaceOptions =
+    isObject(nested) && "huggingFace" in nested ? nested.huggingFace : undefined;
+  const openAIClientOptions = isJsonObject(openAIOptions) ? openAIOptions : {};
+  const huggingFaceClientOptions = isJsonObject(huggingFaceOptions) ? huggingFaceOptions : {};
+  const billTo = huggingFaceBillTo(nested);
+  const existingHeaders = isJsonObject(openAIClientOptions.defaultHeaders)
+    ? parseJsonObject(openAIClientOptions.defaultHeaders)
+    : {};
+  return {
+    // SAFETY: Nested Hugging Face clientOptions are JSON constructor fields plus fetch and billTo.
+    inference: {
+      ...includeWhen(!(apiBase === undefined), { endpointUrl: apiBase }),
+      fetch: fetchImplementation,
+      ...huggingFaceClientOptions,
+      ...includeWhen(billTo !== undefined, { billTo }),
+    },
+    // SAFETY: Nested OpenAI clientOptions are JSON constructor fields plus fetch and billing headers.
+    responses: {
+      ...openAIClientOptions,
+      apiKey,
+      baseURL: HUGGINGFACE_OPENRESPONSES_URL,
+      fetch: fetchImplementation,
+      ...includeWhen(billTo !== undefined, {
+        defaultHeaders: Object.assign({}, existingHeaders, { [HF_BILL_TO_HEADER]: billTo }),
+      }),
+    },
+  };
 }
 
 function normalizeEmptyToolArguments<Value>(value: Value): void {
@@ -60,27 +125,9 @@ export class HuggingFaceProvider extends OpenAIProvider {
   private readonly inference: HuggingFaceInferenceClientLike;
 
   constructor(options: ProviderOptions = {}, clients: HuggingFaceProviderClients = {}) {
-    const apiKey = options.apiKey ?? getEnvironmentVariable("HF_TOKEN");
-    if (apiKey === undefined) throw new MissingApiKeyError("huggingface", "HF_TOKEN");
-    const apiBase = options.apiBase ?? getEnvironmentVariable("HUGGINGFACE_API_BASE");
-    const nested = options.clientOptions;
-    const configuredFetch =
-      isObject(nested) && "fetch" in nested && isFunction(nested.fetch) ? nested.fetch : undefined;
-    // SAFETY: isFunction verifies callability; Fetch supplies the transport's parameter contract.
-    const fetchImplementation = configuredFetch ? (configuredFetch as Fetch) : globalThis.fetch;
-    const openAIOptions = isObject(nested) && "openAI" in nested ? nested.openAI : undefined;
-    const huggingFaceOptions =
-      isObject(nested) && "huggingFace" in nested ? nested.huggingFace : undefined;
-    const openAIClientOptions = isJsonObject(openAIOptions) ? openAIOptions : {};
-    const huggingFaceClientOptions = isJsonObject(huggingFaceOptions) ? huggingFaceOptions : {};
-    const responsesClient =
-      clients.responses ??
-      new OpenAI({
-        ...openAIClientOptions,
-        apiKey,
-        baseURL: "https://evalstate-openresponses.hf.space/v1",
-        fetch: fetchImplementation,
-      });
+    const sdk = huggingfaceSdkOptions(options);
+    // SAFETY: huggingfaceSdkOptions returns OpenAI constructor fields for the OpenResponses client.
+    const responsesClient = clients.responses ?? new OpenAI(sdk.responses as ClientOptions);
     super(
       {
         capabilities: {
@@ -106,18 +153,15 @@ export class HuggingFaceProvider extends OpenAIProvider {
         gatewayControls: false,
         name: "huggingface",
       },
-      { ...options, apiKey },
+      { ...options, apiKey: sdk.responses.apiKey },
       responsesClient,
     );
-    this.apiKey = apiKey;
-    this.fetch = fetchImplementation;
+    this.apiKey = sdk.responses.apiKey;
+    this.fetch = sdk.responses.fetch;
     this.inference =
       clients.inference ??
-      new InferenceClient(apiKey, {
-        ...includeWhen(!(apiBase === undefined), { endpointUrl: apiBase }),
-        fetch: fetchImplementation,
-        ...huggingFaceClientOptions,
-      });
+      // SAFETY: huggingfaceSdkOptions returns InferenceClient constructor fields, including billTo.
+      new InferenceClient(sdk.responses.apiKey, sdk.inference);
   }
 
   override completion(

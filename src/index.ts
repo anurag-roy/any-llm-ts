@@ -6,6 +6,7 @@ export {
   createBatch,
   deleteFile,
   downloadFile,
+  downloadVideo,
   embedding,
   imageEdit,
   imageGeneration,
@@ -19,14 +20,18 @@ export {
   retrieveBatch,
   retrieveBatchResults,
   retrieveFile,
+  retrieveVideo,
+  pollVideo,
   speech,
   transcription,
   uploadFile,
+  videoGeneration,
 } from "./api.js";
 export type {
   DirectBatchParams,
   DirectCreateBatchParams,
   DirectDownloadFileParams,
+  DirectDownloadVideoParams,
   DirectEmbeddingParams,
   DirectFileResourceParams,
   DirectImageEditParams,
@@ -35,8 +40,10 @@ export type {
   DirectListFilesParams,
   DirectModerationParams,
   DirectMessagesParams,
+  DirectPollVideoParams,
   DirectProviderOptions,
   DirectRerankParams,
+  DirectRetrieveVideoParams,
   DirectResponsesParams,
   DirectSpeechParams,
   DirectStructuredCompletionParams,
@@ -44,6 +51,7 @@ export type {
   DirectStructuredResponsesParams,
   DirectTranscriptionParams,
   DirectUploadFileParams,
+  DirectVideoGenerationParams,
 } from "./api.js";
 export {
   AnyLLMError,
@@ -73,7 +81,11 @@ export type { AnthropicProviderConfig } from "./providers/anthropic.js";
 export { AzureProvider } from "./providers/azure.js";
 export type { AzureInferenceClientLike } from "./providers/azure.js";
 export { AzureAnthropicProvider } from "./providers/azureanthropic.js";
-export { BedrockProvider, isAnthropicBedrockModel } from "./providers/bedrock.js";
+export {
+  BedrockProvider,
+  isAnthropicBedrockModel,
+  isGptOssBedrockModel,
+} from "./providers/bedrock.js";
 export type {
   BedrockClientLike,
   BedrockControlClientLike,
@@ -83,13 +95,19 @@ export type {
 } from "./providers/bedrock.js";
 export { FireworksProvider } from "./providers/fireworks.js";
 export { CohereProvider } from "./providers/cohere.js";
+export { DeepinfraProvider } from "./providers/deepinfra.js";
 export { GeminiProvider } from "./providers/gemini.js";
 export type { GeminiProviderConfig } from "./providers/gemini.js";
 export { GitHubProvider } from "./providers/github.js";
-export { HuggingFaceProvider } from "./providers/huggingface.js";
+export {
+  HUGGINGFACE_OPENRESPONSES_URL,
+  HuggingFaceProvider,
+  huggingfaceSdkOptions,
+} from "./providers/huggingface.js";
 export type {
   HuggingFaceInferenceClientLike,
   HuggingFaceProviderClients,
+  HuggingFaceSdkOptions,
 } from "./providers/huggingface.js";
 export { DeepseekProvider } from "./providers/deepseek.js";
 export type { DeepseekProviderClients } from "./providers/deepseek.js";

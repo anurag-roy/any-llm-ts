@@ -1,6 +1,7 @@
 import { AnyLLMError, UnsupportedParameterError, normalizeProviderError } from "./errors.js";
 import type {
   CompletionOperationOptions,
+  CompletionParams,
   JsonObject,
   JsonValue,
   ProviderOptions,
@@ -84,6 +85,17 @@ export function compactObject<Value extends object>(value: Value): CompactObject
   return Object.fromEntries(
     Object.entries(value).filter(([, entry]) => entry !== undefined),
   ) as CompactObject<Value>;
+}
+
+/** OpenAI's `maxCompletionTokens` wins over `maxTokens` for providers that name the limit themselves. */
+export function resolveOutputTokenLimit(params: CompletionParams): number | undefined {
+  if (params.maxCompletionTokens === undefined) return params.maxTokens;
+  if (params.maxTokens !== undefined && params.maxTokens !== params.maxCompletionTokens) {
+    console.warn(
+      `Ignoring maxTokens (${String(params.maxTokens)}) in favor of maxCompletionTokens (${String(params.maxCompletionTokens)}).`,
+    );
+  }
+  return params.maxCompletionTokens;
 }
 
 export function getEnvironmentVariable(name: string | undefined): string | undefined {

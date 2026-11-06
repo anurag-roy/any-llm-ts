@@ -51,6 +51,7 @@ import type {
   ProviderCapabilities,
   ProviderMetadata,
   ProviderOptions,
+  ReasoningEffort,
   ToolCall,
   ToolCallDelta,
 } from "../types.js";
@@ -60,6 +61,7 @@ import {
   isAsyncIterable,
   iterateClosing,
   rejectMaxRetries,
+  resolveOutputTokenLimit,
   timeoutAbortOptions,
   unixTimestamp,
 } from "../utils.js";
@@ -106,6 +108,7 @@ const bedrockCapabilities: ProviderCapabilities = {
   rerank: false,
   responses: false,
   streaming: true,
+  videoGeneration: false,
   vision: true,
 };
 
@@ -210,6 +213,12 @@ const nativeMessageStreamTypes = new Set([
 export function isAnthropicBedrockModel(model: string): boolean {
   return model.includes("anthropic.");
 }
+
+export function isGptOssBedrockModel(model: string): boolean {
+  return model.includes("openai.gpt-oss");
+}
+
+const gptOssReasoningEfforts = new Set<ReasoningEffort>(["high", "low", "medium"]);
 
 interface BedrockNativeStreamEvent {
   chunk?: {
@@ -494,10 +503,15 @@ function dataImage(value: string) {
   };
 }
 
+type BedrockToolResultBlock =
+  | { image: ReturnType<typeof dataImage> }
+  | { json: JsonValue }
+  | { text: string };
+
 type BedrockContentBlock =
   | { image: ReturnType<typeof dataImage> }
   | { text: string }
-  | { toolResult: { content: JsonObject[]; toolUseId: string } }
+  | { toolResult: { content: BedrockToolResultBlock[]; toolUseId: string } }
   | { toolUse: { input: JsonValue; name: string; toolUseId: string } };
 
 interface BedrockMessage {
@@ -554,8 +568,20 @@ function toolResult(message: ChatMessage) {
   if (message.toolCallId === undefined) {
     throw invalidRequest("Tool result messages must include toolCallId.");
   }
+  if (Array.isArray(message.content)) {
+    return {
+      toolResult: {
+        content: userContent(message.content).flatMap((block): BedrockToolResultBlock[] => {
+          if ("text" in block) return [{ text: block.text }];
+          if ("image" in block) return [{ image: block.image }];
+          return [];
+        }),
+        toolUseId: message.toolCallId,
+      },
+    };
+  }
   const text = isString(message.content) ? message.content : JSON.stringify(message.content);
-  let content: JsonObject;
+  let content: BedrockToolResultBlock;
   try {
     content = { json: parseJsonValue(JSON.parse(text), "Bedrock tool result") };
   } catch {
@@ -566,12 +592,36 @@ function toolResult(message: ChatMessage) {
   };
 }
 
+function convertSystemContent(content: ChatMessage["content"]): { text: string }[] {
+  const blocks = isString(content) ? [{ text: content, type: "text" as const }] : content;
+  if (!Array.isArray(blocks) || blocks.length === 0) {
+    throw invalidRequest(
+      "System message content must be a nonempty string or a nonempty list of text parts.",
+    );
+  }
+  return blocks.map((block) => {
+    if (!isObject(block) || Array.isArray(block)) {
+      throw invalidRequest("System message content parts must be text objects.");
+    }
+    const record = parseJsonObject(block);
+    if (record.type !== "text") {
+      throw new UnsupportedParameterError(
+        "system content",
+        "bedrock",
+        "Converse system messages only accept text parts.",
+      );
+    }
+    if (!isString(record.text) || record.text.length === 0) {
+      throw invalidRequest("System message content text must be a nonempty string.");
+    }
+    return { text: record.text };
+  });
+}
+
 function convertMessages(messages: ChatMessage[]) {
   const system = messages
     .filter((message) => message.role === "system" || message.role === "developer")
-    .flatMap((message) =>
-      isString(message.content) && message.content.length > 0 ? [{ text: message.content }] : [],
-    );
+    .flatMap((message) => convertSystemContent(message.content));
   const converted: BedrockMessage[] = [];
   let pendingToolResults: BedrockContentBlock[] = [];
   const flushTools = (): void => {
@@ -665,9 +715,88 @@ function structuredOutputTool(responseFormat: JsonObject) {
   };
 }
 
-function toolConfiguration(params: CompletionParams) {
+function replayedToolConfig(messages: BedrockMessage[]) {
+  const names = new Set<string>();
+  for (const message of messages) {
+    for (const block of message.content) {
+      if ("toolUse" in block) names.add(block.toolUse.name);
+    }
+  }
+  if (names.size === 0) return undefined;
+  return {
+    tools: [...names].map((name) => ({
+      toolSpec: {
+        description: " ",
+        inputSchema: {
+          json: {
+            properties: {},
+            type: "object",
+          },
+        },
+        name,
+      },
+    })),
+  };
+}
+
+function convertToolChoice(
+  toolChoice: CompletionParams["toolChoice"],
+  toolNames: Set<string>,
+): { any: JsonObject } | { tool: { name: string } } | undefined {
+  if (toolChoice === undefined || toolChoice === "auto") return undefined;
+  if (toolChoice === "none") {
+    throw new UnsupportedParameterError(
+      "toolChoice",
+      "bedrock",
+      "Use 'auto', 'none', 'required', or a named function choice.",
+    );
+  }
+  if (toolChoice === "required") {
+    if (toolNames.size === 0) {
+      throw invalidRequest("toolChoice 'required' requires at least one tool.");
+    }
+    return { any: {} };
+  }
+  if (isObject(toolChoice)) {
+    const keys = Object.keys(toolChoice).toSorted();
+    const functionChoice = "function" in toolChoice ? toolChoice.function : undefined;
+    if (
+      keys.join(",") !== "function,type" ||
+      toolChoice.type !== "function" ||
+      !isObject(functionChoice) ||
+      Array.isArray(functionChoice) ||
+      Object.keys(functionChoice).join(",") !== "name" ||
+      !isString(functionChoice.name) ||
+      functionChoice.name.length === 0
+    ) {
+      throw invalidRequest(
+        "toolChoice must be a function choice containing only a nonempty function name.",
+      );
+    }
+    if (!toolNames.has(functionChoice.name)) {
+      throw invalidRequest(
+        `toolChoice names '${functionChoice.name}', which is not present in tools.`,
+      );
+    }
+    return { tool: { name: functionChoice.name } };
+  }
+  throw new UnsupportedParameterError(
+    "toolChoice",
+    "bedrock",
+    "Use 'auto', 'none', 'required', or a named function choice.",
+  );
+}
+
+function toolConfiguration(params: CompletionParams, messages: BedrockMessage[]) {
   const tools = configuredTools(params);
   if (params.responseFormat !== undefined) {
+    if (isGptOssBedrockModel(params.model)) {
+      throw new UnsupportedParameterError(
+        "responseFormat",
+        "bedrock",
+        "Bedrock does not constrain gpt-oss output to a schema, so the answer may not be JSON.",
+      );
+    }
     if (!params.model.includes("anthropic.")) {
       throw new UnsupportedParameterError(
         "responseFormat",
@@ -693,31 +822,64 @@ function toolConfiguration(params: CompletionParams) {
         "Claude rejects forced tool use while extended thinking is enabled. Omit reasoningEffort or use none.",
       );
     }
+    if (params.toolChoice === "none") {
+      throw new UnsupportedParameterError(
+        "toolChoice='none' with responseFormat",
+        "bedrock",
+        "responseFormat is emulated via a forced tool call, which toolChoice 'none' forbids.",
+      );
+    }
     tools.push(structuredOutputTool(params.responseFormat));
+    const forcedChoice = { tool: { name: structuredOutputToolName } };
+    const names = new Set(tools.map((tool) => tool.toolSpec.name));
+    const requestedChoice = convertToolChoice(params.toolChoice, names);
+    if (
+      requestedChoice !== undefined &&
+      JSON.stringify(requestedChoice) !== JSON.stringify({ any: {} }) &&
+      JSON.stringify(requestedChoice) !== JSON.stringify(forcedChoice)
+    ) {
+      throw new UnsupportedParameterError(
+        "toolChoice with responseFormat",
+        "bedrock",
+        "responseFormat requires the reserved structured-output tool. Drop the named toolChoice or omit responseFormat to force a different tool.",
+      );
+    }
     return {
-      toolChoice: { tool: { name: structuredOutputToolName } },
+      toolChoice: forcedChoice,
       tools,
     };
   }
-  if (tools.length === 0) return undefined;
-  const toolChoice =
-    params.toolChoice === "required"
-      ? { any: {} }
-      : isObject(params.toolChoice) &&
-          "function" in params.toolChoice &&
-          isObject(params.toolChoice.function) &&
-          "name" in params.toolChoice.function &&
-          isString(params.toolChoice.function.name)
-        ? { tool: { name: params.toolChoice.function.name } }
-        : undefined;
+  if (params.toolChoice === "none") return replayedToolConfig(messages);
+  const names = new Set(tools.map((tool) => tool.toolSpec.name));
+  const toolChoice = convertToolChoice(params.toolChoice, names);
+  if (
+    toolChoice !== undefined &&
+    params.reasoningEffort !== undefined &&
+    params.reasoningEffort !== "auto" &&
+    params.reasoningEffort !== "none" &&
+    !isGptOssBedrockModel(params.model)
+  ) {
+    throw new UnsupportedParameterError(
+      "toolChoice with reasoningEffort",
+      "bedrock",
+      "Claude rejects forced tool use with manual extended thinking. Use toolChoice 'auto' or disable reasoningEffort to force a tool.",
+    );
+  }
+  if (tools.length === 0) return replayedToolConfig(messages);
   return { tools, ...includeWhen(!(toolChoice === undefined), { toolChoice }) };
 }
 
 function completionRequest(params: CompletionParams) {
   const converted = convertMessages(params.messages);
+  const stop = params.stop;
   const inferenceConfig = compactObject({
-    maxTokens: params.maxTokens ?? params.maxCompletionTokens,
-    stopSequences: isString(params.stop) ? [params.stop] : params.stop,
+    maxTokens: resolveOutputTokenLimit(params),
+    stopSequences:
+      stop === undefined || stop === "" || (Array.isArray(stop) && stop.length === 0)
+        ? undefined
+        : isString(stop)
+          ? [stop]
+          : stop,
     temperature: params.temperature,
     topP: params.topP,
   });
@@ -731,19 +893,31 @@ function completionRequest(params: CompletionParams) {
     params.reasoningEffort !== "auto" &&
     params.reasoningEffort !== "none"
   ) {
-    if (!isAnthropicBedrockModel(params.model) && !params.model.startsWith("arn:")) {
+    const gptOss = isGptOssBedrockModel(params.model);
+    if (gptOss && !gptOssReasoningEfforts.has(params.reasoningEffort)) {
+      throw new UnsupportedParameterError(
+        `reasoning_effort '${params.reasoningEffort}'`,
+        "bedrock",
+        "gpt-oss on Bedrock takes one of: low, medium, high.",
+      );
+    }
+    if (!gptOss && !isAnthropicBedrockModel(params.model) && !params.model.startsWith("arn:")) {
       throw new UnsupportedParameterError(
         "reasoningEffort",
         "bedrock",
         "reasoningEffort is only translated for Anthropic Claude models on Bedrock. For other models, pass the model's own reasoning field in additionalModelRequestFields.",
       );
     }
-    additionalModelRequestFields.reasoning_config = {
-      budget_tokens: reasoningBudgets[params.reasoningEffort],
-      type: "enabled",
-    };
+    if (gptOss) {
+      additionalModelRequestFields.reasoning_effort = params.reasoningEffort;
+    } else {
+      additionalModelRequestFields.reasoning_config = {
+        budget_tokens: reasoningBudgets[params.reasoningEffort],
+        type: "enabled",
+      };
+    }
   }
-  const toolConfig = toolConfiguration(params);
+  const toolConfig = toolConfiguration(params, converted.messages);
   return compactObject({
     ...params.providerOptions,
     ...converted,

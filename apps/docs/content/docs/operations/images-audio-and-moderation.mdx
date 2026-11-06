@@ -1,6 +1,6 @@
 ---
 title: Images, audio, and moderation
-description: Use compatible image generation, transcription, speech, and moderation endpoints.
+description: Use compatible image generation, image edit, transcription, speech, and moderation endpoints.
 ---
 
 These operations are available on adapters whose capability metadata marks them as supported.
@@ -20,6 +20,29 @@ const image = await imageGeneration({
 
 console.log(image.data[0]?.url ?? image.data[0]?.b64Json);
 ```
+
+## Image edit
+
+```ts
+import { imageEdit } from "any-llm-ts";
+
+const edited = await imageEdit({
+  provider: "openai",
+  model: "gpt-image-1",
+  image: "./robot.png",
+  prompt: "Make the robot hold a TypeScript book",
+});
+
+console.log(edited.data[0]?.url ?? edited.data[0]?.b64Json);
+```
+
+`image` accepts a filesystem path, bytes, a `Blob`, or a `(filename, content[, mimeType])` tuple.
+Pass an array when the provider accepts multiple reference images.
+
+Gemini image models generate and edit through `generateContent` instead of OpenAI's Images API.
+Pass a Nano Banana or `*-image-*` model, map `size` to an aspect ratio Gemini accepts, and read
+`b64Json` plus optional `usage`. Gemini rejects `responseFormat: "url"` because it returns image
+bytes. Vertex AI does not implement this path.
 
 ## Audio transcription
 
@@ -55,6 +78,13 @@ const audio = await speech({
 
 await writeFile("speech.mp3", audio);
 ```
+
+OpenAI and Azure OpenAI take `instructions`, `speed`, and the usual formats (`mp3`, `opus`, `aac`,
+`flac`, `wav`, `pcm`). Groq, Together, Mistral, and Gemini also advertise speech, with provider
+limits: Groq serves `flac` / `mp3` / `wav` and rejects `instructions`; Together serves `mp3` /
+`wav` and rejects `instructions` and `speed`; Mistral Voxtral sends `voice` as `voice_id` and
+rejects `aac`; Gemini TTS goes through `generateContent` and returns WAV (or raw PCM). Vertex AI
+does not inherit Gemini speech.
 
 ## Moderation
 

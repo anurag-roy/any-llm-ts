@@ -278,7 +278,11 @@ export function normalizeProviderError(
   }
 
   const lowered = `${code ?? ""} ${errorType ?? ""} ${message}`.toLowerCase();
-  if (lowered.includes("context") && (lowered.includes("length") || lowered.includes("token"))) {
+  if (
+    (lowered.includes("context") && (lowered.includes("length") || lowered.includes("token"))) ||
+    lowered.includes("prompt is too long") ||
+    lowered.includes("exceeds the maximum number of tokens")
+  ) {
     return new ContextLengthExceededError(message, options);
   }
   if (lowered.includes("content_filter") || lowered.includes("content filter")) {

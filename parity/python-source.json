@@ -1,7 +1,7 @@
 {
   "source": {
     "repository": "mozilla-ai/any-llm",
-    "commit": "368f6cf17349c6c73649722016e7f816b7f2f200"
+    "commit": "f23ff3ade108efabef3114d5a28f2f4159065aa4"
   },
   "providers": [
     "anthropic",
@@ -51,6 +51,7 @@
     "sambanova",
     "telnyx",
     "together",
+    "tokenhub",
     "vertexai",
     "vertexaianthropic",
     "vllm",
@@ -89,6 +90,7 @@
     "openai",
     "openrouter",
     "otari",
+    "ovhcloud",
     "portkey",
     "sambanova",
     "together",
@@ -112,6 +114,10 @@
     "speech",
     "moderation",
     "rerank",
+    "videoGeneration",
+    "retrieveVideo",
+    "pollVideo",
+    "downloadVideo",
     "listModels",
     "createBatch",
     "retrieveBatch",
@@ -120,7 +126,7 @@
     "retrieveBatchResults"
   ],
   "capabilities": {
-    "audioSpeech": ["azureopenai", "openai", "otari"],
+    "audioSpeech": ["azureopenai", "gemini", "groq", "mistral", "openai", "otari", "together"],
     "audioTranscription": ["azureopenai", "openai", "otari"],
     "batch": [
       "anthropic",
@@ -183,6 +189,7 @@
       "sambanova",
       "telnyx",
       "together",
+      "tokenhub",
       "vertexai",
       "vertexaianthropic",
       "vllm",
@@ -211,6 +218,7 @@
       "openai",
       "openrouter",
       "otari",
+      "ovhcloud",
       "qiniu",
       "requesty",
       "sagemaker",
@@ -221,8 +229,8 @@
       "voyage"
     ],
     "files": ["anthropic", "azureopenai", "gemini", "openai"],
-    "imageEdit": ["openai"],
-    "imageGeneration": ["azureopenai", "neosantara", "openai", "otari"],
+    "imageEdit": ["gemini", "openai"],
+    "imageGeneration": ["azureopenai", "gemini", "neosantara", "openai", "otari"],
     "listModels": [
       "anthropic",
       "atlascloud",
@@ -265,6 +273,7 @@
       "sambanova",
       "telnyx",
       "together",
+      "tokenhub",
       "vertexai",
       "vllm",
       "watsonx",
@@ -319,6 +328,7 @@
       "sambanova",
       "telnyx",
       "together",
+      "tokenhub",
       "vertexai",
       "vertexaianthropic",
       "vllm",
@@ -361,7 +371,6 @@
       "gemini",
       "meta",
       "neosantara",
-      "ollama",
       "openai",
       "openrouter",
       "otari",
@@ -412,6 +421,7 @@
       "zai"
     ],
     "rerank": ["cohere", "fireworks", "otari", "together", "voyage"],
+    "videoGeneration": ["deepinfra", "gemini", "together"],
     "responses": [
       "azureopenai",
       "deepseek",
@@ -474,6 +484,7 @@
       "sambanova",
       "telnyx",
       "together",
+      "tokenhub",
       "vertexai",
       "vertexaianthropic",
       "vllm",

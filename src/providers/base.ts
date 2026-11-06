@@ -44,14 +44,17 @@ import type {
   Transcription,
   TranscriptionParams,
   UploadFileParams,
+  VideoGenerationParams,
+  VideoJob,
 } from "../types.js";
+import { downloadVideoUrl } from "../video.js";
 import {
   completionStreamToMessageEvents,
   completionToMessageResponse,
   messagesToCompletionParams,
   normalizeMessagesContainer,
 } from "../messages-compat.js";
-import { includeWhen, mapAsyncIterableErrors } from "../utils.js";
+import { includeWhen, isNumber, mapAsyncIterableErrors } from "../utils.js";
 
 const deepSeekV4Model = /\bdeepseek-v4(?!\d)/iu;
 
@@ -158,6 +161,22 @@ export abstract class BaseProvider {
 
   downloadFile(_params: DownloadFileParams): Promise<FileDownload> {
     return Promise.reject(new UnsupportedOperationError("file downloads", this.metadata.name));
+  }
+
+  videoGeneration(_params: VideoGenerationParams): Promise<VideoJob> {
+    return Promise.reject(new UnsupportedOperationError("video generation", this.metadata.name));
+  }
+
+  retrieveVideo(_videoId: string, _providerOptions?: JsonObject): Promise<VideoJob> {
+    return Promise.reject(new UnsupportedOperationError("video generation", this.metadata.name));
+  }
+
+  downloadVideo(url: string, providerOptions: JsonObject = {}): Promise<Uint8Array> {
+    return this.execute(async () => {
+      const timeout = providerOptions.timeout;
+      if (!isNumber(timeout)) return downloadVideoUrl(url);
+      return downloadVideoUrl(url, { signal: AbortSignal.timeout(timeout * 1_000) });
+    });
   }
 
   /**

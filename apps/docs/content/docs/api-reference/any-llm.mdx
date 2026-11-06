@@ -30,6 +30,7 @@ llm.responses(params)
 llm.embedding(params)
 llm.listModels(providerOptions?)
 llm.imageGeneration(params)
+llm.imageEdit(params)
 llm.transcription(params)
 llm.speech(params)
 llm.moderation(params)
@@ -45,6 +46,10 @@ llm.listFiles(params?)
 llm.retrieveFile(params)
 llm.downloadFile(params)
 llm.deleteFile(params)
+llm.videoGeneration(params)
+llm.retrieveVideo(videoId, providerOptions?)
+llm.pollVideo(videoId, options?)
+llm.downloadVideo(output, providerOptions?)
 ```
 
 `messages()` uses native Messages support where available and translates through normalized chat

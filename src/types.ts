@@ -432,6 +432,14 @@ export interface ImageEditParams {
   user?: string;
 }
 
+export interface ImageUsage {
+  inputTokens: number;
+  inputTokensDetails: { imageTokens: number; textTokens: number };
+  outputTokens: number;
+  outputTokensDetails: { imageTokens: number; textTokens: number };
+  totalTokens: number;
+}
+
 export interface ImageGenerationResponse {
   created: number;
   data: {
@@ -439,8 +447,101 @@ export interface ImageGenerationResponse {
     revisedPrompt?: string;
     url?: string;
   }[];
+  outputFormat?: "jpeg" | "png" | "webp";
   provider: string;
   raw?: unknown;
+  usage?: ImageUsage;
+}
+
+/** Lifecycle of a video job. Providers' own words (`pending`, `processing`, `success`) map onto these. */
+export type VideoStatus = "queued" | "in_progress" | "completed" | "failed";
+
+export interface VideoError {
+  /** What went wrong, in the provider's words. */
+  message: string;
+  /** The provider's error code, when it gives one. */
+  code?: string;
+}
+
+export interface VideoOutput {
+  /** Where the video can be fetched. Some providers' URLs need their credentials; `downloadVideo` adds them. */
+  url?: string;
+  /** The video, base64-encoded, when the provider returns it inline. */
+  b64Data?: string;
+  /** Media type of the video. */
+  mimeType?: string;
+}
+
+export interface VideoJob {
+  /** Provider-assigned job ID; pass it to `retrieveVideo`. */
+  id: string;
+  /** Model that renders the video. */
+  model: string;
+  /** Where the job is. Providers' own words map onto these four. */
+  status: VideoStatus;
+  /** `true` once `status` is `completed` or `failed`. */
+  done: boolean;
+  /** Unix timestamp of the request, when the provider reports it. */
+  createdAt?: number;
+  /** Unix timestamp of completion, when the provider reports it. */
+  completedAt?: number;
+  /** Percent complete, when the provider reports it. */
+  progress?: number;
+  /** Length of the video in seconds, when the provider reports it. */
+  seconds?: number;
+  /** `WIDTHxHEIGHT` of the output, when the provider reports it. */
+  size?: string;
+  /** Why a `failed` job failed. */
+  error?: VideoError;
+  /** The rendered videos; empty until `completed`. */
+  outputs: VideoOutput[];
+}
+
+export interface VideoGeometry {
+  /** What the caller wrote, for error messages. */
+  described: string;
+  /** Exact `(width, height)`, only when the shape came from `size`. */
+  dimensions?: [number, number];
+  /** Width over height, so 16:9 is about 1.78 and a portrait video is below 1. */
+  ratio?: number;
+  /** Pixels on the short side, which names the resolution tier (720 for `720p`). */
+  shortSide?: number;
+}
+
+export interface VideoGenerationParams {
+  /** The provider's own model ID, without a `provider:` prefix. */
+  model: string;
+  /** What the video shows. */
+  prompt: string;
+  /** Length of the video in seconds. */
+  seconds?: number;
+  /** `WIDTHxHEIGHT`, such as `1280x720`. Says both how sharp and what shape; not combined with `resolution` or `aspectRatio`. */
+  size?: string;
+  /** How sharp, by short side: `480p`, `720p`, `1080p` or `4k`. Pair it with `aspectRatio` for the shape. */
+  resolution?: string;
+  /** What shape, as `WIDTH:HEIGHT` such as `16:9` or `9:16`. */
+  aspectRatio?: string;
+  /** Seed for reproducible generation. */
+  seed?: number;
+  /** What the video should not contain. */
+  negativePrompt?: string;
+  /** Image URLs, provider file URIs or `data:` URLs the video takes its subjects or style from. */
+  referenceImages?: string[];
+  /** Audio URLs the video follows, for lip sync, beat-matched motion or a sound track. */
+  referenceAudios?: string[];
+  /** Image the video starts from, in the same forms as `referenceImages`. */
+  firstFrame?: string;
+  /** Image the video ends on, in the same forms as `referenceImages`. */
+  lastFrame?: string;
+  providerOptions?: JsonObject;
+}
+
+export interface PollVideoOptions {
+  /** Seconds to wait between retrievals. */
+  pollInterval?: number;
+  /** Seconds to wait in total before giving up, or `null` to wait forever. */
+  timeout?: number | null;
+  providerOptions?: JsonObject;
 }
 
 export interface TranscriptionParams {
@@ -626,6 +727,8 @@ export interface ListFilesParams {
 
 export interface FileResourceParams {
   fileId: string;
+  /** OpenAI and Azure OpenAI Code Interpreter container that produced this file. */
+  containerId?: string;
   providerOptions?: JsonObject;
 }
 
@@ -916,6 +1019,7 @@ export interface ProviderCapabilities {
   rerank: boolean;
   responses: boolean;
   streaming: boolean;
+  videoGeneration: boolean;
   vision: boolean;
 }
 

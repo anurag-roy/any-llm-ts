@@ -1,6 +1,6 @@
 import { includeWhen, parseJsonObject, parseJsonObjectArray } from "../utils.js";
 import type { JsonObject } from "../types.js";
-import { isFunction, isNumber, isObject, isString } from "../utils.js";
+import { isFunction, isJsonObject, isNumber, isObject, isString } from "../utils.js";
 import { basename } from "node:path";
 import { readFile } from "node:fs/promises";
 
@@ -20,7 +20,17 @@ import type {
   ProviderOptions,
   RerankParams,
   RerankResponse,
+  VideoGenerationParams,
+  VideoJob,
+  VideoStatus,
 } from "../types.js";
+import {
+  optionalEpoch,
+  optionalVideoSeconds,
+  parseVideoGeometry,
+  videoJob,
+  videoOutput,
+} from "../video.js";
 import { OpenAIProvider } from "./openai.js";
 
 const statusMap = {
@@ -160,17 +170,24 @@ export class TogetherProvider extends OpenAIProvider {
       {
         apiBase: "https://api.together.xyz/v1",
         capabilities: {
+          audioSpeech: true,
           batch: true,
           embedding: true,
           reasoning: true,
           rerank: true,
+          videoGeneration: true,
           vision: true,
         },
         documentationUrl: "https://docs.together.ai/reference/",
         envApiBase: "TOGETHER_API_BASE",
         envApiKey: "TOGETHER_API_KEY",
         name: "together",
-        quirks: { responseFormatMode: "together" },
+        quirks: {
+          rejectSpeechInstructions: true,
+          rejectSpeechSpeed: true,
+          responseFormatMode: "together",
+          speechResponseFormats: ["mp3", "wav"],
+        },
       },
       options,
       client,
@@ -328,4 +345,136 @@ export class TogetherProvider extends OpenAIProvider {
       return { results };
     });
   }
+
+  override videoGeneration(params: VideoGenerationParams): Promise<VideoJob> {
+    return this.execute(async () => {
+      const { body, timeout } = convertTogetherVideoParams(params);
+      const response = await this.client.post(togetherVideosUrl(this.client.baseURL), {
+        body,
+        ...includeWhen(timeout !== undefined, { timeout }),
+      });
+      return convertTogetherVideoJob(response);
+    });
+  }
+
+  override retrieveVideo(videoId: string, providerOptions: JsonObject = {}): Promise<VideoJob> {
+    return this.execute(async () =>
+      convertTogetherVideoJob(
+        await this.client.get(togetherVideosUrl(this.client.baseURL, videoId), providerOptions),
+      ),
+    );
+  }
+}
+
+const TOGETHER_VIDEO_STATUSES = {
+  completed: "completed",
+  failed: "failed",
+  in_progress: "in_progress",
+  pending: "queued",
+  processing: "in_progress",
+  queued: "queued",
+} as const satisfies Record<string, VideoStatus>;
+
+function togetherVideosUrl(baseURL: string, videoId?: string): string {
+  const root = baseURL.endsWith("/") ? baseURL : `${baseURL}/`;
+  const videos = new URL("../v2/videos", root);
+  const href = videos.href.replace(/\/$/u, "");
+  return videoId === undefined ? href : `${href}/${videoId}`;
+}
+
+export interface TogetherVideoCreateRequest {
+  body: JsonObject;
+  timeout?: number;
+}
+
+export function convertTogetherVideoParams(
+  params: VideoGenerationParams,
+): TogetherVideoCreateRequest {
+  const extras = { ...(params.providerOptions ?? {}) };
+  const timeout = isNumber(extras.timeout) ? extras.timeout : undefined;
+  delete extras.timeout;
+  const extraBody: JsonObject = isJsonObject(extras.extra_body)
+    ? Object.fromEntries(Object.entries(extras.extra_body))
+    : {};
+  delete extras.extra_body;
+  const frameImages = Array.isArray(extras.frame_images) ? [...extras.frame_images] : [];
+  delete extras.frame_images;
+  if (params.firstFrame !== undefined) {
+    frameImages.push({ frame: "first", input_image: params.firstFrame });
+  }
+  if (params.lastFrame !== undefined) {
+    frameImages.push({ frame: "last", input_image: params.lastFrame });
+  }
+  const geometry = parseVideoGeometry(params);
+  if (geometry?.shortSide !== undefined && params.resolution !== undefined) {
+    extraBody.resolution = `${geometry.shortSide}p`;
+  }
+  if (params.aspectRatio !== undefined) extraBody.ratio = params.aspectRatio;
+  if (params.referenceAudios !== undefined) {
+    const media: JsonObject = isJsonObject(extraBody.media)
+      ? Object.fromEntries(Object.entries(extraBody.media))
+      : {};
+    extraBody.media = { ...media, audio_inputs: params.referenceAudios };
+  }
+  return {
+    body: {
+      model: params.model,
+      prompt: params.prompt,
+      ...includeWhen(params.seconds !== undefined, { seconds: String(params.seconds) }),
+      ...includeWhen(geometry?.dimensions !== undefined, {
+        height: geometry?.dimensions?.[1],
+        width: geometry?.dimensions?.[0],
+      }),
+      ...includeWhen(params.seed !== undefined, { seed: params.seed }),
+      ...includeWhen(params.negativePrompt !== undefined, {
+        negative_prompt: params.negativePrompt,
+      }),
+      ...includeWhen(params.referenceImages !== undefined, {
+        reference_images: params.referenceImages,
+      }),
+      ...includeWhen(frameImages.length > 0, { frame_images: frameImages }),
+      ...extraBody,
+      ...extras,
+    },
+    ...includeWhen(timeout !== undefined, { timeout }),
+  };
+}
+
+export function convertTogetherVideoJob<Value>(value: Value): VideoJob {
+  const job = isObject(value) ? parseJsonObject(value) : parseJsonObject({});
+  const rawStatus = isString(job.status) ? job.status : "";
+  if (!Object.hasOwn(TOGETHER_VIDEO_STATUSES, rawStatus)) {
+    throw new ProviderError(
+      `Together returned an unknown video status '${rawStatus}' for job ${isString(job.id) ? job.id : ""}`,
+    );
+  }
+  // SAFETY: Object.hasOwn established that the status is one of the mapped keys.
+  const status = TOGETHER_VIDEO_STATUSES[rawStatus as keyof typeof TOGETHER_VIDEO_STATUSES];
+  const error = record(job.error);
+  const outputs = job.outputs === undefined || job.outputs === null ? {} : record(job.outputs);
+  const size = isString(job.size) && job.size.length > 0 ? job.size : undefined;
+  return videoJob({
+    id: isString(job.id) ? job.id : "",
+    model: isString(job.model) ? job.model : "",
+    status,
+    ...includeWhen(optionalEpoch(job.created_at) !== undefined, {
+      createdAt: optionalEpoch(job.created_at),
+    }),
+    ...includeWhen(optionalEpoch(job.completed_at) !== undefined, {
+      completedAt: optionalEpoch(job.completed_at),
+    }),
+    ...includeWhen(optionalVideoSeconds(job.seconds) !== undefined, {
+      seconds: optionalVideoSeconds(job.seconds),
+    }),
+    ...includeWhen(size !== undefined, { size }),
+    ...includeWhen(isString(error.message), {
+      error: {
+        message: isString(error.message) ? error.message : "",
+        ...includeWhen(isString(error.code), {
+          code: isString(error.code) ? error.code : undefined,
+        }),
+      },
+    }),
+    outputs: isString(outputs.video_url) ? [videoOutput({ url: outputs.video_url })] : [],
+  });
 }

@@ -37,6 +37,7 @@ const verifiedProviders = new Set([
   "openai",
   "openrouter",
   "otari",
+  "ovhcloud",
   "portkey",
   "sambanova",
   "together",
@@ -58,6 +59,7 @@ const displayNames = {
   openai: "OpenAI",
   openrouter: "OpenRouter",
   sagemaker: "Amazon SageMaker",
+  tokenhub: "TokenHub",
   vertexai: "Google Vertex AI",
   vertexaianthropic: "Vertex AI Anthropic",
   watsonx: "IBM watsonx",
@@ -80,6 +82,7 @@ const capabilityKeys = [
   "rerank",
   "responses",
   "streaming",
+  "videoGeneration",
   "vision",
 ] as const;
 const authenticationKinds = ["ambient", "none", "stored"] as const;
@@ -215,8 +218,8 @@ type IncompleteProviderMetadata = Omit<
   GeneratedProviderMetadataKeys | "capabilities"
 > &
   Partial<Pick<ProviderMetadata, GeneratedProviderMetadataKeys>> & {
-    capabilities: Omit<ProviderCapabilities, "files" | "imageEdit"> &
-      Partial<Pick<ProviderCapabilities, "files" | "imageEdit">>;
+    capabilities: Omit<ProviderCapabilities, "files" | "imageEdit" | "videoGeneration"> &
+      Partial<Pick<ProviderCapabilities, "files" | "imageEdit" | "videoGeneration">>;
   };
 
 const fileOperationsCatalog = ["delete", "download", "list", "retrieve", "upload"] as const;
@@ -245,6 +248,7 @@ export function completeProviderMetadata(
       ...metadata.capabilities,
       files: fileOperations.length > 0,
       imageEdit: metadata.capabilities.imageEdit === true,
+      videoGeneration: metadata.capabilities.videoGeneration === true,
     },
     configuration: metadata.configuration ?? providerConfiguration(name, metadata.apiBase),
     displayName: metadata.displayName ?? providerDisplayName(name),
