@@ -1,6 +1,6 @@
 import { includeWhen, parseJsonObject, parseJsonObjectArray } from "../utils.js";
 import type { JsonObject } from "../types.js";
-import { isFunction, isNumber, isObject, isString } from "../utils.js";
+import { isFunction, isJsonObject, isNumber, isObject, isString } from "../utils.js";
 import { basename } from "node:path";
 import { readFile } from "node:fs/promises";
 
@@ -27,7 +27,7 @@ import type {
 import {
   optionalEpoch,
   optionalVideoSeconds,
-  parseVideoSize,
+  parseVideoGeometry,
   videoJob,
   videoOutput,
 } from "../video.js";
@@ -170,6 +170,7 @@ export class TogetherProvider extends OpenAIProvider {
       {
         apiBase: "https://api.together.xyz/v1",
         capabilities: {
+          audioSpeech: true,
           batch: true,
           embedding: true,
           reasoning: true,
@@ -181,7 +182,12 @@ export class TogetherProvider extends OpenAIProvider {
         envApiBase: "TOGETHER_API_BASE",
         envApiKey: "TOGETHER_API_KEY",
         name: "together",
-        quirks: { responseFormatMode: "together" },
+        quirks: {
+          rejectSpeechInstructions: true,
+          rejectSpeechSpeed: true,
+          responseFormatMode: "together",
+          speechResponseFormats: ["mp3", "wav"],
+        },
       },
       options,
       client,
@@ -387,6 +393,10 @@ export function convertTogetherVideoParams(
   const extras = { ...(params.providerOptions ?? {}) };
   const timeout = isNumber(extras.timeout) ? extras.timeout : undefined;
   delete extras.timeout;
+  const extraBody: JsonObject = isJsonObject(extras.extra_body)
+    ? Object.fromEntries(Object.entries(extras.extra_body))
+    : {};
+  delete extras.extra_body;
   const frameImages = Array.isArray(extras.frame_images) ? [...extras.frame_images] : [];
   delete extras.frame_images;
   if (params.firstFrame !== undefined) {
@@ -395,15 +405,25 @@ export function convertTogetherVideoParams(
   if (params.lastFrame !== undefined) {
     frameImages.push({ frame: "last", input_image: params.lastFrame });
   }
-  const dimensions = parseVideoSize(params.size);
+  const geometry = parseVideoGeometry(params);
+  if (geometry?.shortSide !== undefined && params.resolution !== undefined) {
+    extraBody.resolution = `${geometry.shortSide}p`;
+  }
+  if (params.aspectRatio !== undefined) extraBody.ratio = params.aspectRatio;
+  if (params.referenceAudios !== undefined) {
+    const media: JsonObject = isJsonObject(extraBody.media)
+      ? Object.fromEntries(Object.entries(extraBody.media))
+      : {};
+    extraBody.media = { ...media, audio_inputs: params.referenceAudios };
+  }
   return {
     body: {
       model: params.model,
       prompt: params.prompt,
       ...includeWhen(params.seconds !== undefined, { seconds: String(params.seconds) }),
-      ...includeWhen(dimensions !== undefined, {
-        height: dimensions?.[1],
-        width: dimensions?.[0],
+      ...includeWhen(geometry?.dimensions !== undefined, {
+        height: geometry?.dimensions?.[1],
+        width: geometry?.dimensions?.[0],
       }),
       ...includeWhen(params.seed !== undefined, { seed: params.seed }),
       ...includeWhen(params.negativePrompt !== undefined, {
@@ -413,6 +433,7 @@ export function convertTogetherVideoParams(
         reference_images: params.referenceImages,
       }),
       ...includeWhen(frameImages.length > 0, { frame_images: frameImages }),
+      ...extraBody,
       ...extras,
     },
     ...includeWhen(timeout !== undefined, { timeout }),

@@ -160,6 +160,70 @@ describe("Together video conversion", () => {
       InvalidRequestError,
     );
   });
+
+  it("sends resolution and ratio through the request body", () => {
+    expect(
+      convertTogetherVideoParams({
+        aspectRatio: "16:9",
+        model: "ByteDance/Seedance-2.5",
+        prompt: "penguins",
+        providerOptions: { extra_body: { generate_audio: false } },
+        resolution: "480P",
+      }).body,
+    ).toEqual({
+      generate_audio: false,
+      model: "ByteDance/Seedance-2.5",
+      prompt: "penguins",
+      ratio: "16:9",
+      resolution: "480p",
+    });
+  });
+
+  it("rejects size combined with resolution", () => {
+    expect(() =>
+      convertTogetherVideoParams({
+        model: "ByteDance/Seedance-2.5",
+        prompt: "penguins",
+        resolution: "480p",
+        size: "854x480",
+      }),
+    ).toThrow(/either size or resolution and aspect_ratio, not both/u);
+  });
+
+  it("sends reference audio as media.audio_inputs and merges caller media", () => {
+    expect(
+      convertTogetherVideoParams({
+        model: "ByteDance/Seedance-2.5",
+        prompt: "a rapper",
+        referenceAudios: ["https://audio/beat.mp3"],
+      }).body,
+    ).toEqual({
+      media: { audio_inputs: ["https://audio/beat.mp3"] },
+      model: "ByteDance/Seedance-2.5",
+      prompt: "a rapper",
+    });
+    const extraBody = {
+      generate_audio: true,
+      media: { reference_videos: [{ video: "https://v/ref.mp4" }] },
+    };
+    expect(
+      convertTogetherVideoParams({
+        model: "ByteDance/Seedance-2.5",
+        prompt: "a rapper",
+        providerOptions: { extra_body: extraBody },
+        referenceAudios: ["https://audio/beat.mp3"],
+      }).body,
+    ).toEqual({
+      generate_audio: true,
+      media: {
+        audio_inputs: ["https://audio/beat.mp3"],
+        reference_videos: [{ video: "https://v/ref.mp4" }],
+      },
+      model: "ByteDance/Seedance-2.5",
+      prompt: "a rapper",
+    });
+    expect(extraBody.media).toEqual({ reference_videos: [{ video: "https://v/ref.mp4" }] });
+  });
 });
 
 describe("Together video provider methods", () => {

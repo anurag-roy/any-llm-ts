@@ -1,7 +1,7 @@
 {
   "source": {
     "repository": "mozilla-ai/any-llm",
-    "commit": "6c266c6a7d0da061b0fc6742d7b17f9000bc757a"
+    "commit": "f23ff3ade108efabef3114d5a28f2f4159065aa4"
   },
   "providers": [
     "anthropic",
@@ -126,7 +126,7 @@
     "retrieveBatchResults"
   ],
   "capabilities": {
-    "audioSpeech": ["azureopenai", "openai", "otari"],
+    "audioSpeech": ["azureopenai", "gemini", "groq", "mistral", "openai", "otari", "together"],
     "audioTranscription": ["azureopenai", "openai", "otari"],
     "batch": [
       "anthropic",
@@ -421,7 +421,7 @@
       "zai"
     ],
     "rerank": ["cohere", "fireworks", "otari", "together", "voyage"],
-    "videoGeneration": ["gemini", "together"],
+    "videoGeneration": ["deepinfra", "gemini", "together"],
     "responses": [
       "azureopenai",
       "deepseek",

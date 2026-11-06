@@ -253,23 +253,24 @@ Vertex AI does not advertise or implement image generation or edit.
 
 ## Video generation
 
-Gemini Omni Flash renders video through the same Interactions API, as a background job. `size`
-must be `16:9` or `9:16` with a short side of 360, 720, 1080, or 2160 pixels. `seconds` and
-`negativePrompt` are rejected. See [Video generation](/docs/operations/video).
+Gemini Omni Flash renders video through the same Interactions API, as a background job. Pass
+`size`, or `resolution` and `aspectRatio`; the video must be `16:9` or `9:16` with a short side of
+360, 720, 1080, or 2160 pixels. `seconds`, `negativePrompt`, and `referenceAudios` are rejected.
+See [Video generation](/docs/operations/video).
 
 ## Capability boundary
 
 The adapter advertises completions, streaming, thinking, image and PDF input, embeddings, model
 listing, batch jobs, Files (upload, list, retrieve, delete), text-only Responses, image generation
-and edit, and video generation. Batch creation accepts `/v1/chat/completions` JSONL input,
-translates each record into an inline Google batch request, and normalizes inline results through
-the same completion converter.
+and edit, video generation, and text-to-speech. Batch creation accepts `/v1/chat/completions`
+JSONL input, translates each record into an inline Google batch request, and normalizes inline
+results through the same completion converter.
 
 See the [Files](/docs/operations/files) page for Gemini upload, list, retrieve, and delete.
 
-`messages()` is available through the common Messages compatibility layer. Moderation, speech, and
+`messages()` is available through the common Messages compatibility layer. Moderation and
 transcription remain outside this adapter's current public surface. Vertex AI does not inherit
-Files, Responses, image generation, or video generation. Vertex completions for Model Garden
+Files, Responses, image generation, video generation, or speech. Vertex completions for Model Garden
 partner IDs (`qwen`, `openai/gpt-oss-`, `deepseek-ai`, `llama`, `meta/llama`, `minimaxai/`,
 `moonshotai/`, `zai-org/`) go to Vertex's OpenAI-compatible endpoint. IDs starting with `mistral`
 or `codestral` go to the `mistralai` publisher's `rawPredict` endpoints. Gemini models stay on

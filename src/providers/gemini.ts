@@ -73,6 +73,7 @@ import type {
   Response,
   ResponsesParams,
   ResponseStreamEvent,
+  SpeechParams,
   Tool,
   ToolCall,
   ToolCallDelta,
@@ -104,6 +105,7 @@ import {
   type GeminiInteractionCreateParams,
 } from "./gemini-interactions.js";
 import { convertInteractionStream } from "./gemini-interactions-stream.js";
+import { convertSpeechParams, speechBytes } from "./gemini-speech.js";
 import { convertInteractionToVideoJob, convertVideoParams } from "./gemini-video.js";
 import {
   convertResponsesToImages,
@@ -187,7 +189,7 @@ const maxThinkingBudgetByModel: [string, number][] = [
 ];
 
 const geminiCapabilities: ProviderCapabilities = {
-  audioSpeech: false,
+  audioSpeech: true,
   audioTranscription: false,
   batch: true,
   completion: true,
@@ -1483,6 +1485,7 @@ export class GeminiProvider extends BaseProvider {
     this.metadata = completeProviderMetadata({
       capabilities: {
         ...geminiCapabilities,
+        audioSpeech: this.providerName === "gemini",
         imageEdit: this.providerName === "gemini",
         imageGeneration: this.providerName === "gemini",
         responses: this.providerName === "gemini",
@@ -1782,6 +1785,19 @@ export class GeminiProvider extends BaseProvider {
       controller.abort();
       throw error;
     }
+  }
+
+  override speech(params: SpeechParams): Promise<Uint8Array> {
+    if (!this.metadata.capabilities.audioSpeech) return super.speech(params);
+    return this.execute(async () => {
+      const request = convertSpeechParams(params, this.providerName);
+      const response = await this.client.models.generateContent({
+        config: request.config,
+        contents: request.contents,
+        model: request.model,
+      });
+      return speechBytes(response, request, this.providerName);
+    });
   }
 
   override videoGeneration(params: VideoGenerationParams): Promise<VideoJob> {

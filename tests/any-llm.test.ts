@@ -92,7 +92,9 @@ describe("AnyLLM registry and facade", () => {
     expect(AnyLLM.getProviderMetadata("deepseek").messagesNative).toBe(true);
     expect(AnyLLM.getProviderMetadata("openai").capabilities.imageEdit).toBe(true);
     expect(AnyLLM.getProviderMetadata("gemini").capabilities.imageGeneration).toBe(true);
+    expect(AnyLLM.getProviderMetadata("gemini").capabilities.audioSpeech).toBe(true);
     expect(AnyLLM.getProviderMetadata("vertexai").capabilities.imageGeneration).toBe(false);
+    expect(AnyLLM.getProviderMetadata("vertexai").capabilities.audioSpeech).toBe(false);
     expect(AnyLLM.getProviderMetadata("tokenhub")).toMatchObject({
       apiBase: "https://us-api.tokenhub.com/v1",
       capabilities: {

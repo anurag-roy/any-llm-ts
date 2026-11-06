@@ -51,6 +51,7 @@ import type {
   ProviderCapabilities,
   ProviderMetadata,
   ProviderOptions,
+  ReasoningEffort,
   ToolCall,
   ToolCallDelta,
 } from "../types.js";
@@ -212,6 +213,12 @@ const nativeMessageStreamTypes = new Set([
 export function isAnthropicBedrockModel(model: string): boolean {
   return model.includes("anthropic.");
 }
+
+export function isGptOssBedrockModel(model: string): boolean {
+  return model.includes("openai.gpt-oss");
+}
+
+const gptOssReasoningEfforts = new Set<ReasoningEffort>(["high", "low", "medium"]);
 
 interface BedrockNativeStreamEvent {
   chunk?: {
@@ -783,6 +790,13 @@ function convertToolChoice(
 function toolConfiguration(params: CompletionParams, messages: BedrockMessage[]) {
   const tools = configuredTools(params);
   if (params.responseFormat !== undefined) {
+    if (isGptOssBedrockModel(params.model)) {
+      throw new UnsupportedParameterError(
+        "responseFormat",
+        "bedrock",
+        "Bedrock does not constrain gpt-oss output to a schema, so the answer may not be JSON.",
+      );
+    }
     if (!params.model.includes("anthropic.")) {
       throw new UnsupportedParameterError(
         "responseFormat",
@@ -842,7 +856,8 @@ function toolConfiguration(params: CompletionParams, messages: BedrockMessage[])
     toolChoice !== undefined &&
     params.reasoningEffort !== undefined &&
     params.reasoningEffort !== "auto" &&
-    params.reasoningEffort !== "none"
+    params.reasoningEffort !== "none" &&
+    !isGptOssBedrockModel(params.model)
   ) {
     throw new UnsupportedParameterError(
       "toolChoice with reasoningEffort",
@@ -878,17 +893,29 @@ function completionRequest(params: CompletionParams) {
     params.reasoningEffort !== "auto" &&
     params.reasoningEffort !== "none"
   ) {
-    if (!isAnthropicBedrockModel(params.model) && !params.model.startsWith("arn:")) {
+    const gptOss = isGptOssBedrockModel(params.model);
+    if (gptOss && !gptOssReasoningEfforts.has(params.reasoningEffort)) {
+      throw new UnsupportedParameterError(
+        `reasoning_effort '${params.reasoningEffort}'`,
+        "bedrock",
+        "gpt-oss on Bedrock takes one of: low, medium, high.",
+      );
+    }
+    if (!gptOss && !isAnthropicBedrockModel(params.model) && !params.model.startsWith("arn:")) {
       throw new UnsupportedParameterError(
         "reasoningEffort",
         "bedrock",
         "reasoningEffort is only translated for Anthropic Claude models on Bedrock. For other models, pass the model's own reasoning field in additionalModelRequestFields.",
       );
     }
-    additionalModelRequestFields.reasoning_config = {
-      budget_tokens: reasoningBudgets[params.reasoningEffort],
-      type: "enabled",
-    };
+    if (gptOss) {
+      additionalModelRequestFields.reasoning_effort = params.reasoningEffort;
+    } else {
+      additionalModelRequestFields.reasoning_config = {
+        budget_tokens: reasoningBudgets[params.reasoningEffort],
+        type: "enabled",
+      };
+    }
   }
   const toolConfig = toolConfiguration(params, converted.messages);
   return compactObject({

@@ -695,6 +695,7 @@
     "tier": "community"
   },
   {
+    "apiBase": "https://api.deepinfra.com/v1/openai",
     "capabilities": {
       "audioSpeech": false,
       "audioTranscription": false,
@@ -712,15 +713,14 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
-      "videoGeneration": false,
+      "videoGeneration": true,
       "vision": true
     },
     "documentationUrl": "https://deepinfra.com/docs/openai_api",
-    "name": "deepinfra",
-    "requiresApiKey": true,
-    "apiBase": "https://api.deepinfra.com/v1/openai",
     "envApiBase": "DEEPINFRA_API_BASE",
     "envApiKey": "DEEPINFRA_API_KEY",
+    "name": "deepinfra",
+    "requiresApiKey": true,
     "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
@@ -940,7 +940,7 @@
   },
   {
     "capabilities": {
-      "audioSpeech": false,
+      "audioSpeech": true,
       "audioTranscription": false,
       "batch": true,
       "completion": true,
@@ -1122,7 +1122,7 @@
   },
   {
     "capabilities": {
-      "audioSpeech": false,
+      "audioSpeech": true,
       "audioTranscription": false,
       "batch": false,
       "completion": true,
@@ -1792,7 +1792,7 @@
   {
     "apiBase": "https://api.mistral.ai/v1",
     "capabilities": {
-      "audioSpeech": false,
+      "audioSpeech": true,
       "audioTranscription": false,
       "batch": true,
       "completion": true,
@@ -2857,7 +2857,7 @@
   {
     "apiBase": "https://api.together.xyz/v1",
     "capabilities": {
-      "audioSpeech": false,
+      "audioSpeech": true,
       "audioTranscription": false,
       "batch": true,
       "completion": true,

@@ -8,7 +8,7 @@ import { basename } from "node:path";
 import { Mistral } from "@mistralai/mistralai";
 import type { BatchJob } from "@mistralai/mistralai/models/components";
 
-import { BatchNotCompleteError, MissingApiKeyError } from "../errors.js";
+import { BatchNotCompleteError, MissingApiKeyError, UnsupportedParameterError } from "../errors.js";
 import type {
   Batch,
   BatchResult,
@@ -18,8 +18,9 @@ import type {
   CreateBatchParams,
   ListBatchesParams,
   ProviderOptions,
+  SpeechParams,
 } from "../types.js";
-import { getEnvironmentVariable } from "../utils.js";
+import { getEnvironmentVariable, timeoutMilliseconds } from "../utils.js";
 import { OpenAIProvider } from "./openai.js";
 
 function batchStatus(value: BatchJob["status"]): BatchStatus {
@@ -100,6 +101,34 @@ function modelInBatchFile(content: string): string | undefined {
   return models.values().next().value;
 }
 
+const MISTRAL_SPEECH_RESPONSE_FORMATS = new Set(["flac", "mp3", "opus", "pcm", "wav"]);
+type MistralSpeechResponseFormat = "flac" | "mp3" | "opus" | "pcm" | "wav";
+
+function mistralSpeechResponseFormat(
+  format: SpeechParams["responseFormat"],
+): MistralSpeechResponseFormat | UnsupportedParameterError | undefined {
+  if (format === undefined) return undefined;
+  if (
+    format === "flac" ||
+    format === "mp3" ||
+    format === "opus" ||
+    format === "pcm" ||
+    format === "wav"
+  ) {
+    return format;
+  }
+  return new UnsupportedParameterError(
+    "response_format",
+    "mistral",
+    `Mistral speech returns ${[...MISTRAL_SPEECH_RESPONSE_FORMATS].toSorted().join(", ")}, not ${JSON.stringify(format)}.`,
+  );
+}
+
+interface MistralSpeechResponse {
+  audioData?: string;
+  audio_data?: string;
+}
+
 function resolveApiKey(options: ProviderOptions): string {
   const apiKey = options.apiKey ?? getEnvironmentVariable("MISTRAL_API_KEY");
   if (apiKey === undefined) throw new MissingApiKeyError("mistral", "MISTRAL_API_KEY");
@@ -134,6 +163,7 @@ export class MistralProvider extends OpenAIProvider {
       {
         apiBase: "https://api.mistral.ai/v1",
         capabilities: {
+          audioSpeech: true,
           batch: true,
           embedding: true,
           moderation: true,
@@ -167,6 +197,42 @@ export class MistralProvider extends OpenAIProvider {
     return super.completionRequest({
       ...params,
       messages: dropEmptyAssistantMessages(params.messages),
+    });
+  }
+
+  override speech(params: SpeechParams): Promise<Uint8Array> {
+    if (params.instructions !== undefined) {
+      return Promise.reject(new UnsupportedParameterError("instructions", "mistral"));
+    }
+    if (params.speed !== undefined) {
+      return Promise.reject(new UnsupportedParameterError("speed", "mistral"));
+    }
+    const responseFormat = mistralSpeechResponseFormat(params.responseFormat);
+    if (responseFormat instanceof UnsupportedParameterError) {
+      return Promise.reject(responseFormat);
+    }
+    return this.execute(async () => {
+      const extras = { ...(params.providerOptions ?? {}) };
+      if (extras.stream === true) {
+        throw new UnsupportedParameterError("stream", "mistral");
+      }
+      if (isNumber(extras.timeout)) {
+        extras.timeout_ms = timeoutMilliseconds(extras.timeout);
+        delete extras.timeout;
+      }
+      // SAFETY: extras are JSON kwargs the speech endpoint accepts next to the required fields.
+      const response = (await this.mistral.audio.speech.complete({
+        input: params.input,
+        model: params.model,
+        voiceId: params.voice,
+        ...includeWhen(responseFormat !== undefined, { responseFormat }),
+        ...extras,
+      })) as MistralSpeechResponse;
+      const encoded = response.audioData ?? response.audio_data;
+      if (!isString(encoded) || encoded.length === 0) {
+        throw new TypeError("Mistral speech returned no audio_data.");
+      }
+      return Uint8Array.from(Buffer.from(encoded, "base64"));
     });
   }
 

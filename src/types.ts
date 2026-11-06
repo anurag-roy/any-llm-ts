@@ -497,6 +497,17 @@ export interface VideoJob {
   outputs: VideoOutput[];
 }
 
+export interface VideoGeometry {
+  /** What the caller wrote, for error messages. */
+  described: string;
+  /** Exact `(width, height)`, only when the shape came from `size`. */
+  dimensions?: [number, number];
+  /** Width over height, so 16:9 is about 1.78 and a portrait video is below 1. */
+  ratio?: number;
+  /** Pixels on the short side, which names the resolution tier (720 for `720p`). */
+  shortSide?: number;
+}
+
 export interface VideoGenerationParams {
   /** The provider's own model ID, without a `provider:` prefix. */
   model: string;
@@ -504,14 +515,20 @@ export interface VideoGenerationParams {
   prompt: string;
   /** Length of the video in seconds. */
   seconds?: number;
-  /** `WIDTHxHEIGHT`, such as `1280x720`. */
+  /** `WIDTHxHEIGHT`, such as `1280x720`. Says both how sharp and what shape; not combined with `resolution` or `aspectRatio`. */
   size?: string;
+  /** How sharp, by short side: `480p`, `720p`, `1080p` or `4k`. Pair it with `aspectRatio` for the shape. */
+  resolution?: string;
+  /** What shape, as `WIDTH:HEIGHT` such as `16:9` or `9:16`. */
+  aspectRatio?: string;
   /** Seed for reproducible generation. */
   seed?: number;
   /** What the video should not contain. */
   negativePrompt?: string;
   /** Image URLs, provider file URIs or `data:` URLs the video takes its subjects or style from. */
   referenceImages?: string[];
+  /** Audio URLs the video follows, for lip sync, beat-matched motion or a sound track. */
+  referenceAudios?: string[];
   /** Image the video starts from, in the same forms as `referenceImages`. */
   firstFrame?: string;
   /** Image the video ends on, in the same forms as `referenceImages`. */

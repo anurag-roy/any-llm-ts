@@ -81,7 +81,11 @@ export type { AnthropicProviderConfig } from "./providers/anthropic.js";
 export { AzureProvider } from "./providers/azure.js";
 export type { AzureInferenceClientLike } from "./providers/azure.js";
 export { AzureAnthropicProvider } from "./providers/azureanthropic.js";
-export { BedrockProvider, isAnthropicBedrockModel } from "./providers/bedrock.js";
+export {
+  BedrockProvider,
+  isAnthropicBedrockModel,
+  isGptOssBedrockModel,
+} from "./providers/bedrock.js";
 export type {
   BedrockClientLike,
   BedrockControlClientLike,
@@ -91,6 +95,7 @@ export type {
 } from "./providers/bedrock.js";
 export { FireworksProvider } from "./providers/fireworks.js";
 export { CohereProvider } from "./providers/cohere.js";
+export { DeepinfraProvider } from "./providers/deepinfra.js";
 export { GeminiProvider } from "./providers/gemini.js";
 export type { GeminiProviderConfig } from "./providers/gemini.js";
 export { GitHubProvider } from "./providers/github.js";

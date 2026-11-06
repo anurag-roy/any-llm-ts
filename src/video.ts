@@ -1,5 +1,12 @@
 import { InvalidRequestError } from "./errors.js";
-import type { JsonValue, VideoJob, VideoOutput, VideoStatus } from "./types.js";
+import type {
+  JsonValue,
+  VideoGenerationParams,
+  VideoJob,
+  VideoOutput,
+  VideoGeometry,
+  VideoStatus,
+} from "./types.js";
 import { includeWhen, isNumber, isString } from "./utils.js";
 
 const TERMINAL_VIDEO_STATUSES = new Set<VideoStatus>(["completed", "failed"]);
@@ -18,6 +25,10 @@ export function videoJob(
   };
 }
 
+function isAsciiDecimal(value: string): boolean {
+  return /^[0-9]+$/u.test(value);
+}
+
 export function parseVideoSize(size: string | undefined): [number, number] | undefined {
   if (size === undefined) return undefined;
   const lowered = size.toLowerCase();
@@ -25,12 +36,77 @@ export function parseVideoSize(size: string | undefined): [number, number] | und
   const width = index === -1 ? lowered : lowered.slice(0, index);
   const separator = index === -1 ? "" : "x";
   const height = index === -1 ? "" : lowered.slice(index + 1);
-  if (separator !== "x" || !/^\d+$/u.test(width) || !/^\d+$/u.test(height)) {
+  if (
+    separator !== "x" ||
+    !isAsciiDecimal(width) ||
+    !isAsciiDecimal(height) ||
+    Number(width) === 0 ||
+    Number(height) === 0
+  ) {
     throw new InvalidRequestError(
       `size must be WIDTHxHEIGHT, such as 1280x720, not ${JSON.stringify(size)}`,
     );
   }
   return [Number(width), Number(height)];
+}
+
+export function parseVideoGeometry(
+  params: Pick<VideoGenerationParams, "aspectRatio" | "resolution" | "size">,
+): VideoGeometry | undefined {
+  if (params.size !== undefined) {
+    if (params.resolution !== undefined || params.aspectRatio !== undefined) {
+      throw new InvalidRequestError("Pass either size or resolution and aspect_ratio, not both.");
+    }
+    const parsed = parseVideoSize(params.size);
+    if (parsed === undefined) return undefined;
+    const [width, height] = parsed;
+    return {
+      described: params.size,
+      dimensions: [width, height],
+      ratio: width / height,
+      shortSide: Math.min(width, height),
+    };
+  }
+  if (params.resolution === undefined && params.aspectRatio === undefined) return undefined;
+  let shortSide: number | undefined;
+  if (params.resolution !== undefined) {
+    const tier = params.resolution.toLowerCase();
+    if (tier === "4k") shortSide = 2160;
+    else if (tier.endsWith("p") && isAsciiDecimal(tier.slice(0, -1))) {
+      shortSide = Number(tier.slice(0, -1));
+    } else {
+      throw new InvalidRequestError(
+        `resolution must be a short side such as 720p, or 4k, not ${JSON.stringify(params.resolution)}`,
+      );
+    }
+  }
+  let ratio: number | undefined;
+  if (params.aspectRatio !== undefined) {
+    const index = params.aspectRatio.indexOf(":");
+    const numerator = index === -1 ? params.aspectRatio : params.aspectRatio.slice(0, index);
+    const separator = index === -1 ? "" : ":";
+    const denominator = index === -1 ? "" : params.aspectRatio.slice(index + 1);
+    if (
+      separator !== ":" ||
+      !isAsciiDecimal(numerator) ||
+      !isAsciiDecimal(denominator) ||
+      Number(numerator) === 0 ||
+      Number(denominator) === 0
+    ) {
+      throw new InvalidRequestError(
+        `aspect_ratio must be WIDTH:HEIGHT, such as 16:9, not ${JSON.stringify(params.aspectRatio)}`,
+      );
+    }
+    ratio = Number(numerator) / Number(denominator);
+  }
+  const described = [params.resolution, params.aspectRatio]
+    .filter((value) => value !== undefined)
+    .join(" ");
+  return {
+    described,
+    ...includeWhen(ratio !== undefined, { ratio }),
+    ...includeWhen(shortSide !== undefined, { shortSide }),
+  };
 }
 
 export function decodeVideoData(b64Data: string): Uint8Array {

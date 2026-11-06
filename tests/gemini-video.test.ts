@@ -11,6 +11,7 @@ import {
 import type { VideoGenerationParams } from "../src/index.js";
 import type { GeminiInteraction } from "../src/providers/gemini-interactions.js";
 import { convertInteractionToVideoJob, convertVideoParams } from "../src/providers/gemini-video.js";
+import { includeWhen } from "../src/utils.js";
 import { videoOutput } from "../src/video.js";
 
 const MODEL = "gemini-omni-1.1-flash";
@@ -88,22 +89,63 @@ describe("Gemini video conversion", () => {
     }
   });
 
-  it("rejects a square size and sizes outside Gemini's resolutions", () => {
-    expect(() => convertVideoParams(params({ size: "720x720" }), "gemini", undefined)).toThrow(
-      /cannot be square/u,
-    );
-    expect(() => convertVideoParams(params({ size: "864x480" }), "gemini", undefined)).toThrow(
-      /short side of 360, 720, 1080, 2160 pixels, not '864x480'/u,
+  it("rejects a size that is not 16:9 or 9:16", () => {
+    for (const size of ["720x720", "2520x1080", "1080x1440"]) {
+      expect(() => convertVideoParams(params({ size }), "gemini", undefined)).toThrow(
+        `16:9 or 9:16 video, not "${size}"`,
+      );
+    }
+  });
+
+  it.each([
+    ["720p", "16:9", { aspect_ratio: "16:9", resolution: "720p" }],
+    ["4K", "9:16", { aspect_ratio: "9:16", resolution: "4k" }],
+    ["360p", undefined, { resolution: "360p" }],
+    [undefined, "9:16", { aspect_ratio: "9:16" }],
+  ] as const)("maps resolution %s and aspectRatio %s", (resolution, aspectRatio, expected) => {
+    expect(
+      convertVideoParams(
+        params({
+          ...includeWhen(aspectRatio !== undefined, { aspectRatio }),
+          ...includeWhen(resolution !== undefined, { resolution }),
+        }),
+        "gemini",
+        undefined,
+      ).response_format,
+    ).toEqual({ type: "video", ...expected });
+  });
+
+  it.each(["1:1", "21:9", "3:4", "4:3"])(
+    "rejects aspectRatio %s that is not 16:9 or 9:16",
+    (aspectRatio) => {
+      expect(() =>
+        convertVideoParams(params({ aspectRatio, resolution: "720p" }), "gemini", undefined),
+      ).toThrow(`16:9 or 9:16 video, not "720p ${aspectRatio}"`);
+    },
+  );
+
+  it("rejects a resolution outside Gemini's tiers", () => {
+    expect(() => convertVideoParams(params({ resolution: "480p" }), "gemini", undefined)).toThrow(
+      /short side of 360, 720, 1080, 2160 pixels, not "480p"/u,
     );
   });
 
-  it("rejects seconds and negativePrompt", () => {
+  it("rejects a size outside Gemini's resolutions", () => {
+    expect(() => convertVideoParams(params({ size: "960x540" }), "gemini", undefined)).toThrow(
+      /short side of 360, 720, 1080, 2160 pixels, not "960x540"/u,
+    );
+  });
+
+  it("rejects seconds, negativePrompt, and referenceAudios", () => {
     expect(() => convertVideoParams(params({ seconds: 5 }), "gemini", undefined)).toThrow(
       UnsupportedParameterError,
     );
     expect(() =>
       convertVideoParams(params({ negativePrompt: "blurry" }), "gemini", undefined),
     ).toThrow(/negative_prompt/u);
+    expect(() =>
+      convertVideoParams(params({ referenceAudios: ["https://a/beat.mp3"] }), "gemini", undefined),
+    ).toThrow(/reference_audios/u);
   });
 
   it("puts frames then references before the prompt", () => {

@@ -7,7 +7,7 @@ import type {
   VideoStatus,
 } from "../types.js";
 import { includeWhen, isObject, isString } from "../utils.js";
-import { parseVideoSize, videoJob, videoOutput } from "../video.js";
+import { parseVideoGeometry, videoJob, videoOutput } from "../video.js";
 import {
   isoToEpoch,
   type GeminiInteraction,
@@ -23,6 +23,21 @@ const RESOLUTIONS = {
 
 function resolutionName(side: number): (typeof RESOLUTIONS)[keyof typeof RESOLUTIONS] | undefined {
   if (side === 360 || side === 720 || side === 1080 || side === 2160) return RESOLUTIONS[side];
+  return undefined;
+}
+
+const ASPECT_RATIOS = {
+  "16:9": 16 / 9,
+  "9:16": 9 / 16,
+} as const;
+
+function isClose(left: number, right: number): boolean {
+  return Math.abs(left - right) <= 1e-9 * Math.max(Math.abs(left), Math.abs(right));
+}
+
+function namedAspectRatio(ratio: number): "16:9" | "9:16" | undefined {
+  if (isClose(ratio, ASPECT_RATIOS["16:9"])) return "16:9";
+  if (isClose(ratio, ASPECT_RATIOS["9:16"])) return "9:16";
   return undefined;
 }
 
@@ -69,26 +84,29 @@ function splitOnce(value: string, separator: string): [string, string, string] {
 }
 
 function responseFormat(params: VideoGenerationParams): GeminiVideoCreateParams["response_format"] {
-  const dimensions = parseVideoSize(params.size);
-  if (dimensions === undefined) return { type: "video" };
-  const [width, height] = dimensions;
-  if (width === height) {
-    throw new InvalidRequestError(
-      `Gemini renders 16:9 or 9:16 video, so size cannot be square: '${params.size}'`,
-    );
+  const geometry = parseVideoGeometry(params);
+  if (geometry === undefined) return { type: "video" };
+  const format: GeminiVideoCreateParams["response_format"] = { type: "video" };
+  if (geometry.ratio !== undefined) {
+    const aspectRatio = namedAspectRatio(geometry.ratio);
+    if (aspectRatio === undefined) {
+      throw new InvalidRequestError(
+        `Gemini renders 16:9 or 9:16 video, not ${JSON.stringify(geometry.described)}`,
+      );
+    }
+    format.aspect_ratio = aspectRatio;
   }
-  const resolution = resolutionName(Math.min(width, height));
-  if (resolution === undefined) {
-    const sizes = Object.keys(RESOLUTIONS).join(", ");
-    throw new InvalidRequestError(
-      `Gemini renders video with a short side of ${sizes} pixels, not '${params.size}'`,
-    );
+  if (geometry.shortSide !== undefined) {
+    const resolution = resolutionName(geometry.shortSide);
+    if (resolution === undefined) {
+      const sizes = Object.keys(RESOLUTIONS).join(", ");
+      throw new InvalidRequestError(
+        `Gemini renders video with a short side of ${sizes} pixels, not ${JSON.stringify(geometry.described)}`,
+      );
+    }
+    format.resolution = resolution;
   }
-  return {
-    aspect_ratio: width > height ? "16:9" : "9:16",
-    resolution,
-    type: "video",
-  };
+  return format;
 }
 
 export function convertVideoParams(
@@ -101,6 +119,9 @@ export function convertVideoParams(
   }
   if (params.negativePrompt !== undefined) {
     throw new UnsupportedParameterError("negative_prompt", providerName);
+  }
+  if (params.referenceAudios !== undefined) {
+    throw new UnsupportedParameterError("reference_audios", providerName);
   }
 
   const parts: GeminiVideoInputPart[] = [];

@@ -16,7 +16,8 @@ const job = await videoGeneration({
   model: "together:ByteDance/Seedance-2.0",
   prompt: "A yellow rubber duck sits on a wooden table while sunlight slowly moves across it.",
   seconds: 5,
-  size: "1280x720",
+  resolution: "720p",
+  aspectRatio: "16:9",
 });
 
 const finished = await pollVideo({
@@ -43,16 +44,20 @@ The same call works against Gemini by changing the model string and dropping `se
 const job = await videoGeneration({
   model: "gemini:gemini-omni-1.1-flash",
   prompt: "A yellow rubber duck sits on a wooden table while sunlight slowly moves across it.",
-  size: "1280x720",
+  resolution: "720p",
+  aspectRatio: "16:9",
 });
 ```
 
+Pass either `size` (`WIDTHxHEIGHT`) or `resolution` and `aspectRatio`, not both.
+
 ## Providers
 
-| Provider | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Gemini   | Gemini Omni Flash through the Interactions API. `size` maps to a `16:9` or `9:16` aspect ratio and a `360p` / `720p` / `1080p` / `4k` resolution, so the short side must be 360, 720, 1080, or 2160 pixels and the video cannot be square. `seconds` and `negativePrompt` raise `UnsupportedParameterError`. Files API URIs download with the API key.                                                                                                                            |
-| Together | `POST /v2/videos` and `GET /v2/videos/{id}` for models such as `ByteDance/Seedance-2.0`. `size` maps to `width` / `height`, `seconds` to a string, and `firstFrame` / `lastFrame` to `frame_images`. Together-only options such as `fps` go in `providerOptions`. Seedance renders fixed resolutions only (for example `864x496`, `1280x720`, `1920x1080`, and their portrait twins); any other `WIDTHxHEIGHT` is sent, but the job then fails with `unsupportedModelResolution`. |
+| Provider  | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| DeepInfra | Native `POST /v1/inference/{model}` after reading the model's input schema from `GET /models/{model}`. Seedance, Wan 3.0, and Wan 2.6 each spell frames, resolution, and audio differently; a field the schema has no name for raises `UnsupportedParameterError`. Renders finish inside the request (default timeout 900 seconds), so `retrieveVideo` only sees jobs started in this process.                                                                                                                                                                                                                                 |
+| Gemini    | Gemini Omni Flash through the Interactions API. `size`, or `resolution` and `aspectRatio`, must be `16:9` or `9:16` with a short side of 360, 720, 1080, or 2160 pixels. `seconds`, `negativePrompt`, and `referenceAudios` raise `UnsupportedParameterError`. Files API URIs download with the API key.                                                                                                                                                                                                                                                                                                                       |
+| Together  | `POST /v2/videos` and `GET /v2/videos/{id}` for models such as `ByteDance/Seedance-2.0`. `size` maps to `width` / `height`, `resolution` and `aspectRatio` to `resolution` / `ratio`, `seconds` to a string, `firstFrame` / `lastFrame` to `frame_images`, and `referenceAudios` to `media.audio_inputs`. Together-only options such as `fps` go in `providerOptions`. Seedance renders fixed resolutions only (for example `864x496`, `1280x720`, `1920x1080`, and their portrait twins); any other `WIDTHxHEIGHT` is sent, but the job then fails with `unsupportedModelResolution`. |
 
 All other providers reject video generation with `UnsupportedOperationError`. OpenAI is among them: the Videos API was removed with no replacement.
 
@@ -68,7 +73,16 @@ const job = await videoGeneration({
 });
 ```
 
-Images are URLs, provider file URIs, or `data:` URLs with base64 content.
+Images are URLs, provider file URIs, or `data:` URLs with base64 content. `referenceAudios` is
+the same for a soundtrack or lip-sync clip; Gemini rejects it.
+
+```ts
+const job = await videoGeneration({
+  model: "together:ByteDance/Seedance-2.5",
+  prompt: "A rapper performs to the beat.",
+  referenceAudios: ["https://example.com/beat.mp3"],
+});
+```
 
 <Callout title="Capability flags are endpoint-level guidance">
   A `true` `videoGeneration` flag does not guarantee that every model offered by the provider

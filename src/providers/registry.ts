@@ -12,6 +12,7 @@ import { AzureAnthropicProvider } from "./azureanthropic.js";
 import { BedrockProvider, isAnthropicBedrockModel } from "./bedrock.js";
 import type { BaseProvider } from "./base.js";
 import { CohereProvider } from "./cohere.js";
+import { DeepinfraProvider } from "./deepinfra.js";
 import { FireworksProvider } from "./fireworks.js";
 import { GeminiProvider } from "./gemini.js";
 import { GitHubProvider } from "./github.js";
@@ -132,19 +133,6 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
     name: "databricks",
   },
   {
-    apiBase: "https://api.deepinfra.com/v1/openai",
-    capabilities: capabilities({
-      embedding: true,
-      moderation: true,
-      reasoning: true,
-      vision: true,
-    }),
-    documentationUrl: "https://deepinfra.com/docs/openai_api",
-    envApiBase: "DEEPINFRA_API_BASE",
-    envApiKey: "DEEPINFRA_API_KEY",
-    name: "deepinfra",
-  },
-  {
     apiBase: "https://api.edenai.run/v3",
     capabilities: capabilities({
       embedding: true,
@@ -169,7 +157,7 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
   },
   {
     apiBase: "https://api.groq.com/openai/v1",
-    capabilities: capabilities({ reasoning: true, responses: true }),
+    capabilities: capabilities({ audioSpeech: true, reasoning: true, responses: true }),
     documentationUrl: "https://console.groq.com/docs/openai",
     envApiBase: "GROQ_BASE_URL",
     envApiKey: "GROQ_API_KEY",
@@ -177,7 +165,11 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
     quirks: {
       reasoningField: "reasoning",
       rejectResponsesMaxToolCalls: true,
+      rejectSpeechInstructions: true,
       rejectStreamingResponseFormat: true,
+      speechInstructionsHint:
+        "Groq steers delivery with bracketed direction tags inside `input`, such as `[cheerful]`.",
+      speechResponseFormats: ["flac", "mp3", "wav"],
     },
     supportsCompletionN: false,
   },
@@ -651,6 +643,7 @@ addBuiltIn("gemini", {
   create: (options) => new GeminiProvider(options),
   metadata: {
     capabilities: capabilities({
+      audioSpeech: true,
       batch: true,
       embedding: true,
       imageEdit: true,
@@ -696,6 +689,7 @@ addBuiltIn("mistral", {
   metadata: {
     apiBase: "https://api.mistral.ai/v1",
     capabilities: capabilities({
+      audioSpeech: true,
       batch: true,
       embedding: true,
       moderation: true,
@@ -710,12 +704,34 @@ addBuiltIn("mistral", {
   },
 });
 
+addBuiltIn("deepinfra", {
+  adapterFamily: "openai",
+  create: (options) => new DeepinfraProvider(options),
+  metadata: {
+    apiBase: "https://api.deepinfra.com/v1/openai",
+    capabilities: capabilities({
+      embedding: true,
+      moderation: true,
+      reasoning: true,
+      videoGeneration: true,
+      vision: true,
+    }),
+    documentationUrl: "https://deepinfra.com/docs/openai_api",
+    envApiBase: "DEEPINFRA_API_BASE",
+    envApiKey: "DEEPINFRA_API_KEY",
+    name: "deepinfra",
+    requiresApiKey: true,
+    supportsCompletionN: true,
+  },
+});
+
 addBuiltIn("together", {
   adapterFamily: "openai",
   create: (options) => new TogetherProvider(options),
   metadata: {
     apiBase: "https://api.together.xyz/v1",
     capabilities: capabilities({
+      audioSpeech: true,
       batch: true,
       embedding: true,
       reasoning: true,

@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { completeProviderMetadata } from "../src/provider-metadata.js";
-import { parseVideoSize, videoJob } from "../src/video.js";
+import { includeWhen } from "../src/utils.js";
+import { parseVideoGeometry, parseVideoSize, videoJob } from "../src/video.js";
 
 import {
   AnyLLM,
@@ -120,11 +121,71 @@ describe("video types and size parsing", () => {
   });
 
   it("rejects malformed sizes", () => {
-    for (const size of ["720p", "1280", "x720", "1280x", "ax720", "1280x720x1"]) {
+    for (const size of [
+      "720p",
+      "1280",
+      "x720",
+      "1280x",
+      "ax720",
+      "1280x720x1",
+      "1280x0",
+      "0x720",
+    ]) {
       expect(() => parseVideoSize(size)).toThrow(InvalidRequestError);
       expect(() => parseVideoSize(size)).toThrow(/WIDTHxHEIGHT/u);
     }
   });
+
+  it("returns undefined without a size or tier", () => {
+    expect(parseVideoGeometry({})).toBeUndefined();
+  });
+
+  it("reads a size as short side, ratio, and dimensions", () => {
+    const geometry = parseVideoGeometry({ size: "720x1280" });
+    expect(geometry).toMatchObject({
+      described: "720x1280",
+      dimensions: [720, 1280],
+      shortSide: 720,
+    });
+    expect(geometry?.ratio).toBeCloseTo(9 / 16);
+  });
+
+  it.each([
+    ["480p", "16:9", 480, 16 / 9, "480p 16:9"],
+    ["1080P", undefined, 1080, undefined, "1080P"],
+    ["4k", "9:16", 2160, 9 / 16, "4k 9:16"],
+    [undefined, "1:1", undefined, 1, "1:1"],
+  ] as const)(
+    "reads resolution %s and aspectRatio %s",
+    (resolution, aspectRatio, shortSide, ratio, described) => {
+      const geometry = parseVideoGeometry({
+        ...includeWhen(aspectRatio !== undefined, { aspectRatio }),
+        ...includeWhen(resolution !== undefined, { resolution }),
+      });
+      expect(geometry?.described).toBe(described);
+      expect(geometry?.shortSide).toBe(shortSide);
+      expect(geometry?.dimensions).toBeUndefined();
+      if (ratio === undefined) expect(geometry?.ratio).toBeUndefined();
+      else expect(geometry?.ratio).toBeCloseTo(ratio);
+    },
+  );
+
+  it("rejects combining size with a tier or ratio", () => {
+    expect(() => parseVideoGeometry({ aspectRatio: "16:9", size: "854x480" })).toThrow(
+      /either size or resolution and aspect_ratio, not both/u,
+    );
+  });
+
+  it.each(["480", "hd", "p720", "4K2"])("rejects malformed resolution %s", (resolution) => {
+    expect(() => parseVideoGeometry({ resolution })).toThrow(/such as 720p, or 4k/u);
+  });
+
+  it.each(["16x9", "16:", "wide", "16:0", "0:9"])(
+    "rejects malformed aspectRatio %s",
+    (aspectRatio) => {
+      expect(() => parseVideoGeometry({ aspectRatio })).toThrow(/such as 16:9/u);
+    },
+  );
 });
 
 describe("AnyLLM video facade", () => {

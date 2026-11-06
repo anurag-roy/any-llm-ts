@@ -3,7 +3,12 @@ import { Mistral } from "@mistralai/mistralai";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 
-import { AnyLLM, BatchNotCompleteError, MistralProvider } from "../src/index.js";
+import {
+  AnyLLM,
+  BatchNotCompleteError,
+  MistralProvider,
+  UnsupportedParameterError,
+} from "../src/index.js";
 import { dropEmptyAssistantMessages } from "../src/providers/mistral.js";
 import { createProvider } from "../src/providers/registry.js";
 
@@ -31,6 +36,7 @@ function batch(overrides: JsonObject = {}) {
 }
 
 interface MistralTestOverrides {
+  audio?: object;
   batch?: object;
   files?: object;
 }
@@ -47,6 +53,7 @@ function client(overrides: MistralTestOverrides = {}): Mistral {
   };
   const filesService = overrides.files ?? { download: vi.fn(), upload: vi.fn() };
   Object.defineProperties(instance, {
+    audio: { configurable: true, value: overrides.audio ?? { speech: { complete: vi.fn() } } },
     batch: { configurable: true, value: batchService },
     files: { configurable: true, value: filesService },
   });
@@ -269,6 +276,7 @@ describe("Mistral prompt cache key", () => {
     const provider = new MistralProvider({ apiKey: "secret" });
     expect(provider.metadata.promptCacheKeySupport).toBe("supported");
     expect(AnyLLM.getProviderMetadata("mistral").promptCacheKeySupport).toBe("supported");
+    expect(AnyLLM.getProviderMetadata("mistral").capabilities.audioSpeech).toBe(true);
     Object.defineProperty(provider, "client", {
       value: { chat: { completions: { create } } },
     });
@@ -332,5 +340,121 @@ describe("Mistral empty assistant messages", () => {
       { content: "", reasoning: "think", role: "assistant" },
       { content: "next", role: "user" },
     ]);
+  });
+});
+
+describe("Mistral speech", () => {
+  it("sends voice as voiceId and decodes base64 audio_data", async () => {
+    const complete = vi.fn().mockResolvedValue({
+      audioData: Buffer.from("audio-bytes").toString("base64"),
+    });
+    const provider = new MistralProvider(
+      { apiKey: "secret" },
+      client({ audio: { speech: { complete } } }),
+    );
+    await expect(
+      provider.speech({
+        input: "Hello",
+        model: "voxtral-mini-tts-2603",
+        voice: "en_paul_neutral",
+      }),
+    ).resolves.toEqual(new Uint8Array(Buffer.from("audio-bytes")));
+    expect(complete).toHaveBeenCalledWith({
+      input: "Hello",
+      model: "voxtral-mini-tts-2603",
+      voiceId: "en_paul_neutral",
+    });
+  });
+
+  it.each(["pcm", "wav", "mp3", "flac", "opus"] as const)(
+    "forwards supported format %s",
+    async (responseFormat) => {
+      const complete = vi
+        .fn()
+        .mockResolvedValue({ audio_data: Buffer.from("x").toString("base64") });
+      await new MistralProvider(
+        { apiKey: "secret" },
+        client({ audio: { speech: { complete } } }),
+      ).speech({
+        input: "Hello",
+        model: "voxtral-mini-tts-2603",
+        responseFormat,
+        voice: "en_paul_neutral",
+      });
+      expect(complete.mock.calls[0]?.[0]).toMatchObject({ responseFormat });
+    },
+  );
+
+  it("forwards extra kwargs and translates timeout to timeout_ms", async () => {
+    const complete = vi.fn().mockResolvedValue({ audioData: Buffer.from("x").toString("base64") });
+    await new MistralProvider(
+      { apiKey: "secret" },
+      client({ audio: { speech: { complete } } }),
+    ).speech({
+      input: "Hello",
+      model: "voxtral-mini-tts-2603",
+      providerOptions: { ref_audio: "base64-clip", timeout: 2.5 },
+      voice: "en_paul_neutral",
+    });
+    expect(complete.mock.calls[0]?.[0]).toMatchObject({
+      ref_audio: "base64-clip",
+      timeout_ms: 2_500,
+    });
+    expect(complete.mock.calls[0]?.[0]).not.toHaveProperty("timeout");
+  });
+
+  it("rejects aac, stream, instructions, and speed", async () => {
+    const complete = vi.fn();
+    const provider = new MistralProvider(
+      { apiKey: "secret" },
+      client({ audio: { speech: { complete } } }),
+    );
+    await expect(
+      provider.speech({
+        input: "Hello",
+        model: "voxtral-mini-tts-2603",
+        responseFormat: "aac",
+        voice: "en_paul_neutral",
+      }),
+    ).rejects.toBeInstanceOf(UnsupportedParameterError);
+    await expect(
+      provider.speech({
+        input: "Hello",
+        model: "voxtral-mini-tts-2603",
+        providerOptions: { stream: true },
+        voice: "en_paul_neutral",
+      }),
+    ).rejects.toThrow(/stream/u);
+    await expect(
+      provider.speech({
+        input: "Hello",
+        instructions: "Speak slowly",
+        model: "voxtral-mini-tts-2603",
+        voice: "en_paul_neutral",
+      }),
+    ).rejects.toThrow(/instructions/u);
+    await expect(
+      provider.speech({
+        input: "Hello",
+        model: "voxtral-mini-tts-2603",
+        speed: 1.5,
+        voice: "en_paul_neutral",
+      }),
+    ).rejects.toThrow(/speed/u);
+    expect(complete).not.toHaveBeenCalled();
+  });
+
+  it("forwards stream false", async () => {
+    const complete = vi.fn().mockResolvedValue({ audioData: Buffer.from("x").toString("base64") });
+    await new MistralProvider(
+      { apiKey: "secret" },
+      client({ audio: { speech: { complete } } }),
+    ).speech({
+      input: "Hello",
+      model: "voxtral-mini-tts-2603",
+      providerOptions: { stream: false },
+      voice: "en_paul_neutral",
+    });
+    expect(complete.mock.calls[0]?.[0]).toMatchObject({ stream: false });
   });
 });

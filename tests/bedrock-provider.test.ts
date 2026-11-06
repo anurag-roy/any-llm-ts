@@ -791,7 +791,7 @@ describe("Bedrock provider", () => {
         model: "model",
       }),
     ).toThrow(InvalidRequestError);
-    for (const model of ["xai.grok-4-fast", "deepseek.v3-v1:0", "openai.gpt-oss-120b-1:0"]) {
+    for (const model of ["xai.grok-4-fast", "deepseek.v3-v1:0"]) {
       expect(() =>
         bedrock.completion({
           messages: [{ content: "hi", role: "user" }],
@@ -805,7 +805,7 @@ describe("Bedrock provider", () => {
     );
   });
 
-  it.each(["xai.grok-4-fast", "deepseek.v3-v1:0", "openai.gpt-oss-120b-1:0"])(
+  it.each(["xai.grok-4-fast", "deepseek.v3-v1:0"])(
     "refuses Claude reasoning_config for non-Claude model %s",
     (model) => {
       expect(() =>
@@ -817,6 +817,68 @@ describe("Bedrock provider", () => {
       ).toThrow(/reasoningEffort/u);
     },
   );
+
+  it.each([
+    "openai.gpt-oss-20b-1:0",
+    "us.openai.gpt-oss-120b-1:0",
+    "openai.gpt-oss-safeguard-120b",
+  ])("sends reasoning_effort for gpt-oss model %s", async (model) => {
+    const send = vi.fn().mockResolvedValue({
+      output: { message: { content: [{ text: "ok" }], role: "assistant" } },
+      stopReason: "end_turn",
+    });
+    await provider(send).completion({
+      messages: [{ content: "hi", role: "user" }],
+      model,
+      reasoningEffort: "low",
+    });
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    const command = send.mock.calls[0]?.[0] as ConverseCommand;
+    expect(command.input.additionalModelRequestFields).toEqual({ reasoning_effort: "low" });
+  });
+
+  it.each(["minimal", "xhigh"] as const)(
+    "refuses gpt-oss reasoningEffort %s that has no Bedrock level",
+    (effort) => {
+      expect(() =>
+        provider().completion({
+          messages: [{ content: "hi", role: "user" }],
+          model: "openai.gpt-oss-20b-1:0",
+          reasoningEffort: effort,
+        }),
+      ).toThrow(`reasoning_effort '${effort}'`);
+    },
+  );
+
+  it("keeps a forced tool with gpt-oss reasoningEffort", async () => {
+    const send = vi.fn().mockResolvedValue({
+      output: { message: { content: [{ text: "ok" }], role: "assistant" } },
+      stopReason: "end_turn",
+    });
+    await provider(send).completion({
+      messages: [{ content: "hi", role: "user" }],
+      model: "openai.gpt-oss-20b-1:0",
+      reasoningEffort: "low",
+      toolChoice: "required",
+      tools: [
+        { function: { name: "get_weather", parameters: { type: "object" } }, type: "function" },
+      ],
+    });
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    const command = send.mock.calls[0]?.[0] as ConverseCommand;
+    expect(command.input.toolConfig).toMatchObject({ toolChoice: { any: {} } });
+    expect(command.input.additionalModelRequestFields).toEqual({ reasoning_effort: "low" });
+  });
+
+  it("refuses responseFormat for gpt-oss", () => {
+    expect(() =>
+      provider().completion({
+        messages: [{ content: "hi", role: "user" }],
+        model: "openai.gpt-oss-20b-1:0",
+        responseFormat: { json_schema: { schema: { type: "object" } }, type: "json_schema" },
+      }),
+    ).toThrow(/responseFormat/u);
+  });
 
   it.each([
     "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/a1b2c3d4e5f6",
