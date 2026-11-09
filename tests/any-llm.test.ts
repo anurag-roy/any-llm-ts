@@ -353,6 +353,18 @@ describe("AnyLLM registry and facade", () => {
     ).rejects.toBeInstanceOf(UnsupportedParameterError);
   });
 
+  it("rejects inferenceGeo for providers that do not support it", async () => {
+    const llm = AnyLLM.fromProvider(new FakeProvider());
+    await expect(
+      llm.messages({
+        inferenceGeo: "us",
+        maxTokens: 10,
+        messages: [{ content: "Hi", role: "user" }],
+        model: "model-a",
+      }),
+    ).rejects.toBeInstanceOf(UnsupportedParameterError);
+  });
+
   it("parses recommended and legacy model syntax", () => {
     expect(AnyLLM.splitModelProvider("openai:gpt-4.1")).toEqual({
       model: "gpt-4.1",

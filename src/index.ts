@@ -2,6 +2,7 @@ export { AnyLLM } from "./any-llm.js";
 export { ChatCompletionAccumulator, accumulateChunks } from "./streaming.js";
 export {
   cancelBatch,
+  completeVideoJob,
   completion,
   createBatch,
   deleteFile,
@@ -29,6 +30,7 @@ export {
 } from "./api.js";
 export type {
   DirectBatchParams,
+  DirectCompleteVideoJobParams,
   DirectCreateBatchParams,
   DirectDownloadFileParams,
   DirectDownloadVideoParams,

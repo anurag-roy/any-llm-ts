@@ -1,7 +1,7 @@
 {
   "source": {
     "repository": "mozilla-ai/any-llm",
-    "commit": "f23ff3ade108efabef3114d5a28f2f4159065aa4"
+    "commit": "fc46b0454bb390acdba1c9198d5c591605520076"
   },
   "providers": [
     "anthropic",
@@ -116,6 +116,7 @@
     "rerank",
     "videoGeneration",
     "retrieveVideo",
+    "completeVideoJob",
     "pollVideo",
     "downloadVideo",
     "listModels",

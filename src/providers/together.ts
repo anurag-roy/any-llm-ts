@@ -1,5 +1,5 @@
 import { includeWhen, parseJsonObject, parseJsonObjectArray } from "../utils.js";
-import type { JsonObject } from "../types.js";
+import type { JsonObject, JsonValue } from "../types.js";
 import { isFunction, isJsonObject, isNumber, isObject, isString } from "../utils.js";
 import { basename } from "node:path";
 import { readFile } from "node:fs/promises";
@@ -25,9 +25,12 @@ import type {
   VideoStatus,
 } from "../types.js";
 import {
+  checkProviderOptions,
+  mergeProviderOptions,
   optionalEpoch,
   optionalVideoSeconds,
   parseVideoGeometry,
+  type SharedVideoFields,
   videoJob,
   videoOutput,
 } from "../video.js";
@@ -387,6 +390,13 @@ export interface TogetherVideoCreateRequest {
   timeout?: number;
 }
 
+function jsonObjectList(value: JsonValue | undefined): JsonObject[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) =>
+    isObject(entry) && !Array.isArray(entry) ? [parseJsonObject(entry)] : [],
+  );
+}
+
 export function convertTogetherVideoParams(
   params: VideoGenerationParams,
 ): TogetherVideoCreateRequest {
@@ -397,44 +407,80 @@ export function convertTogetherVideoParams(
     ? Object.fromEntries(Object.entries(extras.extra_body))
     : {};
   delete extras.extra_body;
-  const frameImages = Array.isArray(extras.frame_images) ? [...extras.frame_images] : [];
-  delete extras.frame_images;
-  if (params.firstFrame !== undefined) {
-    frameImages.push({ frame: "first", input_image: params.firstFrame });
-  }
-  if (params.lastFrame !== undefined) {
-    frameImages.push({ frame: "last", input_image: params.lastFrame });
-  }
+  const fields: SharedVideoFields = { prompt: ["prompt", params.prompt] };
+  const bodyFields: SharedVideoFields = {};
+  const mediaFields: SharedVideoFields = {};
+  if (params.seconds !== undefined) fields.seconds = ["seconds", String(params.seconds)];
   const geometry = parseVideoGeometry(params);
-  if (geometry?.shortSide !== undefined && params.resolution !== undefined) {
-    extraBody.resolution = `${geometry.shortSide}p`;
+  if (geometry !== undefined) {
+    if (geometry.dimensions !== undefined) {
+      const [width, height] = geometry.dimensions;
+      fields.width = ["size", width];
+      fields.height = ["size", height];
+    }
+    if (params.resolution !== undefined) {
+      bodyFields.resolution = ["resolution", `${String(geometry.shortSide)}p`];
+    }
+    if (params.aspectRatio !== undefined) {
+      bodyFields.ratio = ["aspect_ratio", params.aspectRatio];
+    }
   }
-  if (params.aspectRatio !== undefined) extraBody.ratio = params.aspectRatio;
+  if (params.generateAudio !== undefined) {
+    bodyFields.generate_audio = ["generate_audio", params.generateAudio];
+  }
+  if (params.seed !== undefined) fields.seed = ["seed", params.seed];
+  if (params.negativePrompt !== undefined) {
+    fields.negative_prompt = ["negative_prompt", params.negativePrompt];
+  }
+  if (params.referenceImages !== undefined) {
+    fields.reference_images = ["reference_images", params.referenceImages];
+  }
   if (params.referenceAudios !== undefined) {
-    const media: JsonObject = isJsonObject(extraBody.media)
-      ? Object.fromEntries(Object.entries(extraBody.media))
-      : {};
-    extraBody.media = { ...media, audio_inputs: params.referenceAudios };
+    mediaFields.audio_inputs = ["reference_audios", params.referenceAudios];
   }
+  if (params.referenceVideos !== undefined) {
+    mediaFields.reference_videos = [
+      "reference_videos",
+      params.referenceVideos.map((video) => ({ video })),
+    ];
+  }
+
+  checkProviderOptions(params, fields, extraBody);
+  const extraFrameImages = jsonObjectList(extras.frame_images);
+  delete extras.frame_images;
+  const bodyFrameImages = jsonObjectList(extraBody.frame_images);
+  delete extraBody.frame_images;
+  const frameImages = [...extraFrameImages, ...bodyFrameImages];
+  for (const [role, parameterName, image] of [
+    ["first", "first_frame", params.firstFrame],
+    ["last", "last_frame", params.lastFrame],
+  ] as const) {
+    if (image === undefined) continue;
+    const field = `frame_images[${role}]`;
+    const passed = frameImages
+      .filter((entry) => entry.frame === role)
+      .flatMap((entry) => (entry.input_image === undefined ? [] : [entry.input_image]));
+    checkProviderOptions(
+      params,
+      { [field]: [parameterName, [image]] },
+      passed.length > 0 ? { [field]: passed } : {},
+    );
+    if (passed.length === 0) frameImages.push({ frame: role, input_image: image });
+  }
+  const callerMedia = isJsonObject(extraBody.media)
+    ? Object.fromEntries(Object.entries(extraBody.media))
+    : {};
+  delete extraBody.media;
+  const media = mergeProviderOptions(params, mediaFields, callerMedia);
+  const mergedBody = mergeProviderOptions(params, bodyFields, extraBody);
+  if (Object.keys(media).length > 0) mergedBody.media = media;
+  const mergedFields = mergeProviderOptions(params, fields, extras);
   return {
     body: {
       model: params.model,
-      prompt: params.prompt,
-      ...includeWhen(params.seconds !== undefined, { seconds: String(params.seconds) }),
-      ...includeWhen(geometry?.dimensions !== undefined, {
-        height: geometry?.dimensions?.[1],
-        width: geometry?.dimensions?.[0],
-      }),
-      ...includeWhen(params.seed !== undefined, { seed: params.seed }),
-      ...includeWhen(params.negativePrompt !== undefined, {
-        negative_prompt: params.negativePrompt,
-      }),
-      ...includeWhen(params.referenceImages !== undefined, {
-        reference_images: params.referenceImages,
-      }),
+      ...mergedFields,
       ...includeWhen(frameImages.length > 0, { frame_images: frameImages }),
-      ...extraBody,
-      ...extras,
+      ...mergedBody,
     },
     ...includeWhen(timeout !== undefined, { timeout }),
   };

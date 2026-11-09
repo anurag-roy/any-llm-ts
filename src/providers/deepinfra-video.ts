@@ -9,8 +9,16 @@ import type {
   VideoJob,
   VideoStatus,
 } from "../types.js";
-import { includeWhen, isObject, isString, parseJsonObject } from "../utils.js";
-import { parseVideoGeometry, videoJob, videoOutput } from "../video.js";
+import { includeWhen, isBoolean, isNumber, isObject, isString, parseJsonObject } from "../utils.js";
+import {
+  checkProviderOptions,
+  isTerminalVideoStatus,
+  mergeProviderOptions,
+  parseVideoGeometry,
+  type SharedVideoFields,
+  videoJob,
+  videoOutput,
+} from "../video.js";
 
 const ASPECT_RATIO_TOLERANCE = 0.03;
 const FRAME_FIELDS = [
@@ -27,10 +35,25 @@ const FRAME_FIELDS = [
     value: (params: VideoGenerationParams) => params.lastFrame,
   },
 ] as const;
-const REFERENCE_IMAGES_FIELD = "reference_images";
 const REFERENCE_AUDIOS_FIELD = "reference_audios";
 const SINGLE_AUDIO_FIELDS = ["audio_url", "driving_audio"] as const;
 const RATIO_FIELDS = ["aspect_ratio", "ratio"] as const;
+function mediaParameter(kind: string): string | undefined {
+  switch (kind) {
+    case "first_frame":
+    case "last_frame":
+      return kind;
+    case "reference_audio":
+      return "reference_audios";
+    case "reference_image":
+      return "reference_images";
+    case "reference_video":
+      return "reference_videos";
+    default:
+      return undefined;
+  }
+}
+const GENERATE_AUDIO_FIELDS = ["generate_audio", "generate_audio_switch", "audio"] as const;
 const STATUS_MAP = {
   failed: "failed",
   queued: "queued",
@@ -101,7 +124,7 @@ export class VideoSchema {
 }
 
 class BodyBuilder {
-  readonly body: JsonObject = {};
+  readonly fields: SharedVideoFields = {};
   readonly media: JsonObject[] = [];
   readonly params: VideoGenerationParams;
   readonly providerName: string;
@@ -111,7 +134,7 @@ class BodyBuilder {
     this.params = params;
     this.schema = schema;
     this.providerName = providerName;
-    this.body.prompt = params.prompt;
+    this.fields.prompt = ["prompt", params.prompt];
   }
 
   reject(parameterName: string): never {
@@ -124,7 +147,15 @@ class BodyBuilder {
 
   plain(parameterName: string, field: string, value: JsonValue): void {
     if (!Object.hasOwn(this.schema.fields, field)) this.reject(parameterName);
-    this.body[field] = value;
+    this.fields[field] = [parameterName, value];
+  }
+
+  switch(parameterName: string, fieldNames: readonly string[], value: boolean): void {
+    const field = fieldNames.find(
+      (name) => fieldObject(this.schema.fields[name])?.type === "boolean",
+    );
+    if (field === undefined) this.reject(parameterName);
+    this.fields[field] = [parameterName, value];
   }
 
   image(
@@ -135,7 +166,7 @@ class BodyBuilder {
   ): void {
     const field = fieldNames.find((name) => Object.hasOwn(this.schema.fields, name));
     if (field !== undefined) {
-      this.body[field] = value;
+      this.fields[field] = [parameterName, value];
       return;
     }
     if (this.schema.mediaTypes().includes(mediaType)) {
@@ -145,21 +176,21 @@ class BodyBuilder {
     this.reject(parameterName);
   }
 
-  referenceImages(images: string[]): void {
-    if (Object.hasOwn(this.schema.fields, REFERENCE_IMAGES_FIELD)) {
-      this.body[REFERENCE_IMAGES_FIELD] = [...images];
+  references(parameterName: string, urls: string[], mediaType: string): void {
+    if (Object.hasOwn(this.schema.fields, parameterName)) {
+      this.fields[parameterName] = [parameterName, [...urls]];
       return;
     }
-    if (this.schema.mediaTypes().includes("reference_image")) {
-      this.media.push(...images.map((image) => ({ type: "reference_image", url: image })));
+    if (this.schema.mediaTypes().includes(mediaType)) {
+      this.media.push(...urls.map((url) => ({ type: mediaType, url })));
       return;
     }
-    this.reject("reference_images");
+    this.reject(parameterName);
   }
 
   referenceAudios(audios: string[]): void {
     if (Object.hasOwn(this.schema.fields, REFERENCE_AUDIOS_FIELD)) {
-      this.body[REFERENCE_AUDIOS_FIELD] = [...audios];
+      this.fields[REFERENCE_AUDIOS_FIELD] = ["reference_audios", [...audios]];
       return;
     }
     if (this.schema.mediaTypes().includes("reference_audio")) {
@@ -173,7 +204,7 @@ class BodyBuilder {
           `${this.schema.model} takes one audio clip as ${field}, not ${String(audios.length)}`,
         );
       }
-      this.body[field] = audios[0];
+      this.fields[field] = ["reference_audios", audios[0] ?? ""];
       return;
     }
     this.reject("reference_audios");
@@ -196,7 +227,7 @@ class BodyBuilder {
           `${this.schema.model} renders ${sizes.join(", ")}, not ${JSON.stringify(geometry.described)}`,
         );
       }
-      this.body.size = size;
+      this.fields.size = ["size", size];
       return;
     }
     if (geometry.shortSide !== undefined) {
@@ -216,7 +247,7 @@ class BodyBuilder {
         `${this.schema.model} renders video with a resolution of ${resolutions.join(", ")}, not ${JSON.stringify(described)}`,
       );
     }
-    this.body.resolution = resolution;
+    this.fields.resolution = [this.params.size === undefined ? "resolution" : "size", resolution];
   }
 
   ratio(ratio: number, described: string): void {
@@ -246,7 +277,10 @@ class BodyBuilder {
         `${this.schema.model} renders video with an aspect ratio of ${ratios.map((entry) => entry.name).join(", ")}, not ${JSON.stringify(described)}`,
       );
     }
-    this.body[ratioField] = nearest.name;
+    this.fields[ratioField] = [
+      this.params.size === undefined ? "aspect_ratio" : "size",
+      nearest.name,
+    ];
   }
 
   build(kwargs: JsonObject): JsonObject {
@@ -263,19 +297,52 @@ class BodyBuilder {
         this.image(frame.parameterName, value, frame.fieldNames, frame.mediaType);
     }
     if (params.referenceImages !== undefined && params.referenceImages.length > 0) {
-      this.referenceImages(params.referenceImages);
+      this.references("reference_images", params.referenceImages, "reference_image");
     }
     if (params.referenceAudios !== undefined && params.referenceAudios.length > 0) {
       this.referenceAudios(params.referenceAudios);
     }
-    const extraMedia = Array.isArray(kwargs.media) ? kwargs.media : [];
+    if (params.referenceVideos !== undefined && params.referenceVideos.length > 0) {
+      this.references("reference_videos", params.referenceVideos, "reference_video");
+    }
+    if (params.generateAudio !== undefined) {
+      this.switch("generate_audio", GENERATE_AUDIO_FIELDS, params.generateAudio);
+    }
+    const callerMedia = Array.isArray(kwargs.media) ? kwargs.media : [];
     const rest = { ...kwargs };
     delete rest.media;
-    for (const item of extraMedia) {
-      if (isObject(item) && !Array.isArray(item)) this.media.push(parseJsonObject(item));
+    const produced: Record<string, JsonValue[]> = {};
+    for (const item of this.media) {
+      if (!isString(item.type)) continue;
+      (produced[item.type] ??= []).push(item.url ?? null);
     }
-    if (this.media.length > 0) this.body.media = this.media;
-    return { ...this.body, ...rest };
+    const passed: Record<string, JsonValue[]> = {};
+    const callerItems: JsonObject[] = [];
+    for (const item of callerMedia) {
+      if (!isObject(item) || Array.isArray(item)) continue;
+      const record = parseJsonObject(item);
+      callerItems.push(record);
+      const kind = isString(record.type) ? record.type : "";
+      (passed[kind] ??= []).push(record.url ?? null);
+    }
+    const producedFields: SharedVideoFields = {};
+    const passedOptions: JsonObject = {};
+    for (const [kind, urls] of Object.entries(produced)) {
+      const parameterName = mediaParameter(kind);
+      if (parameterName === undefined) continue;
+      producedFields[`media[${kind}]`] = [parameterName, urls];
+    }
+    for (const [kind, urls] of Object.entries(passed)) {
+      passedOptions[`media[${kind}]`] = urls;
+    }
+    checkProviderOptions(params, producedFields, passedOptions);
+    const media = [
+      ...this.media.filter((item) => !isString(item.type) || !Object.hasOwn(passed, item.type)),
+      ...callerItems,
+    ];
+    const body = mergeProviderOptions(params, this.fields, rest);
+    if (media.length > 0) body.media = media;
+    return body;
   }
 }
 
@@ -295,6 +362,31 @@ export function absoluteVideoUrl(url: string, apiBase: string): string {
   const rest = index === -1 ? apiBase : apiBase.slice(index + 3);
   const host = rest.split("/")[0] ?? "";
   return `${scheme}://${host}/${url.replace(/^\/+/u, "")}`;
+}
+
+function billedNumber(value: JsonValue | undefined): number | undefined {
+  if (isBoolean(value) || !isNumber(value) || !Number.isFinite(value)) return undefined;
+  return value;
+}
+
+export function callbackResponse(payload: JsonObject): JsonObject {
+  if (!isString(payload.request_id) || payload.request_id.length === 0) {
+    throw new InvalidRequestError(
+      "The DeepInfra webhook callback has no request_id, so it names no video job",
+    );
+  }
+  let results: JsonObject = {};
+  if (payload.results !== undefined && payload.results !== null) {
+    if (!isObject(payload.results) || Array.isArray(payload.results)) {
+      throw new InvalidRequestError(
+        "The results of a DeepInfra webhook callback are a JSON object, not an array or other value",
+      );
+    }
+    results = parseJsonObject(payload.results);
+  }
+  const rest = { ...payload };
+  delete rest.results;
+  return { ...rest, ...results };
 }
 
 export function convertInferenceResponse(
@@ -328,12 +420,22 @@ export function convertInferenceResponse(
           : JSON.stringify(detail),
     };
   }
+  let cost: number | undefined;
+  let tokens: number | undefined;
+  if (isTerminalVideoStatus(status)) {
+    cost = billedNumber(inferenceStatus.cost);
+    const billedTokens = billedNumber(response.out_tokens);
+    tokens =
+      billedTokens !== undefined && Number.isInteger(billedTokens) ? billedTokens : undefined;
+  }
   return videoJob({
     id: isString(response.request_id)
       ? response.request_id
       : `deepinfra-${randomUUID().replaceAll("-", "")}`,
     model,
     status,
+    ...includeWhen(cost !== undefined, { cost }),
+    ...includeWhen(tokens !== undefined, { tokens }),
     ...includeWhen(error !== undefined, { error }),
     outputs,
   });

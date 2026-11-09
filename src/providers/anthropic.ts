@@ -698,6 +698,7 @@ export function nativeMessagesRequest(params: MessagesParams) {
     model: params.model,
     output_config:
       params.outputFormat === undefined ? undefined : normalizeOutputConfig(params.outputFormat),
+    ...includeWhen(params.inferenceGeo !== undefined, { inference_geo: params.inferenceGeo }),
     service_tier: params.serviceTier,
     stop_sequences: params.stopSequences,
     stream: params.stream,
@@ -788,6 +789,8 @@ export function nativeMessage<Value>(value: Value): MessageResponse {
   if (isNumber(usage.cache_read_input_tokens)) {
     normalizedUsage.cacheReadInputTokens = usage.cache_read_input_tokens;
   }
+  if (isString(usage.inference_geo)) normalizedUsage.inferenceGeo = usage.inference_geo;
+  if (isString(usage.service_tier)) normalizedUsage.serviceTier = usage.service_tier;
   if (isObject(usage.cache_creation) && !Array.isArray(usage.cache_creation)) {
     const ttl = parseJsonObject(usage.cache_creation);
     const ephemeral5m = isNumber(ttl.ephemeral_5m_input_tokens)
@@ -859,6 +862,8 @@ export function nativeMessageEvent<Value>(value: Value): MessageStreamEvent {
     if (isNumber(usage.cache_read_input_tokens)) {
       normalizedUsage.cacheReadInputTokens = usage.cache_read_input_tokens;
     }
+    if (isString(usage.inference_geo)) normalizedUsage.inferenceGeo = usage.inference_geo;
+    if (isString(usage.service_tier)) normalizedUsage.serviceTier = usage.service_tier;
     const stopSequence = rawDelta.stop_sequence;
     const normalizedDelta: Extract<MessageStreamEvent, { type: "message_delta" }>["delta"] = {
       stopReason: messageStopReason(rawDelta.stop_reason),
@@ -978,16 +983,19 @@ function anthropicUsage(value: JsonObject): CompletionUsage {
           ...includeWhen(!(cacheWrite === undefined), { cacheWriteTokens: cacheWrite }),
           ...includeWhen(!(cacheCreationTokenDetails === undefined), { cacheCreationTokenDetails }),
         };
+  const inferenceGeo = isString(value.inference_geo) ? value.inference_geo : undefined;
   return {
     completionTokens,
     promptTokens,
     totalTokens: completionTokens + promptTokens,
     ...includeWhen(!(promptTokensDetails === undefined), { promptTokensDetails }),
+    ...includeWhen(inferenceGeo !== undefined, { inferenceGeo }),
   };
 }
 
 export class AnthropicProvider extends BaseProvider {
   override readonly supportsMessagesStructuredOutputStreaming = true;
+  override readonly supportsMessagesInferenceGeo: boolean;
   readonly metadata: ProviderMetadata;
   private readonly client: Anthropic;
   private readonly providerName: string;
@@ -999,6 +1007,7 @@ export class AnthropicProvider extends BaseProvider {
   ) {
     super(options);
     this.providerName = config.name ?? "anthropic";
+    this.supportsMessagesInferenceGeo = this.providerName === "anthropic";
     const apiBase =
       options.apiBase ?? getEnvironmentVariable(config.envApiBase ?? "ANTHROPIC_BASE_URL");
     // SAFETY: The provider contract establishes the asserted representation at this boundary.
@@ -1320,6 +1329,8 @@ export class AnthropicProvider extends BaseProvider {
           ]
         : [],
     );
+    const usage = parseJsonObject(response.usage);
+    const serviceTier = isString(usage.service_tier) ? usage.service_tier : undefined;
     return {
       choices: [
         {
@@ -1345,7 +1356,8 @@ export class AnthropicProvider extends BaseProvider {
       object: "chat.completion",
       provider: this.providerName,
       raw: value,
-      usage: anthropicUsage(parseJsonObject(response.usage)),
+      usage: anthropicUsage(usage),
+      ...includeWhen(serviceTier !== undefined, { serviceTier }),
     };
   }
 
@@ -1358,6 +1370,8 @@ export class AnthropicProvider extends BaseProvider {
     let created = unixTimestamp();
     let inputTokens = 0;
     let pendingUsage: CompletionUsage | undefined;
+    let inferenceGeo: string | undefined;
+    let serviceTier: string | undefined;
 
     for await (const event of iterateClosing(stream)) {
       if (event.type === "message_start") {
@@ -1367,6 +1381,10 @@ export class AnthropicProvider extends BaseProvider {
         model = stringValue(message.model, model);
         created = unixTimestamp();
         inputTokens = Number(messageUsage.input_tokens ?? 0);
+        inferenceGeo = isString(messageUsage.inference_geo)
+          ? messageUsage.inference_geo
+          : undefined;
+        serviceTier = isString(messageUsage.service_tier) ? messageUsage.service_tier : undefined;
         yield this.chunk(id, model, created, { role: "assistant" }, null, event);
         continue;
       }
@@ -1469,10 +1487,13 @@ export class AnthropicProvider extends BaseProvider {
       }
       if (event.type === "message_stop") {
         const message = parseOptionalJsonObject(event.message);
-        const usage =
+        let usage =
           message?.usage === undefined
             ? pendingUsage
             : anthropicUsage(parseJsonObject(message.usage));
+        if (usage !== undefined && inferenceGeo !== undefined && usage.inferenceGeo === undefined) {
+          usage = { ...usage, inferenceGeo };
+        }
         yield {
           choices: [],
           created,
@@ -1481,6 +1502,7 @@ export class AnthropicProvider extends BaseProvider {
           object: "chat.completion.chunk",
           provider: this.providerName,
           raw: event,
+          ...includeWhen(serviceTier !== undefined, { serviceTier }),
           ...includeWhen(!(usage === undefined), { usage }),
         };
       }

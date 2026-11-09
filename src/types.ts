@@ -209,6 +209,8 @@ export interface CompletionUsage {
   completionTime?: number;
   completionTokensDetails?: JsonObject;
   evalDuration?: number;
+  /** The region the request ran in, as Anthropic reports it (such as `us` or `global`). */
+  inferenceGeo?: string;
   loadDuration?: number;
   promptEvalDuration?: number;
   promptTime?: number;
@@ -491,6 +493,10 @@ export interface VideoJob {
   seconds?: number;
   /** `WIDTHxHEIGHT` of the output, when the provider reports it. */
   size?: string;
+  /** What the provider charged for the job, in USD, when it reports it. */
+  cost?: number;
+  /** The units the provider bills the job by, when it bills video by tokens and reports them. */
+  tokens?: number;
   /** Why a `failed` job failed. */
   error?: VideoError;
   /** The rendered videos; empty until `completed`. */
@@ -529,10 +535,14 @@ export interface VideoGenerationParams {
   referenceImages?: string[];
   /** Audio URLs the video follows, for lip sync, beat-matched motion or a sound track. */
   referenceAudios?: string[];
+  /** Video URLs or provider file URIs the video takes its motion, subjects or style from. */
+  referenceVideos?: string[];
   /** Image the video starts from, in the same forms as `referenceImages`. */
   firstFrame?: string;
   /** Image the video ends on, in the same forms as `referenceImages`. */
   lastFrame?: string;
+  /** Whether the video carries a sound track. `undefined` leaves the provider's default. */
+  generateAudio?: boolean;
   providerOptions?: JsonObject;
 }
 
@@ -883,6 +893,12 @@ export interface MessagesParams {
   promptCacheKey?: string;
   providerOptions?: JsonObject;
   serviceTier?: string;
+  /**
+   * Anthropic's region to run the request in, such as `us`. When omitted, Anthropic uses the
+   * workspace's `default_inference_geo`. The response reports where it ran in
+   * `usage.inferenceGeo`. Providers without a matching option raise.
+   */
+  inferenceGeo?: string;
   stopSequences?: string[];
   stream?: boolean;
   system?: MessagesTextBlock[] | string;
@@ -921,6 +937,8 @@ export interface MessageUsage {
   cacheCreation?: CacheCreationTokenDetails;
   cacheCreationInputTokens?: number;
   cacheReadInputTokens?: number;
+  inferenceGeo?: string;
+  serviceTier?: string;
 }
 
 export interface MessageResponse {

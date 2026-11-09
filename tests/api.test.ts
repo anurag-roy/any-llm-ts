@@ -1,10 +1,12 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { completeProviderMetadata } from "../src/provider-metadata.js";
+import { isString } from "../src/utils.js";
 
 import {
   BaseProvider,
   cancelBatch,
+  completeVideoJob,
   createBatch,
   deleteFile,
   downloadFile,
@@ -39,6 +41,7 @@ import type {
   EmbeddingResponse,
   ImageGenerationParams,
   ImageGenerationResponse,
+  JsonObject,
   ListBatchesParams,
   Model,
   ModerationParams,
@@ -200,6 +203,16 @@ class ApiProvider extends BaseProvider {
       outputs: [{ mimeType: "video/mp4", url: "https://cdn.example/v.mp4" }],
       status: "completed",
     });
+  }
+
+  override completeVideoJob(payload: JsonObject, model?: string): VideoJob {
+    return {
+      done: true,
+      id: isString(payload.request_id) ? payload.request_id : "vid-callback",
+      model: model ?? "video",
+      outputs: [{ mimeType: "video/mp4", url: "https://cdn.example/v.mp4" }],
+      status: "completed",
+    };
   }
 
   override rerank(params: RerankParams): Promise<RerankResponse> {
@@ -373,6 +386,12 @@ describe("stateless operation helpers", () => {
         provider: "api-fake",
       }),
     ).resolves.toEqual(new TextEncoder().encode("video"));
+    expect(
+      completeVideoJob({
+        payload: { request_id: "vid-callback" },
+        provider: "api-fake",
+      }),
+    ).toMatchObject({ id: "vid-callback", model: "video", status: "completed" });
   });
 
   it("delegates Files helpers to the selected provider", async () => {

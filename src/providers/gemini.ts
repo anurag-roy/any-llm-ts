@@ -1803,10 +1803,14 @@ export class GeminiProvider extends BaseProvider {
   override videoGeneration(params: VideoGenerationParams): Promise<VideoJob> {
     if (!this.metadata.capabilities.videoGeneration) return super.videoGeneration(params);
     return this.execute(async () => {
-      const created = await this.interactionsCreate({
-        ...convertVideoParams(params, this.providerName, this.interactionsVersion),
-        ...(params.providerOptions ?? {}),
-      });
+      const created = await this.interactionsCreate(
+        convertVideoParams(
+          params,
+          this.providerName,
+          this.interactionsVersion,
+          params.providerOptions,
+        ),
+      );
       if (isAsyncIterable(created)) {
         throw new TypeError("Gemini video generation returned a stream.");
       }

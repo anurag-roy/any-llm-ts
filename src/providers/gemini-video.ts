@@ -1,13 +1,21 @@
 import { InvalidRequestError, ProviderError, UnsupportedParameterError } from "../errors.js";
 import type {
+  JsonObject,
+  JsonValue,
   VideoError,
   VideoGenerationParams,
   VideoJob,
   VideoOutput,
   VideoStatus,
 } from "../types.js";
-import { includeWhen, isObject, isString } from "../utils.js";
-import { parseVideoGeometry, videoJob, videoOutput } from "../video.js";
+import { includeWhen, isJsonObject, isObject, isString, parseJsonObject } from "../utils.js";
+import {
+  mergeProviderOptions,
+  parseVideoGeometry,
+  type SharedVideoFields,
+  videoJob,
+  videoOutput,
+} from "../video.js";
 import {
   isoToEpoch,
   type GeminiInteraction,
@@ -55,10 +63,10 @@ const STATUS_MAP = {
 export interface GeminiVideoCreateParams {
   api_version?: string;
   background: true;
-  generation_config?: { seed: number };
+  generation_config?: JsonObject;
   input: string | GeminiVideoInputPart[];
   model: string;
-  response_format: { aspect_ratio?: string; resolution?: string; type: "video" };
+  response_format: JsonObject | JsonObject[];
 }
 
 export type GeminiVideoInputPart =
@@ -83,10 +91,10 @@ function splitOnce(value: string, separator: string): [string, string, string] {
   return [value.slice(0, index), separator, value.slice(index + separator.length)];
 }
 
-function responseFormat(params: VideoGenerationParams): GeminiVideoCreateParams["response_format"] {
+function responseFormatFields(params: VideoGenerationParams): SharedVideoFields {
+  const fields: SharedVideoFields = {};
   const geometry = parseVideoGeometry(params);
-  if (geometry === undefined) return { type: "video" };
-  const format: GeminiVideoCreateParams["response_format"] = { type: "video" };
+  if (geometry === undefined) return fields;
   if (geometry.ratio !== undefined) {
     const aspectRatio = namedAspectRatio(geometry.ratio);
     if (aspectRatio === undefined) {
@@ -94,7 +102,7 @@ function responseFormat(params: VideoGenerationParams): GeminiVideoCreateParams[
         `Gemini renders 16:9 or 9:16 video, not ${JSON.stringify(geometry.described)}`,
       );
     }
-    format.aspect_ratio = aspectRatio;
+    fields.aspect_ratio = [params.size === undefined ? "aspect_ratio" : "size", aspectRatio];
   }
   if (geometry.shortSide !== undefined) {
     const resolution = resolutionName(geometry.shortSide);
@@ -104,16 +112,43 @@ function responseFormat(params: VideoGenerationParams): GeminiVideoCreateParams[
         `Gemini renders video with a short side of ${sizes} pixels, not ${JSON.stringify(geometry.described)}`,
       );
     }
-    format.resolution = resolution;
+    fields.resolution = [params.size === undefined ? "resolution" : "size", resolution];
   }
-  return format;
+  return fields;
+}
+
+function asDict(option: JsonValue | undefined): JsonObject {
+  if (isJsonObject(option) && !Array.isArray(option)) {
+    return Object.fromEntries(Object.entries(option));
+  }
+  if (isObject(option) && !Array.isArray(option)) return parseJsonObject(option);
+  return {};
+}
+
+function mergeResponseFormat(
+  params: VideoGenerationParams,
+  option: JsonValue | undefined,
+): JsonObject | JsonObject[] {
+  const fields = responseFormatFields(params);
+  if (!Array.isArray(option)) {
+    return { type: "video", ...mergeProviderOptions(params, fields, asDict(option)) };
+  }
+  const formats = option.map((entry) => asDict(entry));
+  if (!formats.some((entry) => entry.type === "video")) {
+    return [...formats, { type: "video", ...mergeProviderOptions(params, fields, {}) }];
+  }
+  return formats.map((entry) =>
+    entry.type === "video" ? mergeProviderOptions(params, fields, entry) : entry,
+  );
 }
 
 export function convertVideoParams(
   params: VideoGenerationParams,
   providerName: string,
   apiVersion: string | undefined,
-): GeminiVideoCreateParams {
+  options: JsonObject = {},
+): GeminiVideoCreateParams & JsonObject {
+  const extras = { ...options };
   if (params.seconds !== undefined) {
     throw new UnsupportedParameterError("seconds", providerName);
   }
@@ -123,20 +158,36 @@ export function convertVideoParams(
   if (params.referenceAudios !== undefined) {
     throw new UnsupportedParameterError("reference_audios", providerName);
   }
+  if (params.referenceVideos !== undefined) {
+    throw new UnsupportedParameterError("reference_videos", providerName);
+  }
+  if (params.generateAudio !== undefined) {
+    throw new UnsupportedParameterError("generate_audio", providerName);
+  }
 
   const parts: GeminiVideoInputPart[] = [];
   if (params.firstFrame !== undefined) parts.push(imagePart(params.firstFrame));
   if (params.lastFrame !== undefined) parts.push(imagePart(params.lastFrame));
   for (const image of params.referenceImages ?? []) parts.push(imagePart(image));
 
-  return {
+  const create: GeminiVideoCreateParams = {
     background: true,
     input: parts.length === 0 ? params.prompt : [...parts, { text: params.prompt, type: "text" }],
     model: params.model,
-    response_format: responseFormat(params),
+    response_format: mergeResponseFormat(params, extras.response_format),
     ...includeWhen(apiVersion !== undefined, { api_version: apiVersion }),
-    ...includeWhen(params.seed !== undefined, { generation_config: { seed: params.seed ?? 0 } }),
   };
+  delete extras.response_format;
+  const configFields: SharedVideoFields =
+    params.seed !== undefined ? { seed: ["seed", params.seed] } : {};
+  const generationConfig = mergeProviderOptions(
+    params,
+    configFields,
+    asDict(extras.generation_config),
+  );
+  delete extras.generation_config;
+  if (Object.keys(generationConfig).length > 0) create.generation_config = generationConfig;
+  return { ...create, ...extras };
 }
 
 function videoPartOutput(part: GeminiInteractionContent & { uri?: unknown }): VideoOutput {

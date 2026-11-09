@@ -55,9 +55,9 @@ Pass either `size` (`WIDTHxHEIGHT`) or `resolution` and `aspectRatio`, not both.
 
 | Provider  | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| DeepInfra | Native `POST /v1/inference/{model}` after reading the model's input schema from `GET /models/{model}`. Seedance, Wan 3.0, and Wan 2.6 each spell frames, resolution, and audio differently; a field the schema has no name for raises `UnsupportedParameterError`. Renders finish inside the request (default timeout 900 seconds), so `retrieveVideo` only sees jobs started in this process.                                                                                                                                                                                                                                 |
-| Gemini    | Gemini Omni Flash through the Interactions API. `size`, or `resolution` and `aspectRatio`, must be `16:9` or `9:16` with a short side of 360, 720, 1080, or 2160 pixels. `seconds`, `negativePrompt`, and `referenceAudios` raise `UnsupportedParameterError`. Files API URIs download with the API key.                                                                                                                                                                                                                                                                                                                       |
-| Together  | `POST /v2/videos` and `GET /v2/videos/{id}` for models such as `ByteDance/Seedance-2.0`. `size` maps to `width` / `height`, `resolution` and `aspectRatio` to `resolution` / `ratio`, `seconds` to a string, `firstFrame` / `lastFrame` to `frame_images`, and `referenceAudios` to `media.audio_inputs`. Together-only options such as `fps` go in `providerOptions`. Seedance renders fixed resolutions only (for example `864x496`, `1280x720`, `1920x1080`, and their portrait twins); any other `WIDTHxHEIGHT` is sent, but the job then fails with `unsupportedModelResolution`. |
+| DeepInfra | Native `POST /v1/inference/{model}` after reading the model's input schema from `GET /models/{model}`. Seedance, Wan 3.0, and Wan 2.6 each spell frames, resolution, audio, and `generateAudio` differently; a field the schema has no name for raises `UnsupportedParameterError`. A `providerOptions` value that changes a shared field raises `InvalidRequestError`. Renders finish inside the request (default timeout 900 seconds), so `retrieveVideo` only sees jobs started in this process. Pass `webhook` and `completeVideoJob` to finish a queued job from its callback. The finished job reports `cost` and `tokens` when DeepInfra bills them. |
+| Gemini    | Gemini Omni Flash through the Interactions API. `size`, or `resolution` and `aspectRatio`, must be `16:9` or `9:16` with a short side of 360, 720, 1080, or 2160 pixels. `seconds`, `negativePrompt`, `referenceAudios`, `referenceVideos`, and `generateAudio` raise `UnsupportedParameterError`. A `response_format` or `generation_config` option merges with the shared fields and raises if it changes them. Files API URIs download with the API key.                                                                                                                                                                                                                                 |
+| Together  | `POST /v2/videos` and `GET /v2/videos/{id}` for models such as `ByteDance/Seedance-2.0`. `size` maps to `width` / `height`, `resolution` and `aspectRatio` to `resolution` / `ratio`, `seconds` to a string, `firstFrame` / `lastFrame` to `frame_images`, `referenceAudios` to `media.audio_inputs`, `referenceVideos` to `media.reference_videos`, and `generateAudio` to `generate_audio`. Together-only options such as `fps` go in `providerOptions`. An option that changes a shared field raises `InvalidRequestError`. Seedance renders fixed resolutions only (for example `864x496`, `1280x720`, `1920x1080`, and their portrait twins); any other `WIDTHxHEIGHT` is sent, but the job then fails with `unsupportedModelResolution`. |
 
 All other providers reject video generation with `UnsupportedOperationError`. OpenAI is among them: the Videos API was removed with no replacement.
 
@@ -73,14 +73,34 @@ const job = await videoGeneration({
 });
 ```
 
-Images are URLs, provider file URIs, or `data:` URLs with base64 content. `referenceAudios` is
-the same for a soundtrack or lip-sync clip; Gemini rejects it.
+Images are URLs, provider file URIs, or `data:` URLs with base64 content. `referenceAudios` and
+`referenceVideos` are the same for a soundtrack, lip-sync clip, or motion reference; Gemini rejects
+both, and `generateAudio`.
 
 ```ts
 const job = await videoGeneration({
   model: "together:ByteDance/Seedance-2.5",
   prompt: "A rapper performs to the beat.",
   referenceAudios: ["https://example.com/beat.mp3"],
+  generateAudio: true,
+});
+```
+
+DeepInfra can post the finished job to a webhook instead of holding the request open. Pass the
+callback body to `completeVideoJob`; `retrieveVideo` then reads it back in the same process.
+
+```ts
+import { completeVideoJob } from "any-llm-ts";
+
+const queued = await videoGeneration({
+  model: "deepinfra:ByteDance/Seedance-2.0",
+  prompt: "A yellow rubber duck sits on a wooden table.",
+  providerOptions: { webhook: "https://hooks.example/done" },
+});
+
+const finished = completeVideoJob({
+  provider: "deepinfra",
+  payload: callbackBody,
 });
 ```
 

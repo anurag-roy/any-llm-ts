@@ -370,6 +370,20 @@ export function retrieveVideo(params: DirectRetrieveVideoParams): Promise<VideoJ
   );
 }
 
+export interface DirectCompleteVideoJobParams extends DirectProviderOptions {
+  payload: JsonObject;
+  provider: string;
+  model?: string;
+}
+
+export function completeVideoJob(params: DirectCompleteVideoJobParams): VideoJob {
+  const { apiBase, apiKey, clientOptions, model, payload, provider } = params;
+  return client(provider, directOptions(apiBase, apiKey, clientOptions)).completeVideoJob(
+    payload,
+    model,
+  );
+}
+
 export interface DirectPollVideoParams extends PollVideoOptions, DirectProviderOptions {
   provider: string;
   videoId: string;

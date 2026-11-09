@@ -224,6 +224,71 @@ describe("Together video conversion", () => {
     });
     expect(extraBody.media).toEqual({ reference_videos: [{ video: "https://v/ref.mp4" }] });
   });
+
+  it("sends generateAudio and referenceVideos through the request body", () => {
+    expect(
+      convertTogetherVideoParams({
+        generateAudio: false,
+        model: "ByteDance/Seedance-2.0",
+        prompt: "a dancer",
+        referenceVideos: ["https://v/one.mp4", "https://v/two.mp4"],
+      }).body,
+    ).toEqual({
+      generate_audio: false,
+      media: {
+        reference_videos: [{ video: "https://v/one.mp4" }, { video: "https://v/two.mp4" }],
+      },
+      model: "ByteDance/Seedance-2.0",
+      prompt: "a dancer",
+    });
+  });
+
+  it("rejects an option that contradicts a shared field", () => {
+    expect(() =>
+      convertTogetherVideoParams({
+        model: "ByteDance/Seedance-2.0",
+        prompt: "a dancer",
+        providerOptions: { extra_body: { prompt: "a goose" } },
+      }),
+    ).toThrow(/prompt="a dancer" conflicts with prompt="a goose"/u);
+    expect(() =>
+      convertTogetherVideoParams({
+        generateAudio: false,
+        model: "ByteDance/Seedance-2.0",
+        prompt: "a dancer",
+        providerOptions: { extra_body: { generate_audio: true } },
+      }),
+    ).toThrow(/generate_audio=false conflicts with generate_audio=true/u);
+    expect(() =>
+      convertTogetherVideoParams({
+        model: "ByteDance/Seedance-2.0",
+        prompt: "a dancer",
+        providerOptions: { width: 1920 },
+        size: "1280x720",
+      }),
+    ).toThrow(/size="1280x720" conflicts with width=1920/u);
+  });
+
+  it("accepts options that agree with the shared fields", () => {
+    const extraBody = { fps: 24, generate_audio: false };
+    expect(
+      convertTogetherVideoParams({
+        generateAudio: false,
+        model: "ByteDance/Seedance-2.0",
+        prompt: "a dancer",
+        providerOptions: { extra_body: extraBody, width: 1280 },
+        size: "1280x720",
+      }).body,
+    ).toEqual({
+      fps: 24,
+      generate_audio: false,
+      height: 720,
+      model: "ByteDance/Seedance-2.0",
+      prompt: "a dancer",
+      width: 1280,
+    });
+    expect(extraBody).toEqual({ fps: 24, generate_audio: false });
+  });
 });
 
 describe("Together video provider methods", () => {

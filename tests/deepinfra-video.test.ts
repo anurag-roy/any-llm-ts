@@ -41,6 +41,7 @@ const SEEDANCE_SCHEMA: JsonObject = {
     prompt: { type: "string" },
     reference_audios: { items: { type: "string" }, type: "array" },
     reference_images: { items: { type: "string" }, type: "array" },
+    reference_videos: { items: { type: "string" }, type: "array" },
     resolution: { enum: ["480p", "720p", "1080p"], type: "string" },
     seed: { type: "integer" },
   },
@@ -162,8 +163,10 @@ describe("DeepInfra video conversion", () => {
         params({
           firstFrame: "data:image/png;base64,Zmlyc3Q=",
           lastFrame: "data:image/png;base64,bGFzdA==",
+          generateAudio: false,
           referenceAudios: ["https://a/beat.mp3"],
           referenceImages: ["https://img/ref.png"],
+          referenceVideos: ["https://v/moves.mp4", "https://v/turn.mp4"],
           seconds: 5,
           seed: 7,
           size: "1280x720",
@@ -174,10 +177,12 @@ describe("DeepInfra video conversion", () => {
       aspect_ratio: "16:9",
       duration: 5,
       first_frame_image: "data:image/png;base64,Zmlyc3Q=",
+      generate_audio: false,
       last_frame_image: "data:image/png;base64,bGFzdA==",
       prompt: "a rubber duck",
       reference_audios: ["https://a/beat.mp3"],
       reference_images: ["https://img/ref.png"],
+      reference_videos: ["https://v/moves.mp4", "https://v/turn.mp4"],
       resolution: "720p",
       seed: 7,
     });
@@ -188,25 +193,28 @@ describe("DeepInfra video conversion", () => {
       convert(
         params({
           firstFrame: "https://img/first.png",
+          generateAudio: true,
           lastFrame: "https://img/last.png",
           model: WAN3,
           referenceAudios: ["https://a/beat.mp3"],
           referenceImages: ["https://img/ref.png"],
+          referenceVideos: ["https://v/moves.mp4", "https://v/turn.mp4"],
           seconds: 10,
           seed: 7,
           size: "720x1280",
         }),
         schema(WAN3, WAN3_SCHEMA),
-        { media: [{ type: "reference_video", url: "https://v.mp4" }] },
       ),
     ).toEqual({
+      audio: true,
       duration: 10,
       media: [
         { type: "first_frame", url: "https://img/first.png" },
         { type: "last_frame", url: "https://img/last.png" },
         { type: "reference_image", url: "https://img/ref.png" },
         { type: "reference_audio", url: "https://a/beat.mp3" },
-        { type: "reference_video", url: "https://v.mp4" },
+        { type: "reference_video", url: "https://v/moves.mp4" },
+        { type: "reference_video", url: "https://v/turn.mp4" },
       ],
       prompt: "a rubber duck",
       ratio: "9:16",
@@ -281,13 +289,44 @@ describe("DeepInfra video conversion", () => {
     );
   });
 
+  it("rejects an option that contradicts a shared field", () => {
+    expect(() => convert(params({ seconds: 5 }), schema(), { duration: 10 })).toThrow(
+      /seconds=5 conflicts with duration=10/u,
+    );
+    expect(() =>
+      convert(params({ generateAudio: false }), schema(), { generate_audio: true }),
+    ).toThrow(/generate_audio=false conflicts with generate_audio=true/u);
+    expect(() => convert(params(), schema(), { prompt: "a goose" })).toThrow(
+      /prompt="a rubber duck" conflicts with prompt="a goose"/u,
+    );
+  });
+
+  it("maps extra media items of a kind any-llm did not produce", () => {
+    expect(
+      convert(
+        params({ firstFrame: "https://img/first.png", model: WAN3 }),
+        schema(WAN3, WAN3_SCHEMA),
+        {
+          media: [{ type: "reference_video", url: "https://v.mp4" }],
+        },
+      ),
+    ).toMatchObject({
+      media: [
+        { type: "first_frame", url: "https://img/first.png" },
+        { type: "reference_video", url: "https://v.mp4" },
+      ],
+    });
+  });
+
   it("maps a finished render and mints an id when none is sent", () => {
     const job = convertInferenceResponse(response(), SEEDANCE, API_BASE);
     expect(job).toMatchObject({
+      cost: 0.5,
       done: true,
       id: "R7X9fdlIaF5GlVisBAi5xR3E",
       model: SEEDANCE,
       status: "completed",
+      tokens: 1000,
     });
     expect(job.outputs[0]?.url).toBe(VIDEO_URL);
     const first = convertInferenceResponse(response({ request_id: null }), SEEDANCE, API_BASE);
@@ -360,8 +399,50 @@ describe("DeepInfra video provider methods", () => {
     expect(post).toHaveBeenCalledTimes(3);
   });
 
-  it("rejects a webhook before posting", async () => {
-    const post = vi.fn();
+  it("starts a webhook job and finishes it from the callback", async () => {
+    const queued = {
+      inference_status: { cost: 0, status: "queued" },
+      request_id: "RqueuedIaF5GlVisBAi5xR3E",
+    };
+    const post = vi.fn().mockResolvedValue(queued);
+    const provider = createDeepinfra(
+      vi.fn().mockResolvedValue({ in_schema: SEEDANCE_SCHEMA }),
+      post,
+    );
+    const job = await provider.videoGeneration({
+      model: SEEDANCE,
+      prompt: "a rubber duck",
+      providerOptions: { webhook: "https://hooks.example/done" },
+    });
+    expect(post).toHaveBeenCalledWith(`https://api.deepinfra.com/v1/inference/${SEEDANCE}`, {
+      body: { prompt: "a rubber duck", webhook: "https://hooks.example/done" },
+      maxRetries: 0,
+      timeout: 900_000,
+    });
+    expect(job).toMatchObject({
+      id: "RqueuedIaF5GlVisBAi5xR3E",
+      status: "queued",
+    });
+    expect(job.cost).toBeUndefined();
+    expect(job.tokens).toBeUndefined();
+    const finished = provider.completeVideoJob({
+      inference_status: { cost: 0.5, runtime_ms: 120_000, status: "succeeded" },
+      request_id: job.id,
+      results: { out_tokens: 1000, status: "ok", video_url: VIDEO_URL },
+    });
+    expect(finished).toMatchObject({
+      cost: 0.5,
+      id: job.id,
+      model: SEEDANCE,
+      status: "completed",
+      tokens: 1000,
+    });
+    expect(finished.outputs[0]?.url).toBe(VIDEO_URL);
+    await expect(provider.retrieveVideo(job.id)).resolves.toBe(finished);
+  });
+
+  it("rejects a webhook reply without a request_id and a callback that names no job", async () => {
+    const post = vi.fn().mockResolvedValue({ inference_status: { status: "queued" } });
     const provider = createDeepinfra(
       vi.fn().mockResolvedValue({ in_schema: SEEDANCE_SCHEMA }),
       post,
@@ -372,7 +453,36 @@ describe("DeepInfra video provider methods", () => {
         prompt: "a rubber duck",
         providerOptions: { webhook: "https://hooks.example/done" },
       }),
-    ).rejects.toThrow(/cannot take a webhook/u);
+    ).rejects.toThrow(/no request_id/u);
+    expect(() =>
+      provider.completeVideoJob({
+        inference_status: { status: "succeeded" },
+        results: { video_url: VIDEO_URL },
+      }),
+    ).toThrow(/no request_id/u);
+    expect(() =>
+      provider.completeVideoJob({
+        inference_status: { status: "succeeded" },
+        request_id: "from-elsewhere",
+        results: { video_url: VIDEO_URL },
+      }),
+    ).toThrow(/pass model/u);
+  });
+
+  it("rejects extra_body that contradicts a shared field before posting", async () => {
+    const post = vi.fn();
+    const provider = createDeepinfra(
+      vi.fn().mockResolvedValue({ in_schema: SEEDANCE_SCHEMA }),
+      post,
+    );
+    await expect(
+      provider.videoGeneration({
+        generateAudio: false,
+        model: SEEDANCE,
+        prompt: "a rubber duck",
+        providerOptions: { extra_body: { generate_audio: true } },
+      }),
+    ).rejects.toThrow(/generate_audio=false conflicts with generate_audio=true/u);
     expect(post).not.toHaveBeenCalled();
   });
 

@@ -381,6 +381,13 @@ export class AnyLLM {
     return this.adapter.retrieveVideo(videoId, providerOptions);
   }
 
+  completeVideoJob(payload: JsonObject, model?: string): VideoJob {
+    if (!this.metadata.capabilities.videoGeneration) {
+      throw new UnsupportedOperationError("video generation", this.provider);
+    }
+    return this.adapter.completeVideoJob(payload, model);
+  }
+
   async pollVideo(videoId: string, options: PollVideoOptions = {}): Promise<VideoJob> {
     const pollInterval = options.pollInterval ?? 5;
     const timeout = options.timeout === undefined ? 600 : options.timeout;
@@ -418,6 +425,9 @@ export class AnyLLM {
     AsyncIterable<MessageStreamEvent> | MessageResponse | ParsedMessageResponse<JsonValue>
   > {
     this.validatePromptCacheKey(params.promptCacheKey);
+    if (params.inferenceGeo !== undefined && !this.adapter.supportsMessagesInferenceGeo) {
+      throw new UnsupportedParameterError("inference_geo", this.provider);
+    }
     // A raw output_config dict streams as JSON text deltas. Only a typed format needs a
     // finished message to parse into, which a stream never produces.
     if (

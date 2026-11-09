@@ -26,8 +26,10 @@ interface AnthropicTestOverrides {
 interface AnthropicUsageFixture {
   cache_creation_input_tokens?: number;
   cache_read_input_tokens?: number;
+  inference_geo?: string;
   input_tokens: number;
   output_tokens: number;
+  service_tier?: string;
 }
 
 interface AnthropicResponseFixture {
@@ -218,6 +220,70 @@ describe("Anthropic provider", () => {
         promptTokensDetails: { cacheWriteTokens: 2, cachedTokens: 3 },
         totalTokens: 20,
       },
+    });
+    expect(result.serviceTier).toBeUndefined();
+    expect(result.usage?.inferenceGeo).toBeUndefined();
+  });
+
+  it("reports inference_geo and service_tier on completions", async () => {
+    const payload = anthropicResponse();
+    payload.usage = {
+      ...payload.usage,
+      inference_geo: "us",
+      service_tier: "priority",
+    };
+    const create = vi.fn().mockResolvedValue(payload);
+    const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
+    // SAFETY: The non-streaming request makes this completion result concrete in the test.
+    const result = (await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "claude-test",
+    })) as ChatCompletion;
+    expect(result.serviceTier).toBe("priority");
+    expect(result.usage).toMatchObject({ inferenceGeo: "us" });
+  });
+
+  it("reports inference_geo from message_start on the trailing usage chunk", async () => {
+    async function* events(): AsyncIterable<JsonObject> {
+      yield {
+        message: {
+          id: "msg-geo",
+          model: "claude-stream",
+          usage: {
+            inference_geo: "us",
+            input_tokens: 10,
+            output_tokens: 1,
+            service_tier: "standard",
+          },
+        },
+        type: "message_start",
+      };
+      yield {
+        delta: { text: "Hi", type: "text_delta" },
+        index: 0,
+        type: "content_block_delta",
+      };
+      yield {
+        delta: { stop_reason: "end_turn" },
+        type: "message_delta",
+        usage: { output_tokens: 5 },
+      };
+      yield { type: "message_stop" };
+    }
+    const create = vi.fn().mockResolvedValue(events());
+    const provider = new AnthropicProvider({}, fakeAnthropic({ messages: { create } }));
+    const result = await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "claude-test",
+      stream: true,
+    });
+    const chunks: ChatCompletionChunk[] = [];
+    // SAFETY: The streaming request makes this completion result an async iterable in the test.
+    for await (const chunk of result as AsyncIterable<ChatCompletionChunk>) chunks.push(chunk);
+    const usageChunk = chunks.find((chunk) => chunk.usage !== undefined);
+    expect(usageChunk).toMatchObject({
+      serviceTier: "standard",
+      usage: { completionTokens: 5, inferenceGeo: "us" },
     });
   });
 
@@ -1415,6 +1481,7 @@ describe("Anthropic provider", () => {
         outputFormat: {
           format: { schema: { type: "object" }, type: "json_schema" },
         },
+        inferenceGeo: "us",
         providerOptions: { custom_option: true },
         serviceTier: "auto",
         stopSequences: ["STOP"],
@@ -1535,6 +1602,7 @@ describe("Anthropic provider", () => {
             role: "user",
           },
         ],
+        inference_geo: "us",
         model: "claude",
         service_tier: "auto",
         stop_sequences: ["STOP"],

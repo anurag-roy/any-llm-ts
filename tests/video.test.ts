@@ -2,7 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { completeProviderMetadata } from "../src/provider-metadata.js";
 import { includeWhen } from "../src/utils.js";
-import { parseVideoGeometry, parseVideoSize, videoJob } from "../src/video.js";
+import {
+  checkProviderOptions,
+  mergeProviderOptions,
+  parseVideoGeometry,
+  parseVideoSize,
+  videoJob,
+} from "../src/video.js";
 
 import {
   AnyLLM,
@@ -112,6 +118,39 @@ describe("video types and size parsing", () => {
     expect(job.outputs).toEqual([]);
     expect(job.error).toBeUndefined();
     expect(job.progress).toBeUndefined();
+    expect(job.cost).toBeUndefined();
+    expect(job.tokens).toBeUndefined();
+  });
+
+  it("carries the provider charge", () => {
+    const job = videoJob({
+      cost: 0.38991,
+      id: "vid-1",
+      model: "m",
+      status: "completed",
+      tokens: 50638,
+    });
+    expect(job.cost).toBe(0.38991);
+    expect(job.tokens).toBe(50638);
+  });
+
+  it("merges provider options over shared fields and rejects a change", () => {
+    const params = { model: "m", prompt: "p", seconds: 5 };
+    expect(mergeProviderOptions(params, { duration: ["seconds", 5] }, { fps: 24 })).toEqual({
+      duration: 5,
+      fps: 24,
+    });
+    expect(mergeProviderOptions(params, { duration: ["seconds", 5] }, { duration: 5 })).toEqual({
+      duration: 5,
+    });
+    expect(() =>
+      mergeProviderOptions(
+        { model: "m", prompt: "p", size: "1280x720" },
+        { height: ["size", 720], width: ["size", 1280] },
+        { width: 1920 },
+      ),
+    ).toThrow(/size="1280x720" conflicts with width=1920/u);
+    checkProviderOptions(params, { duration: ["seconds", 5] }, { duration: 5, fps: 24 });
   });
 
   it("parses WIDTHxHEIGHT in either case", () => {
@@ -201,6 +240,7 @@ describe("AnyLLM video facade", () => {
     await expect(llm.retrieveVideo("vid-1", { extra: "x" })).resolves.toMatchObject({
       status: "queued",
     });
+    expect(() => llm.completeVideoJob({ request_id: "vid-1" })).toThrow(/webhook/u);
   });
 
   it("refuses video generation when the provider does not advertise it", async () => {
@@ -209,6 +249,7 @@ describe("AnyLLM video facade", () => {
       UnsupportedOperationError,
     );
     await expect(llm.retrieveVideo("vid-1")).rejects.toBeInstanceOf(UnsupportedOperationError);
+    expect(() => llm.completeVideoJob({ request_id: "vid-1" })).toThrow(UnsupportedOperationError);
   });
 
   it("returns the first finished poll result and a failed job without throwing", async () => {

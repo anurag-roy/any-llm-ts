@@ -136,7 +136,7 @@ describe("Gemini video conversion", () => {
     );
   });
 
-  it("rejects seconds, negativePrompt, and referenceAudios", () => {
+  it("rejects seconds, negativePrompt, referenceAudios, referenceVideos, and generateAudio", () => {
     expect(() => convertVideoParams(params({ seconds: 5 }), "gemini", undefined)).toThrow(
       UnsupportedParameterError,
     );
@@ -146,6 +146,62 @@ describe("Gemini video conversion", () => {
     expect(() =>
       convertVideoParams(params({ referenceAudios: ["https://a/beat.mp3"] }), "gemini", undefined),
     ).toThrow(/reference_audios/u);
+    expect(() =>
+      convertVideoParams(params({ referenceVideos: ["https://v/moves.mp4"] }), "gemini", undefined),
+    ).toThrow(/reference_videos/u);
+    expect(() => convertVideoParams(params({ generateAudio: false }), "gemini", undefined)).toThrow(
+      /generate_audio/u,
+    );
+  });
+
+  it("merges response_format and generation_config options with the shared fields", () => {
+    const converted = convertVideoParams(
+      params({ seed: 7, size: "1280x720" }),
+      "gemini",
+      undefined,
+      {
+        generation_config: { seed: 7, temperature: 0.5 },
+        response_format: { delivery: "uri", resolution: "720p" },
+        store: false,
+      },
+    );
+    expect(converted.response_format).toEqual({
+      aspect_ratio: "16:9",
+      delivery: "uri",
+      resolution: "720p",
+      type: "video",
+    });
+    expect(converted.generation_config).toEqual({ seed: 7, temperature: 0.5 });
+    expect(converted.store).toBe(false);
+  });
+
+  it("rejects an option that contradicts a shared field", () => {
+    expect(() =>
+      convertVideoParams(params({ size: "1280x720" }), "gemini", undefined, {
+        response_format: { aspect_ratio: "9:16" },
+      }),
+    ).toThrow(/size="1280x720" conflicts with aspect_ratio="9:16"/u);
+    expect(() =>
+      convertVideoParams(params({ seed: 7 }), "gemini", undefined, {
+        generation_config: { seed: 8 },
+      }),
+    ).toThrow(/seed=7 conflicts with seed=8/u);
+  });
+
+  it("merges the video entry of a response_format list", () => {
+    expect(
+      convertVideoParams(params({ size: "1280x720" }), "gemini", undefined, {
+        response_format: [{ type: "text" }, { delivery: "uri", type: "video" }],
+      }).response_format,
+    ).toEqual([
+      { type: "text" },
+      { aspect_ratio: "16:9", delivery: "uri", resolution: "720p", type: "video" },
+    ]);
+    expect(
+      convertVideoParams(params({ resolution: "720p" }), "gemini", undefined, {
+        response_format: [{ type: "text" }],
+      }).response_format,
+    ).toEqual([{ type: "text" }, { resolution: "720p", type: "video" }]);
   });
 
   it("puts frames then references before the prompt", () => {
@@ -277,6 +333,20 @@ describe("Gemini video provider methods", () => {
       outputs: [{ b64Data: VIDEO_B64 }],
     });
     expect(get).toHaveBeenCalledWith("int-123", { timeout: 5 });
+  });
+
+  it("rejects a response_format that contradicts size before creating", async () => {
+    const create = vi.fn();
+    const provider = new GeminiProvider({ apiKey: "test-key" }, fakeClient({ create }));
+    await expect(
+      provider.videoGeneration({
+        model: MODEL,
+        prompt: "a paper boat",
+        providerOptions: { response_format: { aspect_ratio: "9:16" } },
+        size: "1280x720",
+      }),
+    ).rejects.toThrow(/size="1280x720" conflicts with aspect_ratio="9:16"/u);
+    expect(create).not.toHaveBeenCalled();
   });
 
   it("follows the client's API version on create and get", async () => {

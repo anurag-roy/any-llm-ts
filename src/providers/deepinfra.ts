@@ -1,6 +1,6 @@
 import type OpenAI from "openai";
 
-import { InvalidRequestError } from "../errors.js";
+import { InvalidRequestError, ProviderError } from "../errors.js";
 import type { JsonObject, ProviderOptions, VideoGenerationParams, VideoJob } from "../types.js";
 import {
   includeWhen,
@@ -11,18 +11,25 @@ import {
   timeoutMilliseconds,
 } from "../utils.js";
 import { OpenAIProvider } from "./openai.js";
-import { convertInferenceResponse, convertVideoParams, VideoSchema } from "./deepinfra-video.js";
+import {
+  callbackResponse,
+  convertInferenceResponse,
+  convertVideoParams,
+  VideoSchema,
+} from "./deepinfra-video.js";
 
 const VIDEO_REQUEST_TIMEOUT_SECONDS = 900;
 const DEFAULT_VIDEO_JOBS_KEPT = 1000;
 
 export const deepinfraVideoStore = {
+  apiBases: new Map<string, string>(),
   jobs: new Map<string, VideoJob>(),
   jobsKept: DEFAULT_VIDEO_JOBS_KEPT,
   schemas: new Map<string, VideoSchema>(),
 };
 
 export function resetDeepinfraVideoStore(): void {
+  deepinfraVideoStore.apiBases.clear();
   deepinfraVideoStore.jobs.clear();
   deepinfraVideoStore.jobsKept = DEFAULT_VIDEO_JOBS_KEPT;
   deepinfraVideoStore.schemas.clear();
@@ -36,11 +43,14 @@ export function deepinfraApiRoot(baseURL: string): string {
 }
 
 function rememberJob(job: VideoJob): VideoJob {
+  const stored = deepinfraVideoStore.jobs.get(job.id);
+  if (stored?.done === true && !job.done) return stored;
   deepinfraVideoStore.jobs.set(job.id, job);
   while (deepinfraVideoStore.jobs.size > deepinfraVideoStore.jobsKept) {
     const oldest = deepinfraVideoStore.jobs.keys().next().value;
     if (oldest === undefined) break;
     deepinfraVideoStore.jobs.delete(oldest);
+    deepinfraVideoStore.apiBases.delete(oldest);
   }
   return job;
 }
@@ -101,25 +111,50 @@ export class DeepinfraProvider extends OpenAIProvider {
       delete extras.extra_body;
       const timeout = timeoutMilliseconds(timeoutSeconds);
       const schema = await this.videoSchema(params.model, timeout);
-      const body = {
-        ...convertVideoParams(params, schema, this.metadata.name, extras),
+      const body = convertVideoParams(params, schema, this.metadata.name, {
+        ...extras,
         ...extraBody,
-      };
-      if (Object.hasOwn(body, "webhook")) {
-        throw new InvalidRequestError(
-          "DeepInfra video jobs cannot take a webhook: the reply would be a queued job that retrieve_video has no way to read back.",
-        );
-      }
+      });
       const response = await this.client.post(this.inferenceUrl(params.model), {
         body,
         maxRetries: 0,
         ...includeWhen(timeout !== undefined, { timeout }),
         ...includeWhen(extraHeaders !== undefined, { headers: extraHeaders }),
       });
-      return rememberJob(
-        convertInferenceResponse(parseJsonObject(response), params.model, this.client.baseURL),
-      );
+      const parsed = parseJsonObject(response);
+      if (Object.hasOwn(body, "webhook") && !parsed.request_id) {
+        throw new ProviderError(
+          "DeepInfra queued the video job with no request_id, so its webhook callback cannot be matched to it",
+        );
+      }
+      const job = convertInferenceResponse(parsed, params.model, this.client.baseURL);
+      if (Object.hasOwn(body, "webhook")) {
+        deepinfraVideoStore.apiBases.set(job.id, this.client.baseURL);
+      }
+      return rememberJob(job);
     });
+  }
+
+  override completeVideoJob(payload: JsonObject, model?: string): VideoJob {
+    const response = callbackResponse(payload);
+    if (!isString(response.request_id)) {
+      throw new InvalidRequestError(
+        "The DeepInfra webhook callback has no request_id, so it names no video job",
+      );
+    }
+    const requestId = response.request_id;
+    let resolvedModel = model;
+    if (resolvedModel === undefined) {
+      const queued = deepinfraVideoStore.jobs.get(requestId);
+      if (queued === undefined) {
+        throw new InvalidRequestError(
+          `DeepInfra's webhook callback does not name the model, and ${JSON.stringify(requestId)} was not started in this process, so pass model.`,
+        );
+      }
+      resolvedModel = queued.model;
+    }
+    const apiBase = deepinfraVideoStore.apiBases.get(requestId) ?? this.client.baseURL;
+    return rememberJob(convertInferenceResponse(response, resolvedModel, apiBase));
   }
 
   override retrieveVideo(videoId: string): Promise<VideoJob> {

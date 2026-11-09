@@ -64,10 +64,10 @@ export interface GeminiInteractionCreateParams {
   background?: boolean;
   extra_headers?: JsonObject;
   extra_query?: JsonObject;
-  generation_config?: { max_output_tokens?: number; seed?: number };
+  generation_config?: JsonObject;
   input: string | object[];
   model: string;
-  response_format?: JsonObject;
+  response_format?: JsonObject | JsonObject[];
   stream?: true;
   system_instruction?: string;
   timeout?: number;

@@ -74,6 +74,8 @@ export abstract class BaseProvider {
   abstract readonly metadata: ProviderMetadata;
   /** Whether a Messages `outputFormat` type can be streamed by this provider. */
   readonly supportsMessagesStructuredOutputStreaming: boolean = false;
+  /** Whether the Messages API accepts Anthropic's `inferenceGeo`; other providers reject it. */
+  readonly supportsMessagesInferenceGeo: boolean = false;
   /** Whether the Messages bridge should pass `cacheControl` breakpoints in `extraContent`. */
   protected readonly readsCacheControlSideChannel: boolean = false;
   protected readonly unifiedExceptions: boolean;
@@ -169,6 +171,10 @@ export abstract class BaseProvider {
 
   retrieveVideo(_videoId: string, _providerOptions?: JsonObject): Promise<VideoJob> {
     return Promise.reject(new UnsupportedOperationError("video generation", this.metadata.name));
+  }
+
+  completeVideoJob(_payload: JsonObject, _model?: string): VideoJob {
+    throw new UnsupportedOperationError("video job webhooks", this.metadata.name);
   }
 
   downloadVideo(url: string, providerOptions: JsonObject = {}): Promise<Uint8Array> {

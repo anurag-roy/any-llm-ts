@@ -1,5 +1,6 @@
 import { InvalidRequestError } from "./errors.js";
 import type {
+  JsonObject,
   JsonValue,
   VideoGenerationParams,
   VideoJob,
@@ -7,7 +8,7 @@ import type {
   VideoGeometry,
   VideoStatus,
 } from "./types.js";
-import { includeWhen, isNumber, isString } from "./utils.js";
+import { includeWhen, isJsonObject, isNumber, isString } from "./utils.js";
 
 const TERMINAL_VIDEO_STATUSES = new Set<VideoStatus>(["completed", "failed"]);
 
@@ -48,6 +49,87 @@ export function parseVideoSize(size: string | undefined): [number, number] | und
     );
   }
   return [Number(width), Number(height)];
+}
+
+/** Each request field a shared parameter set, mapped to that parameter's name and the value it set. */
+export type SharedVideoFields = Record<string, readonly [string, JsonValue]>;
+
+function jsonEqual(left: JsonValue | undefined, right: JsonValue | undefined): boolean {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return (
+      left.length === right.length && left.every((item, index) => jsonEqual(item, right[index]))
+    );
+  }
+  if (isJsonObject(left) && isJsonObject(right)) {
+    const keys = Object.keys(left);
+    return (
+      keys.length === Object.keys(right).length &&
+      keys.every((key) => Object.hasOwn(right, key) && jsonEqual(left[key], right[key]))
+    );
+  }
+  return false;
+}
+
+function sharedVideoParameter(
+  params: VideoGenerationParams,
+  parameterName: string,
+): JsonValue | undefined {
+  switch (parameterName) {
+    case "aspect_ratio":
+      return params.aspectRatio;
+    case "first_frame":
+      return params.firstFrame;
+    case "generate_audio":
+      return params.generateAudio;
+    case "last_frame":
+      return params.lastFrame;
+    case "negative_prompt":
+      return params.negativePrompt;
+    case "prompt":
+      return params.prompt;
+    case "reference_audios":
+      return params.referenceAudios;
+    case "reference_images":
+      return params.referenceImages;
+    case "reference_videos":
+      return params.referenceVideos;
+    case "resolution":
+      return params.resolution;
+    case "seed":
+      return params.seed;
+    case "seconds":
+      return params.seconds;
+    case "size":
+      return params.size;
+    default:
+      return undefined;
+  }
+}
+
+export function checkProviderOptions(
+  params: VideoGenerationParams,
+  fields: SharedVideoFields,
+  options: JsonObject,
+): void {
+  for (const [field, [parameterName, value]] of Object.entries(fields)) {
+    if (!Object.hasOwn(options, field) || jsonEqual(options[field], value)) continue;
+    throw new InvalidRequestError(
+      `${parameterName}=${JSON.stringify(sharedVideoParameter(params, parameterName))} conflicts with ${field}=${JSON.stringify(options[field])}; pass only one of them`,
+    );
+  }
+}
+
+export function mergeProviderOptions(
+  params: VideoGenerationParams,
+  fields: SharedVideoFields,
+  options: JsonObject,
+): JsonObject {
+  checkProviderOptions(params, fields, options);
+  return {
+    ...Object.fromEntries(Object.entries(fields).map(([field, [, value]]) => [field, value])),
+    ...options,
+  };
 }
 
 export function parseVideoGeometry(
