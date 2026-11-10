@@ -1000,7 +1000,38 @@ describe("Bedrock provider", () => {
       { function: { arguments: '{"city":' }, index: 0 },
     ]);
     expect(chunks[6]?.choices[0]?.finishReason).toBe("tool_calls");
+    expect(chunks[6]?.usage).toBeUndefined();
+    expect(chunks[7]?.choices).toEqual([]);
     expect(chunks[7]?.usage).toMatchObject({ promptTokens: 3, totalTokens: 6 });
+  });
+
+  it("reports streamed usage on a chunk with no choices", async () => {
+    const send = vi.fn(async () => ({
+      stream: events(
+        { contentBlockDelta: { delta: { text: "hi" } } },
+        { messageStop: { stopReason: "max_tokens" } },
+        { metadata: { metrics: {}, usage: { inputTokens: 18, outputTokens: 5, totalTokens: 23 } } },
+      ),
+    }));
+    const result = await provider(send).completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "model",
+      stream: true,
+    });
+    const chunks: ChatCompletionChunk[] = [];
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    for await (const chunk of result as AsyncIterable<ChatCompletionChunk>) chunks.push(chunk);
+
+    const finish = chunks.at(-2);
+    const usage = chunks.at(-1);
+    expect(finish?.choices[0]?.finishReason).toBe("length");
+    expect(finish?.usage).toBeUndefined();
+    expect(usage?.choices).toEqual([]);
+    expect(usage?.usage).toEqual({
+      completionTokens: 5,
+      promptTokens: 18,
+      totalTokens: 23,
+    });
   });
 
   const bedrockStopReasons = {

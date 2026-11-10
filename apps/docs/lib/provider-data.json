@@ -697,14 +697,14 @@
   {
     "apiBase": "https://api.deepinfra.com/v1/openai",
     "capabilities": {
-      "audioSpeech": false,
-      "audioTranscription": false,
+      "audioSpeech": true,
+      "audioTranscription": true,
       "batch": false,
       "completion": true,
       "embedding": true,
       "files": false,
       "imageEdit": false,
-      "imageGeneration": false,
+      "imageGeneration": true,
       "listModels": true,
       "messages": true,
       "moderation": true,

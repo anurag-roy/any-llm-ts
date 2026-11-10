@@ -1038,7 +1038,6 @@ function streamChunk<Value>(
     role: "assistant",
   };
   let finishReason: FinishReason = null;
-  let usage: CompletionUsage | undefined;
 
   if (event.messageStart !== undefined) {
     delta.content = "";
@@ -1089,7 +1088,17 @@ function streamChunk<Value>(
     finishReason = bedrockFinishReason(stop.stopReason);
   } else if (event.metadata !== undefined) {
     const metadata = parseJsonObject(event.metadata);
-    usage = normalizedUsage(metadata.usage);
+    const usage = normalizedUsage(metadata.usage);
+    return {
+      choices: [],
+      created: state.created,
+      id: state.id,
+      model: state.model,
+      object: "chat.completion.chunk",
+      provider: "bedrock",
+      raw: value,
+      ...includeWhen(!(usage === undefined), { usage }),
+    };
   } else {
     return undefined;
   }
@@ -1102,7 +1111,6 @@ function streamChunk<Value>(
     object: "chat.completion.chunk",
     provider: "bedrock",
     raw: value,
-    ...includeWhen(!(usage === undefined), { usage }),
   };
 }
 

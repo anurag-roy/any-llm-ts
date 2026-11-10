@@ -84,6 +84,8 @@ function sharedVideoParameter(
       return params.generateAudio;
     case "last_frame":
       return params.lastFrame;
+    case "model_id":
+      return params.model;
     case "negative_prompt":
       return params.negativePrompt;
     case "prompt":

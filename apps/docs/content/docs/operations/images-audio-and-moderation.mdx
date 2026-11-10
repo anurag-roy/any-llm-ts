@@ -80,11 +80,12 @@ await writeFile("speech.mp3", audio);
 ```
 
 OpenAI and Azure OpenAI take `instructions`, `speed`, and the usual formats (`mp3`, `opus`, `aac`,
-`flac`, `wav`, `pcm`). Groq, Together, Mistral, and Gemini also advertise speech, with provider
-limits: Groq serves `flac` / `mp3` / `wav` and rejects `instructions`; Together serves `mp3` /
-`wav` and rejects `instructions` and `speed`; Mistral Voxtral sends `voice` as `voice_id` and
-rejects `aac`; Gemini TTS goes through `generateContent` and returns WAV (or raw PCM). Vertex AI
-does not inherit Gemini speech.
+`flac`, `wav`, `pcm`). Groq, Together, Mistral, Gemini, and DeepInfra also advertise speech, with
+provider limits: Groq serves `flac` / `mp3` / `wav` and rejects `instructions`; Together serves
+`mp3` / `wav` and rejects `instructions` and `speed`; Mistral Voxtral sends `voice` as `voice_id`
+and rejects `aac`; Gemini TTS goes through `generateContent` and returns WAV (or raw PCM); DeepInfra
+serves `flac` / `mp3` / `opus` / `pcm` / `wav` and rejects `instructions` and `aac`. Vertex AI does
+not inherit Gemini speech.
 
 ## Moderation
 

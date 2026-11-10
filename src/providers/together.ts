@@ -397,18 +397,34 @@ function jsonObjectList(value: JsonValue | undefined): JsonObject[] {
   );
 }
 
+function jsonObjectCopy(value: JsonValue | undefined): JsonObject {
+  return isJsonObject(value) ? Object.fromEntries(Object.entries(value)) : {};
+}
+
+function isAsciiDecimal(value: string): boolean {
+  return /^[0-9]+$/u.test(value);
+}
+
+function matchResolutionSpelling(options: JsonObject, sent: string): void {
+  const value = options.resolution;
+  if (!isString(value)) return;
+  let tier = value.toLowerCase();
+  if (tier === "4k") tier = "2160p";
+  else if (tier.endsWith("p") && isAsciiDecimal(tier.slice(0, -1))) {
+    tier = `${String(Number(tier.slice(0, -1)))}p`;
+  }
+  if (tier === sent) options.resolution = sent;
+}
+
 export function convertTogetherVideoParams(
   params: VideoGenerationParams,
 ): TogetherVideoCreateRequest {
   const extras = { ...(params.providerOptions ?? {}) };
   const timeout = isNumber(extras.timeout) ? extras.timeout : undefined;
   delete extras.timeout;
-  const extraBody: JsonObject = isJsonObject(extras.extra_body)
-    ? Object.fromEntries(Object.entries(extras.extra_body))
-    : {};
+  const extraBody = jsonObjectCopy(extras.extra_body);
   delete extras.extra_body;
   const fields: SharedVideoFields = { prompt: ["prompt", params.prompt] };
-  const bodyFields: SharedVideoFields = {};
   const mediaFields: SharedVideoFields = {};
   if (params.seconds !== undefined) fields.seconds = ["seconds", String(params.seconds)];
   const geometry = parseVideoGeometry(params);
@@ -419,21 +435,21 @@ export function convertTogetherVideoParams(
       fields.height = ["size", height];
     }
     if (params.resolution !== undefined) {
-      bodyFields.resolution = ["resolution", `${String(geometry.shortSide)}p`];
+      fields.resolution = ["resolution", `${String(geometry.shortSide)}p`];
     }
     if (params.aspectRatio !== undefined) {
-      bodyFields.ratio = ["aspect_ratio", params.aspectRatio];
+      fields.ratio = ["aspect_ratio", params.aspectRatio];
     }
   }
   if (params.generateAudio !== undefined) {
-    bodyFields.generate_audio = ["generate_audio", params.generateAudio];
+    fields.generate_audio = ["generate_audio", params.generateAudio];
   }
   if (params.seed !== undefined) fields.seed = ["seed", params.seed];
   if (params.negativePrompt !== undefined) {
     fields.negative_prompt = ["negative_prompt", params.negativePrompt];
   }
   if (params.referenceImages !== undefined) {
-    fields.reference_images = ["reference_images", params.referenceImages];
+    mediaFields.reference_images = ["reference_images", params.referenceImages];
   }
   if (params.referenceAudios !== undefined) {
     mediaFields.audio_inputs = ["reference_audios", params.referenceAudios];
@@ -445,42 +461,57 @@ export function convertTogetherVideoParams(
     ];
   }
 
-  checkProviderOptions(params, fields, extraBody);
-  const extraFrameImages = jsonObjectList(extras.frame_images);
-  delete extras.frame_images;
-  const bodyFrameImages = jsonObjectList(extraBody.frame_images);
-  delete extraBody.frame_images;
-  const frameImages = [...extraFrameImages, ...bodyFrameImages];
+  const sentResolution = fields.resolution?.[1];
+  if (isString(sentResolution)) {
+    matchResolutionSpelling(extras, sentResolution);
+    matchResolutionSpelling(extraBody, sentResolution);
+  }
+  checkProviderOptions(params, { ...fields, model: ["model_id", params.model] }, extraBody);
+  const bodyMedia = jsonObjectCopy(extraBody.media);
+  delete extraBody.media;
+  const keywordMedia = jsonObjectCopy(extras.media);
+  delete extras.media;
+  const sharedFrames: [string, string, string][] = [];
   for (const [role, parameterName, image] of [
     ["first", "first_frame", params.firstFrame],
     ["last", "last_frame", params.lastFrame],
   ] as const) {
-    if (image === undefined) continue;
-    const field = `frame_images[${role}]`;
-    const passed = frameImages
-      .filter((entry) => entry.frame === role)
-      .flatMap((entry) => (entry.input_image === undefined ? [] : [entry.input_image]));
-    checkProviderOptions(
-      params,
-      { [field]: [parameterName, [image]] },
-      passed.length > 0 ? { [field]: passed } : {},
-    );
-    if (passed.length === 0) frameImages.push({ frame: role, input_image: image });
+    if (image !== undefined) sharedFrames.push([role, parameterName, image]);
   }
-  const callerMedia = isJsonObject(extraBody.media)
-    ? Object.fromEntries(Object.entries(extraBody.media))
-    : {};
-  delete extraBody.media;
+  for (const source of [bodyMedia, keywordMedia]) {
+    checkProviderOptions(params, mediaFields, source);
+    for (const [role, parameterName, image] of sharedFrames) {
+      const field = `frame_images[${role}]`;
+      const passed = jsonObjectList(source.frame_images)
+        .filter((entry) => entry.frame === role)
+        .flatMap((entry) => (entry.input_image === undefined ? [] : [entry.input_image]));
+      checkProviderOptions(
+        params,
+        { [field]: [parameterName, [image]] },
+        passed.length > 0 ? { [field]: passed } : {},
+      );
+    }
+  }
+  const callerMedia = Object.fromEntries([
+    ...Object.entries(bodyMedia),
+    ...Object.entries(keywordMedia),
+  ]);
+  const frameImages = jsonObjectList(callerMedia.frame_images);
+  delete callerMedia.frame_images;
+  for (const [role, , image] of sharedFrames) {
+    if (!frameImages.some((entry) => entry.frame === role)) {
+      frameImages.push({ frame: role, input_image: image });
+    }
+  }
   const media = mergeProviderOptions(params, mediaFields, callerMedia);
-  const mergedBody = mergeProviderOptions(params, bodyFields, extraBody);
-  if (Object.keys(media).length > 0) mergedBody.media = media;
+  if (frameImages.length > 0) media.frame_images = frameImages;
   const mergedFields = mergeProviderOptions(params, fields, extras);
   return {
     body: {
       model: params.model,
       ...mergedFields,
-      ...includeWhen(frameImages.length > 0, { frame_images: frameImages }),
-      ...mergedBody,
+      ...includeWhen(Object.keys(media).length > 0, { media }),
+      ...includeWhen(Object.keys(extraBody).length > 0, extraBody),
     },
     ...includeWhen(timeout !== undefined, { timeout }),
   };

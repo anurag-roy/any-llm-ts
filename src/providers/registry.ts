@@ -710,7 +710,10 @@ addBuiltIn("deepinfra", {
   metadata: {
     apiBase: "https://api.deepinfra.com/v1/openai",
     capabilities: capabilities({
+      audioSpeech: true,
+      audioTranscription: true,
       embedding: true,
+      imageGeneration: true,
       moderation: true,
       reasoning: true,
       videoGeneration: true,

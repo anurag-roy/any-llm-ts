@@ -55,14 +55,17 @@ function rememberJob(job: VideoJob): VideoJob {
   return job;
 }
 
-/** DeepInfra adapter: OpenAI-compatible chat and embeddings, plus native inference video. */
+/** DeepInfra adapter: OpenAI-compatible chat, embeddings, images and audio, plus native inference video. */
 export class DeepinfraProvider extends OpenAIProvider {
   constructor(options: ProviderOptions = {}, client?: OpenAI) {
     super(
       {
         apiBase: "https://api.deepinfra.com/v1/openai",
         capabilities: {
+          audioSpeech: true,
+          audioTranscription: true,
           embedding: true,
+          imageGeneration: true,
           moderation: true,
           reasoning: true,
           videoGeneration: true,
@@ -72,6 +75,10 @@ export class DeepinfraProvider extends OpenAIProvider {
         envApiBase: "DEEPINFRA_API_BASE",
         envApiKey: "DEEPINFRA_API_KEY",
         name: "deepinfra",
+        quirks: {
+          rejectSpeechInstructions: true,
+          speechResponseFormats: ["flac", "mp3", "opus", "pcm", "wav"],
+        },
       },
       options,
       client,

@@ -128,15 +128,17 @@ describe("Together video conversion", () => {
       }).body,
     ).toEqual({
       fps: 24,
-      frame_images: [
-        { frame: "first", input_image: "https://img/first.png" },
-        { frame: "last", input_image: "https://img/last.png" },
-      ],
       height: 720,
+      media: {
+        frame_images: [
+          { frame: "first", input_image: "https://img/first.png" },
+          { frame: "last", input_image: "https://img/last.png" },
+        ],
+        reference_images: ["https://img/ref.png"],
+      },
       model: "ByteDance/Seedance-2.0",
       negative_prompt: "blurry",
       prompt: "penguins",
-      reference_images: ["https://img/ref.png"],
       seconds: "5",
       seed: 7,
       steps: 30,
@@ -147,12 +149,16 @@ describe("Together video conversion", () => {
         lastFrame: "https://img/last.png",
         model: "m",
         prompt: "p",
-        providerOptions: { frame_images: [{ frame: 0.5, input_image: "https://img/mid.png" }] },
-      }).body.frame_images,
-    ).toEqual([
-      { frame: 0.5, input_image: "https://img/mid.png" },
-      { frame: "last", input_image: "https://img/last.png" },
-    ]);
+        providerOptions: {
+          media: { frame_images: [{ frame: 0.5, input_image: "https://img/mid.png" }] },
+        },
+      }).body.media,
+    ).toEqual({
+      frame_images: [
+        { frame: 0.5, input_image: "https://img/mid.png" },
+        { frame: "last", input_image: "https://img/last.png" },
+      ],
+    });
   });
 
   it("rejects a malformed size before the request", () => {
@@ -161,23 +167,51 @@ describe("Together video conversion", () => {
     );
   });
 
-  it("sends resolution and ratio through the request body", () => {
+  it("sends resolution and ratio as top-level fields", () => {
     expect(
       convertTogetherVideoParams({
         aspectRatio: "16:9",
         model: "ByteDance/Seedance-2.5",
         prompt: "penguins",
-        providerOptions: { extra_body: { generate_audio: false } },
+        providerOptions: { extra_body: { output_quality: 30 } },
         resolution: "480P",
       }).body,
     ).toEqual({
-      generate_audio: false,
       model: "ByteDance/Seedance-2.5",
+      output_quality: 30,
       prompt: "penguins",
       ratio: "16:9",
       resolution: "480p",
     });
   });
+
+  it.each([
+    { expected: { resolution: "2160p" }, options: { resolution: "4k" }, resolution: "4k" },
+    { expected: { resolution: "720p" }, options: { resolution: "720P" }, resolution: "720p" },
+    {
+      expected: { resolution: "720p" },
+      options: { extra_body: { resolution: "0720p" } },
+      resolution: "720p",
+    },
+    { expected: { resolution: "720p" }, options: { resolution: "720p" }, resolution: "0720p" },
+    {
+      expected: { resolution: "2160p" },
+      options: { extra_body: { resolution: "4k" } },
+      resolution: "4K",
+    },
+  ] as const)(
+    "accepts resolution $resolution spelled another way",
+    ({ expected, options, resolution }) => {
+      expect(
+        convertTogetherVideoParams({
+          model: "m",
+          prompt: "p",
+          providerOptions: options,
+          resolution,
+        }).body,
+      ).toEqual({ model: "m", prompt: "p", ...expected });
+    },
+  );
 
   it("rejects size combined with resolution", () => {
     expect(() =>
@@ -202,19 +236,26 @@ describe("Together video conversion", () => {
       model: "ByteDance/Seedance-2.5",
       prompt: "a rapper",
     });
-    const extraBody = {
-      generate_audio: true,
-      media: { reference_videos: [{ video: "https://v/ref.mp4" }] },
-    };
+    const media = { reference_videos: [{ video: "https://v/ref.mp4" }] };
     expect(
       convertTogetherVideoParams({
         model: "ByteDance/Seedance-2.5",
         prompt: "a rapper",
-        providerOptions: { extra_body: extraBody },
+        providerOptions: { media },
+        referenceAudios: ["https://audio/beat.mp3"],
+      }).body.media,
+    ).toEqual({
+      audio_inputs: ["https://audio/beat.mp3"],
+      reference_videos: [{ video: "https://v/ref.mp4" }],
+    });
+    expect(
+      convertTogetherVideoParams({
+        model: "ByteDance/Seedance-2.5",
+        prompt: "a rapper",
+        providerOptions: { extra_body: { media } },
         referenceAudios: ["https://audio/beat.mp3"],
       }).body,
     ).toEqual({
-      generate_audio: true,
       media: {
         audio_inputs: ["https://audio/beat.mp3"],
         reference_videos: [{ video: "https://v/ref.mp4" }],
@@ -222,7 +263,28 @@ describe("Together video conversion", () => {
       model: "ByteDance/Seedance-2.5",
       prompt: "a rapper",
     });
-    expect(extraBody.media).toEqual({ reference_videos: [{ video: "https://v/ref.mp4" }] });
+    expect(media).toEqual({ reference_videos: [{ video: "https://v/ref.mp4" }] });
+  });
+
+  it("lets media as an argument win over media in extra_body", () => {
+    expect(
+      convertTogetherVideoParams({
+        model: "m",
+        prompt: "p",
+        providerOptions: {
+          extra_body: {
+            media: {
+              frame_videos: [{ video: "https://v/f.mp4" }],
+              source_video: "https://v/old.mp4",
+            },
+          },
+          media: { source_video: "https://v/new.mp4" },
+        },
+      }).body.media,
+    ).toEqual({
+      frame_videos: [{ video: "https://v/f.mp4" }],
+      source_video: "https://v/new.mp4",
+    });
   });
 
   it("sends generateAudio and referenceVideos through the request body", () => {
@@ -267,10 +329,55 @@ describe("Together video conversion", () => {
         size: "1280x720",
       }),
     ).toThrow(/size="1280x720" conflicts with width=1920/u);
+    expect(() =>
+      convertTogetherVideoParams({
+        model: "ByteDance/Seedance-2.0",
+        prompt: "a dancer",
+        providerOptions: { extra_body: { model: "Kwai/Kling-2.1" } },
+      }),
+    ).toThrow(/model_id="ByteDance\/Seedance-2.0" conflicts with model="Kwai\/Kling-2.1"/u);
+    expect(() =>
+      convertTogetherVideoParams({
+        model: "ByteDance/Seedance-2.0",
+        prompt: "a dancer",
+        providerOptions: {
+          extra_body: { media: { reference_images: ["b"] } },
+          media: { reference_images: ["a"] },
+        },
+        referenceImages: ["a"],
+      }),
+    ).toThrow(/reference_images=\["a"\] conflicts with reference_images=\["b"\]/u);
+    expect(() =>
+      convertTogetherVideoParams({
+        firstFrame: "a.png",
+        model: "ByteDance/Seedance-2.0",
+        prompt: "a dancer",
+        providerOptions: {
+          extra_body: { media: { frame_images: [{ frame: "first", input_image: "b.png" }] } },
+          media: { frame_images: [{ frame: "first", input_image: "a.png" }] },
+        },
+      }),
+    ).toThrow(/first_frame="a.png" conflicts with frame_images\[first\]=\["b.png"\]/u);
+    expect(() =>
+      convertTogetherVideoParams({
+        model: "ByteDance/Seedance-2.5",
+        prompt: "penguins",
+        providerOptions: { extra_body: { resolution: "1080p" } },
+        resolution: "720p",
+      }),
+    ).toThrow(/resolution="720p" conflicts with resolution="1080p"/u);
+    expect(() =>
+      convertTogetherVideoParams({
+        model: "ByteDance/Seedance-2.0",
+        prompt: "a dancer",
+        providerOptions: { media: { reference_images: ["b"] } },
+        referenceImages: ["a"],
+      }),
+    ).toThrow(/reference_images=\["a"\] conflicts with reference_images=\["b"\]/u);
   });
 
   it("accepts options that agree with the shared fields", () => {
-    const extraBody = { fps: 24, generate_audio: false };
+    const extraBody = { fps: 24, generate_audio: false, model: "ByteDance/Seedance-2.0" };
     expect(
       convertTogetherVideoParams({
         generateAudio: false,
@@ -287,7 +394,51 @@ describe("Together video conversion", () => {
       prompt: "a dancer",
       width: 1280,
     });
-    expect(extraBody).toEqual({ fps: 24, generate_audio: false });
+    expect(extraBody).toEqual({
+      fps: 24,
+      generate_audio: false,
+      model: "ByteDance/Seedance-2.0",
+    });
+  });
+
+  it("keeps one frame image when the caller repeats last_frame", () => {
+    expect(
+      convertTogetherVideoParams({
+        lastFrame: "https://img/last.png",
+        model: "m",
+        prompt: "p",
+        providerOptions: {
+          media: { frame_images: [{ frame: "last", input_image: "https://img/last.png" }] },
+        },
+      }).body.media,
+    ).toEqual({
+      frame_images: [{ frame: "last", input_image: "https://img/last.png" }],
+    });
+  });
+
+  it("merges extra_body frame images with first_frame", () => {
+    const extraBody = {
+      fps: 24,
+      media: { frame_images: [{ frame: 0.5, input_image: "https://img/mid.png" }] },
+    };
+    expect(
+      convertTogetherVideoParams({
+        firstFrame: "https://img/first.png",
+        model: "m",
+        prompt: "p",
+        providerOptions: { extra_body: extraBody },
+      }).body,
+    ).toEqual({
+      fps: 24,
+      media: {
+        frame_images: [
+          { frame: 0.5, input_image: "https://img/mid.png" },
+          { frame: "first", input_image: "https://img/first.png" },
+        ],
+      },
+      model: "m",
+      prompt: "p",
+    });
   });
 });
 
@@ -344,5 +495,36 @@ describe("Together video provider methods", () => {
       status: "completed",
     });
     expect(get).toHaveBeenCalledTimes(2);
+  });
+
+  it("posts media, resolution, and generate_audio in the request body", async () => {
+    const post = vi.fn().mockResolvedValue(togetherJob({ status: "queued" }));
+    const provider = new TogetherProvider({ apiKey: "secret" }, client({ post }));
+    await expect(
+      provider.videoGeneration({
+        aspectRatio: "16:9",
+        firstFrame: "https://img/first.png",
+        generateAudio: true,
+        model: "ByteDance/Seedance-2.5",
+        prompt: "penguins",
+        providerOptions: { fps: 24 },
+        referenceImages: ["https://img/ref.png"],
+        resolution: "720p",
+      }),
+    ).resolves.toMatchObject({ id: "vid-123", status: "queued" });
+    expect(post).toHaveBeenCalledWith("https://api.together.xyz/v2/videos", {
+      body: {
+        fps: 24,
+        generate_audio: true,
+        media: {
+          frame_images: [{ frame: "first", input_image: "https://img/first.png" }],
+          reference_images: ["https://img/ref.png"],
+        },
+        model: "ByteDance/Seedance-2.5",
+        prompt: "penguins",
+        ratio: "16:9",
+        resolution: "720p",
+      },
+    });
   });
 });
