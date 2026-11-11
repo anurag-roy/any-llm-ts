@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  HUGGINGFACE_MODELS_ROUTER_URL,
   HUGGINGFACE_OPENRESPONSES_URL,
   HuggingFaceProvider,
   huggingfaceSdkOptions,
@@ -45,6 +46,12 @@ describe("Hugging Face provider", () => {
     });
     expect(sdk.inference).not.toHaveProperty("bill_to");
     expect(sdk.responses).not.toHaveProperty("billTo");
+    expect(sdk.models).toMatchObject({
+      apiKey: "test-api-key",
+      baseURL: HUGGINGFACE_MODELS_ROUTER_URL,
+      timeout: 10,
+    });
+    expect(sdk.models).not.toHaveProperty("defaultHeaders");
   });
 
   it("bills the token account when billTo is omitted", () => {
@@ -55,6 +62,11 @@ describe("Hugging Face provider", () => {
       apiKey: "test-api-key",
       baseURL: HUGGINGFACE_OPENRESPONSES_URL,
     });
+    expect(sdk.models).toMatchObject({
+      apiKey: "test-api-key",
+      baseURL: HUGGINGFACE_MODELS_ROUTER_URL,
+    });
+    expect(sdk.models).not.toHaveProperty("defaultHeaders");
   });
 
   it("uses the official inference client and normalizes empty tool arguments", async () => {
@@ -160,6 +172,35 @@ describe("Hugging Face provider", () => {
     );
   });
 
+  it("lists chat models from the Inference Providers router", async () => {
+    const page = {
+      async *[Symbol.asyncIterator]() {
+        yield {
+          created: 0,
+          id: "swiss-ai/Apertus-70B-Instruct-2509",
+          object: "model",
+          owned_by: "swiss-ai",
+        };
+      },
+    };
+    const list = vi.fn().mockResolvedValue(page);
+    const fetch = vi.fn();
+    const provider = new HuggingFaceProvider(
+      { apiKey: "hf-token", clientOptions: { fetch } },
+      {
+        ...fakeClients({ chatCompletion: vi.fn(), chatCompletionStream: vi.fn() }),
+        models: Object.assign(new OpenAI({ apiKey: "test" }), {
+          models: { list },
+        }),
+      },
+    );
+    await expect(provider.listModels()).resolves.toMatchObject([
+      { id: "swiss-ai/Apertus-70B-Instruct-2509", ownedBy: "swiss-ai" },
+    ]);
+    expect(list).toHaveBeenCalledOnce();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("lists warm models from the Hugging Face Hub API", async () => {
     const fetch = vi
       .fn()
@@ -184,5 +225,31 @@ describe("Hugging Face provider", () => {
     const url = String(fetch.mock.calls[0]?.[0]);
     expect(url).toContain("inference=warm");
     expect(url).toContain("limit=2");
+  });
+
+  it("searches the Hub when given Hub filters", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify([{ id: "swiss-ai/Apertus-v1.5-70B" }]), { status: 200 }),
+      );
+    const list = vi.fn();
+    const provider = new HuggingFaceProvider(
+      { apiKey: "hf-token", clientOptions: { fetch } },
+      {
+        ...fakeClients({ chatCompletion: vi.fn(), chatCompletionStream: vi.fn() }),
+        models: Object.assign(new OpenAI({ apiKey: "test" }), {
+          models: { list },
+        }),
+      },
+    );
+    await expect(provider.listModels({ search: "Apertus" })).resolves.toMatchObject([
+      { id: "swiss-ai/Apertus-v1.5-70B", ownedBy: "huggingface" },
+    ]);
+    const url = String(fetch.mock.calls[0]?.[0]);
+    expect(url).toContain("search=Apertus");
+    expect(url).toContain("inference=warm");
+    expect(url).toContain("limit=20");
+    expect(list).not.toHaveBeenCalled();
   });
 });

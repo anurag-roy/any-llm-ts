@@ -1145,9 +1145,17 @@ function tokensByModality(
   return totals;
 }
 
-function normalizeUsage(
-  value: GenerateContentResponse["usageMetadata"],
-): CompletionUsage | undefined {
+function webSearchQueryCount(response: GenerateContentResponse): number {
+  let total = 0;
+  for (const candidate of response.candidates ?? []) {
+    const queries = candidate.groundingMetadata?.webSearchQueries;
+    if (Array.isArray(queries)) total += queries.length;
+  }
+  return total;
+}
+
+function normalizeUsage(response: GenerateContentResponse): CompletionUsage | undefined {
+  const value = response.usageMetadata;
   if (value === undefined) return undefined;
   // Gemini excludes tool-use prompt tokens from promptTokenCount but includes
   // them in totalTokenCount. OpenAI-shaped usage folds that category into promptTokens.
@@ -1181,12 +1189,14 @@ function normalizeUsage(
           }),
           ...includeWhen(promptAudio !== undefined, { audioTokens: promptAudio }),
         };
+  const webSearchRequests = webSearchQueryCount(response);
   return {
     completionTokens,
     promptTokens,
     totalTokens,
     ...includeWhen(!(completionTokensDetails === undefined), { completionTokensDetails }),
     ...includeWhen(!(promptTokensDetails === undefined), { promptTokensDetails }),
+    ...includeWhen(webSearchRequests > 0, { serverToolUse: { webSearchRequests } }),
   };
 }
 
@@ -2048,7 +2058,7 @@ export class GeminiProvider extends BaseProvider {
       }
     }
 
-    const usage = normalizeUsage(response.usageMetadata);
+    const usage = normalizeUsage(response);
 
     return {
       choices,
@@ -2173,7 +2183,7 @@ export class GeminiProvider extends BaseProvider {
         }
       }
 
-      const usage = normalizeUsage(response.usageMetadata);
+      const usage = normalizeUsage(response);
       if (cacheUse !== undefined) reportCacheWrite(usage, cacheUse);
       yield {
         choices,

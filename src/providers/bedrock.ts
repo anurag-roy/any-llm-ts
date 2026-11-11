@@ -1313,6 +1313,10 @@ export class BedrockProvider extends BaseProvider {
     return isAnthropicBedrockModel(model);
   }
 
+  override supportsCompletionResponseFormat(model: string): boolean {
+    return isAnthropicBedrockModel(model);
+  }
+
   override messages(
     params: MessagesParams,
     options?: CompletionOperationOptions,

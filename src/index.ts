@@ -96,12 +96,14 @@ export type {
   BedrockS3ClientLike,
 } from "./providers/bedrock.js";
 export { FireworksProvider } from "./providers/fireworks.js";
+export { OpenRouterProvider } from "./providers/openrouter.js";
 export { CohereProvider } from "./providers/cohere.js";
 export { DeepinfraProvider } from "./providers/deepinfra.js";
 export { GeminiProvider } from "./providers/gemini.js";
 export type { GeminiProviderConfig } from "./providers/gemini.js";
 export { GitHubProvider } from "./providers/github.js";
 export {
+  HUGGINGFACE_MODELS_ROUTER_URL,
   HUGGINGFACE_OPENRESPONSES_URL,
   HuggingFaceProvider,
   huggingfaceSdkOptions,

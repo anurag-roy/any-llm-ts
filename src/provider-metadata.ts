@@ -211,6 +211,7 @@ type GeneratedProviderMetadataKeys =
   | "promptCacheKeySupport"
   | "provenance"
   | "supportsCompletionN"
+  | "supportsCompletionResponseFormat"
   | "tier";
 
 type IncompleteProviderMetadata = Omit<
@@ -265,6 +266,7 @@ export function completeProviderMetadata(
       libraryVersion: packageMetadata.version,
     },
     supportsCompletionN: metadata.supportsCompletionN === true,
+    supportsCompletionResponseFormat: metadata.supportsCompletionResponseFormat !== false,
     tier: metadata.tier ?? providerTier(name),
   };
   validateProviderMetadata(completed, name);
@@ -446,6 +448,11 @@ export function validateProviderMetadata(metadata: ProviderMetadata, expectedId?
   }
   if (!isBoolean(metadata.supportsCompletionN)) {
     throw new TypeError(`Provider "${metadata.id}" supportsCompletionN must be boolean.`);
+  }
+  if (!isBoolean(metadata.supportsCompletionResponseFormat)) {
+    throw new TypeError(
+      `Provider "${metadata.id}" supportsCompletionResponseFormat must be boolean.`,
+    );
   }
   if (!["community", "verified"].includes(metadata.tier)) {
     throw new TypeError(`Provider "${metadata.id}" has invalid tier metadata.`);

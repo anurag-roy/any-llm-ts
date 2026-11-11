@@ -120,6 +120,23 @@ describe("Python source parity contract", () => {
     expect(AnyLLM.getProviderMetadata("bedrock").supportsCompletionN).toBe(false);
   });
 
+  it("exposes completion responseFormat support, including Bedrock per model", () => {
+    expect(AnyLLM.getProviderMetadata("openai").supportsCompletionResponseFormat).toBe(true);
+    expect(AnyLLM.getProviderMetadata("bedrock").supportsCompletionResponseFormat).toBe(true);
+    expect(AnyLLM.getProviderMetadata("inception").supportsCompletionResponseFormat).toBe(false);
+    expect(AnyLLM.getProviderMetadata("llamafile").supportsCompletionResponseFormat).toBe(false);
+    expect(AnyLLM.getProviderMetadata("minimax").supportsCompletionResponseFormat).toBe(false);
+    expect(AnyLLM.getProviderMetadata("sagemaker").supportsCompletionResponseFormat).toBe(false);
+    expect(AnyLLM.getProviderMetadata("zai").supportsCompletionResponseFormat).toBe(false);
+    expect(
+      AnyLLM.supportsCompletionResponseFormat(
+        "bedrock",
+        "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+      ),
+    ).toBe(true);
+    expect(AnyLLM.supportsCompletionResponseFormat("bedrock", "amazon.nova-lite-v1:0")).toBe(false);
+  });
+
   it("matches Python native Messages providers", () => {
     const expected = new Set(sourceParity.messagesNative);
     for (const metadata of AnyLLM.getAllProviderMetadata()) {

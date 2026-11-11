@@ -80,6 +80,7 @@ import {
   getProviderMetadata,
   getSupportedProviders,
   servesMessagesNatively,
+  supportsCompletionResponseFormat,
 } from "./providers/registry.js";
 
 export class AnyLLM {
@@ -110,6 +111,7 @@ export class AnyLLM {
       name: options.name.trim().toLowerCase(),
       promptCacheKeySupport: "passthrough" as const,
       supportsCompletionN: options.metadata?.supportsCompletionN ?? true,
+      supportsCompletionResponseFormat: options.metadata?.supportsCompletionResponseFormat ?? true,
       ...includeWhen(!(capabilities === undefined), {
         capabilities,
       }),
@@ -167,6 +169,18 @@ export class AnyLLM {
 
   servesMessagesNatively(model: string): boolean {
     return this.adapter.servesMessagesNatively(model);
+  }
+
+  /**
+   * Whether a chat completion for `model` may carry `responseFormat`.
+   * When this is false, a request with one raises before it reaches the provider.
+   */
+  static supportsCompletionResponseFormat(provider: string, model: string): boolean {
+    return supportsCompletionResponseFormat(provider, model);
+  }
+
+  supportsCompletionResponseFormat(model: string): boolean {
+    return this.adapter.supportsCompletionResponseFormat(model);
   }
 
   static splitModelProvider(model: string) {

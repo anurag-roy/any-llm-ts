@@ -87,6 +87,7 @@
       "libraryVersion": "0.8.0"
     },
     "supportsCompletionN": false,
+    "supportsCompletionResponseFormat": true,
     "tier": "verified"
   },
   {
@@ -117,6 +118,7 @@
     "envApiBase": "ATLASCLOUD_API_BASE",
     "envApiKey": "ATLASCLOUD_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -208,6 +210,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "community"
   },
   {
@@ -268,6 +271,7 @@
       "libraryVersion": "0.8.0"
     },
     "supportsCompletionN": false,
+    "supportsCompletionResponseFormat": true,
     "tier": "community"
   },
   {
@@ -328,6 +332,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "verified"
   },
   {
@@ -388,6 +393,7 @@
       "libraryVersion": "0.8.0"
     },
     "supportsCompletionN": false,
+    "supportsCompletionResponseFormat": true,
     "tier": "verified"
   },
   {
@@ -418,6 +424,7 @@
     "envApiBase": "CASCADIA_API_BASE",
     "envApiKey": "CASCADIA_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -479,6 +486,7 @@
     "envApiBase": "CEREBRAS_API_BASE",
     "envApiKey": "CEREBRAS_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -571,6 +579,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "community"
   },
   {
@@ -601,6 +610,7 @@
     "envApiBase": "DASHSCOPE_API_BASE",
     "envApiKey": "DASHSCOPE_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -661,6 +671,7 @@
     "envApiBase": "DATABRICKS_HOST",
     "envApiKey": "DATABRICKS_TOKEN",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -753,6 +764,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "community"
   },
   {
@@ -814,6 +826,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "verified"
   },
   {
@@ -844,6 +857,7 @@
     "envApiBase": "EDENAI_API_BASE",
     "envApiKey": "EDENAI_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -936,6 +950,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "verified"
   },
   {
@@ -996,6 +1011,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "verified"
   },
   {
@@ -1057,6 +1073,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "community"
   },
   {
@@ -1087,6 +1104,7 @@
     "envApiBase": "GMI_API_BASE",
     "envApiKey": "GMI_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1148,6 +1166,7 @@
     "envApiBase": "GROQ_BASE_URL",
     "envApiKey": "GROQ_API_KEY",
     "supportsCompletionN": false,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1239,6 +1258,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "community"
   },
   {
@@ -1269,6 +1289,7 @@
     "envApiBase": "INCEPTION_API_BASE",
     "envApiKey": "INCEPTION_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": false,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1330,6 +1351,7 @@
     "envApiBase": "KENARI_API_BASE",
     "envApiKey": "KENARI_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1422,6 +1444,7 @@
       "libraryVersion": "0.8.0"
     },
     "supportsCompletionN": false,
+    "supportsCompletionResponseFormat": true,
     "tier": "community"
   },
   {
@@ -1452,6 +1475,7 @@
     "envApiBase": "LLAMA_API_BASE",
     "envApiKey": "LLAMA_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1513,6 +1537,7 @@
     "envApiBase": "LLAMACPP_API_BASE",
     "envApiKey": "LLAMACPP_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1573,6 +1598,7 @@
     "apiBase": "http://127.0.0.1:8080/v1",
     "envApiBase": "LLAMAFILE_API_BASE",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": false,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1634,6 +1660,7 @@
     "envApiBase": "LM_STUDIO_API_BASE",
     "envApiKey": "LM_STUDIO_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1726,6 +1753,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "community"
   },
   {
@@ -1756,6 +1784,7 @@
     "envApiBase": "MINIMAX_API_BASE",
     "envApiKey": "MINIMAX_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": false,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1848,6 +1877,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "verified"
   },
   {
@@ -1878,6 +1908,7 @@
     "envApiBase": "MOONSHOT_API_BASE",
     "envApiKey": "MOONSHOT_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1939,6 +1970,7 @@
     "envApiBase": "ANY_LLM_PLATFORM_URL",
     "envApiKey": "ANY_LLM_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2000,6 +2032,7 @@
     "envApiBase": "NEBIUS_API_BASE",
     "envApiKey": "NEBIUS_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2061,6 +2094,7 @@
     "envApiBase": "NEOSANTARA_API_BASE",
     "envApiKey": "NEOSANTARA_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2121,6 +2155,7 @@
     "apiBase": "http://localhost:11434/v1",
     "envApiBase": "OLLAMA_HOST",
     "supportsCompletionN": false,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2244,9 +2279,11 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "verified"
   },
   {
+    "apiBase": "https://openrouter.ai/api/v1",
     "capabilities": {
       "audioSpeech": false,
       "audioTranscription": false,
@@ -2261,18 +2298,17 @@
       "moderation": false,
       "pdfInput": true,
       "reasoning": true,
-      "rerank": false,
+      "rerank": true,
       "responses": true,
       "streaming": true,
       "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://openrouter.ai/docs/api-reference/overview",
-    "name": "openrouter",
-    "requiresApiKey": true,
-    "apiBase": "https://openrouter.ai/api/v1",
     "envApiBase": "OPENROUTER_API_BASE",
     "envApiKey": "OPENROUTER_API_KEY",
+    "name": "openrouter",
+    "requiresApiKey": true,
     "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
@@ -2305,6 +2341,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "verified"
   },
   {
@@ -2365,6 +2402,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "verified"
   },
   {
@@ -2395,6 +2433,7 @@
     "envApiBase": "OVHCLOUD_API_BASE",
     "envApiKey": "OVHCLOUD_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2456,6 +2495,7 @@
     "envApiBase": "PERPLEXITY_BASE_URL",
     "envApiKey": "PERPLEXITY_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2517,6 +2557,7 @@
     "envApiBase": "PORTKEY_API_BASE",
     "envApiKey": "PORTKEY_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2578,6 +2619,7 @@
     "envApiBase": "QINIU_API_BASE",
     "envApiKey": "QINIU_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2639,6 +2681,7 @@
     "envApiBase": "REQUESTY_API_BASE",
     "envApiKey": "REQUESTY_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2698,6 +2741,7 @@
     "envApiKey": "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY",
     "name": "sagemaker",
     "requiresApiKey": false,
+    "supportsCompletionResponseFormat": false,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2760,6 +2804,7 @@
     "envApiBase": "SAMBANOVA_API_BASE",
     "envApiKey": "SAMBANOVA_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2821,6 +2866,7 @@
     "envApiBase": "TELNYX_API_BASE",
     "envApiKey": "TELNYX_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2913,6 +2959,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "verified"
   },
   {
@@ -2943,6 +2990,7 @@
     "envApiBase": "TOKENHUB_API_BASE",
     "envApiKey": "TOKENHUB_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -3034,6 +3082,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "community"
   },
   {
@@ -3094,6 +3143,7 @@
       "libraryVersion": "0.8.0"
     },
     "supportsCompletionN": false,
+    "supportsCompletionResponseFormat": true,
     "tier": "community"
   },
   {
@@ -3124,6 +3174,7 @@
     "envApiBase": "VLLM_API_BASE",
     "envApiKey": "VLLM_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -3215,6 +3266,7 @@
       "libraryVersion": "0.8.0"
     },
     "supportsCompletionN": false,
+    "supportsCompletionResponseFormat": true,
     "tier": "verified"
   },
   {
@@ -3275,6 +3327,7 @@
       "libraryVersion": "0.8.0"
     },
     "supportsCompletionN": false,
+    "supportsCompletionResponseFormat": true,
     "tier": "community"
   },
   {
@@ -3305,6 +3358,7 @@
     "envApiBase": "XAI_API_BASE",
     "envApiKey": "XAI_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -3366,6 +3420,7 @@
     "envApiBase": "ZAI_BASE_URL",
     "envApiKey": "ZAI_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": false,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"

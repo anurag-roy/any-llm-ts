@@ -1,11 +1,12 @@
 import { includeWhen } from "../utils.js";
 import { parseJsonObject } from "../utils.js";
 import type { JsonObject } from "../types.js";
-import { isFunction, isJsonObject, isNumber, isObject, isString } from "../utils.js";
+import { isBoolean, isFunction, isJsonObject, isNumber, isObject, isString } from "../utils.js";
 import { InferenceClient } from "@huggingface/inference";
 import OpenAI from "openai";
 import type { ClientOptions } from "openai";
 
+import { contextWindowFromListing, listedModel } from "../model.js";
 import { MissingApiKeyError, UnsupportedParameterError } from "../errors.js";
 import type {
   ChatCompletion,
@@ -20,6 +21,7 @@ import { OpenAIProvider } from "./openai.js";
 type Fetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 export const HUGGINGFACE_OPENRESPONSES_URL = "https://evalstate-openresponses.hf.space/v1";
+export const HUGGINGFACE_MODELS_ROUTER_URL = "https://router.huggingface.co/v1";
 const HF_BILL_TO_HEADER = "X-HF-Bill-To";
 
 export type HuggingFaceInferenceClientLike = Pick<
@@ -29,6 +31,7 @@ export type HuggingFaceInferenceClientLike = Pick<
 
 export interface HuggingFaceProviderClients {
   inference?: HuggingFaceInferenceClientLike;
+  models?: OpenAI;
   responses?: OpenAI;
 }
 
@@ -36,6 +39,11 @@ export interface HuggingFaceSdkOptions {
   inference: {
     billTo?: string;
     endpointUrl?: string;
+    fetch: Fetch;
+  };
+  models: {
+    apiKey: string;
+    baseURL: string;
     fetch: Fetch;
   };
   responses: {
@@ -80,6 +88,13 @@ export function huggingfaceSdkOptions(options: ProviderOptions): HuggingFaceSdkO
       ...huggingFaceClientOptions,
       ...includeWhen(billTo !== undefined, { billTo }),
     },
+    // SAFETY: Nested OpenAI clientOptions are JSON constructor fields plus fetch.
+    models: {
+      ...openAIClientOptions,
+      apiKey,
+      baseURL: HUGGINGFACE_MODELS_ROUTER_URL,
+      fetch: fetchImplementation,
+    },
     // SAFETY: Nested OpenAI clientOptions are JSON constructor fields plus fetch and billing headers.
     responses: {
       ...openAIClientOptions,
@@ -112,10 +127,28 @@ function normalizeEmptyToolArguments<Value>(value: Value): void {
   }
 }
 
-function hubModelsUrl(limit: number): string {
+function hubQueryValue<Value>(value: Value): string | undefined {
+  if (isString(value) || isNumber(value) || isBoolean(value)) return String(value);
+  return undefined;
+}
+
+function hubModelsUrl(options: JsonObject): string {
   const url = new URL("https://huggingface.co/api/models");
-  url.searchParams.set("inference", "warm");
-  url.searchParams.set("limit", String(limit));
+  const inference =
+    options.inference !== undefined
+      ? options.inference
+      : options.inference_provider === undefined
+        ? "warm"
+        : undefined;
+  const inferenceValue = hubQueryValue(inference);
+  if (inferenceValue !== undefined) url.searchParams.set("inference", inferenceValue);
+  const limit = hubQueryValue(options.limit ?? 20);
+  if (limit !== undefined) url.searchParams.set("limit", limit);
+  for (const [key, value] of Object.entries(options)) {
+    if (key === "inference" || key === "limit") continue;
+    const serialized = hubQueryValue(value);
+    if (serialized !== undefined) url.searchParams.set(key, serialized);
+  }
   return url.toString();
 }
 
@@ -123,6 +156,7 @@ export class HuggingFaceProvider extends OpenAIProvider {
   private readonly apiKey: string;
   private readonly fetch: Fetch;
   private readonly inference: HuggingFaceInferenceClientLike;
+  private readonly modelsClient: OpenAI;
 
   constructor(options: ProviderOptions = {}, clients: HuggingFaceProviderClients = {}) {
     const sdk = huggingfaceSdkOptions(options);
@@ -162,6 +196,7 @@ export class HuggingFaceProvider extends OpenAIProvider {
       clients.inference ??
       // SAFETY: huggingfaceSdkOptions returns InferenceClient constructor fields, including billTo.
       new InferenceClient(sdk.responses.apiKey, sdk.inference);
+    this.modelsClient = clients.models ?? new OpenAI(sdk.models);
   }
 
   override completion(
@@ -198,9 +233,19 @@ export class HuggingFaceProvider extends OpenAIProvider {
   }
 
   override listModels(providerOptions: JsonObject = {}): Promise<Model[]> {
+    if (Object.keys(providerOptions).length === 0) {
+      return this.execute(async () => {
+        const page = await this.modelsClient.models.list();
+        const models: Model[] = [];
+        for await (const model of page) {
+          const listed = listedModel(model, { ownedBy: "huggingface" });
+          if (listed !== undefined) models.push(listed);
+        }
+        return models;
+      });
+    }
     return this.execute(async () => {
-      const limit = isNumber(providerOptions.limit) ? providerOptions.limit : 20;
-      const response = await this.fetch(hubModelsUrl(limit), {
+      const response = await this.fetch(hubModelsUrl(providerOptions), {
         headers: { Authorization: `Bearer ${this.apiKey}` },
       });
       if (!response.ok) {
@@ -224,6 +269,7 @@ export class HuggingFaceProvider extends OpenAIProvider {
         if (id === undefined) return [];
         const created = record.createdAt ?? record.created_at;
         const milliseconds = isString(created) ? Date.parse(created) : Number.NaN;
+        const contextWindow = contextWindowFromListing(record);
         return [
           {
             created: Number.isNaN(milliseconds) ? 0 : Math.floor(milliseconds / 1_000),
@@ -231,6 +277,7 @@ export class HuggingFaceProvider extends OpenAIProvider {
             object: "model",
             ownedBy: "huggingface",
             raw: item,
+            ...includeWhen(contextWindow !== undefined, { contextWindow }),
           },
         ];
       });

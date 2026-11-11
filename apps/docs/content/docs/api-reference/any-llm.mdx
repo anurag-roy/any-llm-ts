@@ -63,6 +63,8 @@ completions for compatible providers. Operations that an adapter does not suppor
 AnyLLM.getSupportedProviders();
 AnyLLM.getProviderMetadata("openai");
 AnyLLM.getAllProviderMetadata();
+AnyLLM.servesMessagesNatively("bedrock", "us.anthropic.claude-haiku-4-5-20251001-v1:0");
+AnyLLM.supportsCompletionResponseFormat("bedrock", "amazon.nova-lite-v1:0");
 ```
 
 ## Model parsing

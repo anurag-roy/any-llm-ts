@@ -62,6 +62,7 @@ import type {
   TranscriptionParams,
   UploadFileParams,
 } from "../types.js";
+import { listedModel } from "../model.js";
 import { completeProviderMetadata, completionParamsWithValidatedN } from "../provider-metadata.js";
 import { resolveTranscriptionFile } from "../audio.js";
 import { resolveImages } from "../image.js";
@@ -141,6 +142,7 @@ interface OpenAIProviderConfig {
   quirks?: OpenAIProviderQuirks;
   requiresApiKey?: boolean;
   supportsCompletionN?: boolean;
+  supportsCompletionResponseFormat?: boolean;
 }
 
 interface OpenAIProviderQuirks {
@@ -1003,6 +1005,7 @@ export class OpenAIProvider extends BaseProvider {
           promptCacheKeySupport: config.promptCacheKeySupport,
         }),
         supportsCompletionN: config.supportsCompletionN ?? true,
+        supportsCompletionResponseFormat: config.supportsCompletionResponseFormat !== false,
         fileOperations: config.fileOperations ?? [],
         ...includeWhen(config.messagesNative === true, { messagesNative: true }),
       },
@@ -1189,18 +1192,10 @@ export class OpenAIProvider extends BaseProvider {
     return this.execute(async () => {
       const page = await this.client.models.list(providerOptions);
       const models: Model[] = [];
+      const ownedBy = this.config.quirks?.defaultModelOwner ?? this.metadata.name;
       for await (const model of page) {
-        const raw = parseJsonObject(model);
-        if (!isString(raw.id)) continue;
-        models.push({
-          created: isNumber(raw.created) ? raw.created : 0,
-          id: raw.id,
-          object: "model",
-          ownedBy: isString(raw.owned_by)
-            ? raw.owned_by
-            : (this.config.quirks?.defaultModelOwner ?? this.metadata.name),
-          raw: model,
-        });
+        const listed = listedModel(model, { ownedBy });
+        if (listed !== undefined) models.push(listed);
       }
       return models;
     });

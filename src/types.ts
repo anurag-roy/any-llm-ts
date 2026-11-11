@@ -202,6 +202,11 @@ export interface PromptTokensDetails {
   [key: string]: JsonValue | undefined;
 }
 
+export interface ServerToolUsage {
+  /** Web searches the provider ran, each one a query it sent to its search engine. */
+  webSearchRequests?: number;
+}
+
 export interface CompletionUsage {
   completionTokens: number;
   promptTokens: number;
@@ -216,6 +221,8 @@ export interface CompletionUsage {
   promptTime?: number;
   promptTokensDetails?: PromptTokensDetails;
   queueTime?: number;
+  /** Calls to tools the provider ran itself during the request, named as in Anthropic's usage. */
+  serverToolUse?: ServerToolUsage;
   totalDuration?: number;
   totalTime?: number;
 }
@@ -348,6 +355,12 @@ export interface Model {
   id: string;
   object: "model";
   ownedBy: string;
+  /**
+   * How many tokens the model's context holds as this provider serves it.
+   * Self-hosted engines such as vLLM report the length they were started with,
+   * which can be below the model's own maximum.
+   */
+  contextWindow?: number;
   raw?: unknown;
 }
 
@@ -1155,6 +1168,12 @@ export interface ProviderMetadata {
    * request. Any other value is forwarded only when this flag is true.
    */
   supportsCompletionN: boolean;
+  /**
+   * Whether a chat completion may carry `responseFormat`. A provider that
+   * clears it rejects one for every model. Bedrock answers per model in
+   * `AnyLLM.supportsCompletionResponseFormat`.
+   */
+  supportsCompletionResponseFormat: boolean;
   tier: ProviderTier;
 }
 

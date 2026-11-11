@@ -143,6 +143,10 @@ describe("Bedrock native Messages", () => {
     expect(isAnthropicBedrockModel(CLAUDE_MODEL)).toBe(true);
     expect(provider(vi.fn()).servesMessagesNatively(CLAUDE_MODEL)).toBe(true);
     expect(provider(vi.fn()).servesMessagesNatively("amazon.nova-lite-v1:0")).toBe(false);
+    expect(AnyLLM.supportsCompletionResponseFormat("bedrock", CLAUDE_MODEL)).toBe(true);
+    expect(AnyLLM.supportsCompletionResponseFormat("bedrock", "amazon.nova-lite-v1:0")).toBe(false);
+    expect(provider(vi.fn()).supportsCompletionResponseFormat(CLAUDE_MODEL)).toBe(true);
+    expect(provider(vi.fn()).supportsCompletionResponseFormat("amazon.nova-lite-v1:0")).toBe(false);
   });
 
   it("sends the Anthropic body with cache control, thinking, and betas", async () => {

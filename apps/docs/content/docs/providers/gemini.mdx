@@ -115,6 +115,10 @@ Code execution parts land on `message.extraContent.google.code_execution` (and o
 ids the adapter synthesized are not sent to Gemini. Through `messages()` those items become
 `server_tool_use` / `code_execution_tool_result` blocks.
 
+When Google Search grounds an answer, `usage.serverToolUse.webSearchRequests` is the number of
+search queries across candidates. Gemini 3 bills each query; earlier models bill one grounded
+prompt. The adapter reports the raw count so the caller can apply pricing.
+
 Gemini thought signatures are preserved at
 `toolCall.extraContent.google.thoughtSignature`. Pass the returned tool call back unchanged in the
 next assistant message so the adapter can return the signature to Gemini. The adapter adds Google's

@@ -120,6 +120,20 @@ describe("AnyLLM registry and facade", () => {
       AnyLLM.servesMessagesNatively("bedrock", "us.anthropic.claude-haiku-4-5-20251001-v1:0"),
     ).toBe(true);
     expect(AnyLLM.servesMessagesNatively("bedrock", "amazon.nova-lite-v1:0")).toBe(false);
+    expect(AnyLLM.supportsCompletionResponseFormat("openai", "gpt-5-nano")).toBe(true);
+    expect(AnyLLM.supportsCompletionResponseFormat("inception", "any-model")).toBe(false);
+    expect(AnyLLM.supportsCompletionResponseFormat("llamafile", "any-model")).toBe(false);
+    expect(AnyLLM.supportsCompletionResponseFormat("minimax", "any-model")).toBe(false);
+    expect(AnyLLM.supportsCompletionResponseFormat("sagemaker", "any-model")).toBe(false);
+    expect(AnyLLM.supportsCompletionResponseFormat("zai", "any-model")).toBe(false);
+    expect(
+      AnyLLM.supportsCompletionResponseFormat(
+        "bedrock",
+        "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+      ),
+    ).toBe(true);
+    expect(AnyLLM.supportsCompletionResponseFormat("bedrock", "amazon.nova-lite-v1:0")).toBe(false);
+    expect(AnyLLM.supportsCompletionResponseFormat("bedrock", "openai.gpt-oss-120b")).toBe(false);
   });
 
   it("treats cascadia, llamacpp, and vllm API keys as optional and honors their env vars", () => {

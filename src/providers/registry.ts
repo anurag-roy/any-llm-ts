@@ -14,6 +14,7 @@ import type { BaseProvider } from "./base.js";
 import { CohereProvider } from "./cohere.js";
 import { DeepinfraProvider } from "./deepinfra.js";
 import { FireworksProvider } from "./fireworks.js";
+import { OpenRouterProvider } from "./openrouter.js";
 import { GeminiProvider } from "./gemini.js";
 import { GitHubProvider } from "./github.js";
 import { HuggingFaceProvider } from "./huggingface.js";
@@ -181,6 +182,7 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
     envApiKey: "INCEPTION_API_KEY",
     name: "inception",
     quirks: { rejectResponseFormat: true },
+    supportsCompletionResponseFormat: false,
   },
   {
     apiBase: "https://kenari.id/v1",
@@ -224,6 +226,7 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
     envApiBase: "LLAMAFILE_API_BASE",
     name: "llamafile",
     quirks: { rejectResponseFormat: true, xmlReasoning: true },
+    supportsCompletionResponseFormat: false,
     requiresApiKey: false,
   },
   {
@@ -247,6 +250,7 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
       rejectResponseFormat: true,
       xmlReasoning: true,
     },
+    supportsCompletionResponseFormat: false,
   },
   {
     apiBase: "https://api.moonshot.ai/v1",
@@ -312,24 +316,6 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
     name: "ollama",
     requiresApiKey: false,
     supportsCompletionN: false,
-  },
-  {
-    apiBase: "https://openrouter.ai/api/v1",
-    capabilities: capabilities({
-      embedding: true,
-      pdfInput: true,
-      reasoning: true,
-      responses: true,
-      vision: true,
-    }),
-    documentationUrl: "https://openrouter.ai/docs/api-reference/overview",
-    envApiBase: "OPENROUTER_API_BASE",
-    envApiKey: "OPENROUTER_API_KEY",
-    name: "openrouter",
-    quirks: {
-      defaultModelOwner: "openrouter",
-      reasoningDirective: "openrouter",
-    },
   },
   {
     apiBase: "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
@@ -466,6 +452,7 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
       },
       rejectResponseFormat: true,
     },
+    supportsCompletionResponseFormat: false,
   },
 ];
 
@@ -483,6 +470,7 @@ function metadataFromConfig(config: OpenAIProviderConfig): ProviderMetadata {
         promptCacheKeySupport: config.promptCacheKeySupport,
       }),
       supportsCompletionN: config.supportsCompletionN ?? true,
+      supportsCompletionResponseFormat: config.supportsCompletionResponseFormat !== false,
     },
     "openai",
   );
@@ -620,6 +608,7 @@ addBuiltIn("sagemaker", {
     envApiKey: "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY",
     name: "sagemaker",
     requiresApiKey: false,
+    supportsCompletionResponseFormat: false,
   },
 });
 
@@ -746,6 +735,28 @@ addBuiltIn("together", {
     envApiBase: "TOGETHER_API_BASE",
     envApiKey: "TOGETHER_API_KEY",
     name: "together",
+    requiresApiKey: true,
+    supportsCompletionN: true,
+  },
+});
+
+addBuiltIn("openrouter", {
+  adapterFamily: "openai",
+  create: (options) => new OpenRouterProvider(options),
+  metadata: {
+    apiBase: "https://openrouter.ai/api/v1",
+    capabilities: capabilities({
+      embedding: true,
+      pdfInput: true,
+      reasoning: true,
+      rerank: true,
+      responses: true,
+      vision: true,
+    }),
+    documentationUrl: "https://openrouter.ai/docs/api-reference/overview",
+    envApiBase: "OPENROUTER_API_BASE",
+    envApiKey: "OPENROUTER_API_KEY",
+    name: "openrouter",
     requiresApiKey: true,
     supportsCompletionN: true,
   },
@@ -1029,6 +1040,12 @@ export function servesMessagesNatively(provider: string, model: string): boolean
   const name = normalizeName(provider);
   if (name === "bedrock") return isAnthropicBedrockModel(model);
   return getProviderMetadata(name).messagesNative;
+}
+
+export function supportsCompletionResponseFormat(provider: string, model: string): boolean {
+  const name = normalizeName(provider);
+  if (name === "bedrock") return isAnthropicBedrockModel(model);
+  return getProviderMetadata(name).supportsCompletionResponseFormat;
 }
 
 export function getProviderDescriptor(name: string): ProviderMetadata {

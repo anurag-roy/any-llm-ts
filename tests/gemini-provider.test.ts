@@ -501,6 +501,158 @@ describe("Gemini provider", () => {
     });
   });
 
+  it("reports Google Search grounding queries as serverToolUse.webSearchRequests", async () => {
+    const sdk = fakeGemini({
+      generateContent: vi.fn().mockResolvedValue(
+        response({
+          candidates: [
+            {
+              content: { parts: [{ text: "It is sunny." }], role: "model" },
+              finishReason: GeminiFinishReason.STOP,
+              groundingMetadata: {
+                webSearchQueries: ["weather paris", "weather paris tomorrow"],
+              },
+              index: 0,
+            },
+          ],
+          usageMetadata: {
+            candidatesTokenCount: 5,
+            promptTokenCount: 20,
+            totalTokenCount: 25,
+          },
+        }),
+      ),
+    });
+    const provider = new GeminiProvider({}, sdk.client);
+    // SAFETY: stream is unset, so completion returns ChatCompletion.
+    const result = (await provider.completion({
+      messages: [{ content: "Weather?", role: "user" }],
+      model: "gemini-test",
+    })) as ChatCompletion;
+    expect(result.usage).toEqual({
+      completionTokens: 5,
+      promptTokens: 20,
+      serverToolUse: { webSearchRequests: 2 },
+      totalTokens: 25,
+    });
+  });
+
+  it("sums grounding queries across candidates and omits the field without them", async () => {
+    const grounded = fakeGemini({
+      generateContent: vi.fn().mockResolvedValue(
+        response({
+          candidates: [
+            {
+              content: { parts: [{ text: "A" }], role: "model" },
+              groundingMetadata: { webSearchQueries: ["a"] },
+              index: 0,
+            },
+            {
+              content: { parts: [{ text: "B" }], role: "model" },
+              groundingMetadata: { webSearchQueries: ["b", "c"] },
+              index: 1,
+            },
+          ],
+          usageMetadata: {
+            candidatesTokenCount: 2,
+            promptTokenCount: 3,
+            totalTokenCount: 5,
+          },
+        }),
+      ),
+    });
+    const ungrounded = fakeGemini({
+      generateContent: vi.fn().mockResolvedValue(
+        response({
+          candidates: [
+            {
+              content: { parts: [{ text: "Hi." }], role: "model" },
+              finishReason: GeminiFinishReason.STOP,
+            },
+          ],
+          usageMetadata: {
+            candidatesTokenCount: 1,
+            promptTokenCount: 3,
+            totalTokenCount: 4,
+          },
+        }),
+      ),
+    });
+    const emptyQueries = fakeGemini({
+      generateContent: vi.fn().mockResolvedValue(
+        response({
+          candidates: [
+            {
+              content: { parts: [{ text: "Hi." }], role: "model" },
+              groundingMetadata: { webSearchQueries: [] },
+            },
+          ],
+          usageMetadata: {
+            candidatesTokenCount: 1,
+            promptTokenCount: 3,
+            totalTokenCount: 4,
+          },
+        }),
+      ),
+    });
+    // SAFETY: stream is unset, so completion returns ChatCompletion.
+    const summed = (await new GeminiProvider({}, grounded.client).completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "gemini-test",
+    })) as ChatCompletion;
+    // SAFETY: stream is unset, so completion returns ChatCompletion.
+    const plain = (await new GeminiProvider({}, ungrounded.client).completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "gemini-test",
+    })) as ChatCompletion;
+    // SAFETY: stream is unset, so completion returns ChatCompletion.
+    const empty = (await new GeminiProvider({}, emptyQueries.client).completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "gemini-test",
+    })) as ChatCompletion;
+    expect(summed.usage?.serverToolUse).toEqual({ webSearchRequests: 3 });
+    expect(plain.usage).toEqual({ completionTokens: 1, promptTokens: 3, totalTokens: 4 });
+    expect(plain.usage).not.toHaveProperty("serverToolUse");
+    expect(empty.usage).not.toHaveProperty("serverToolUse");
+  });
+
+  it("reports grounding queries on streamed usage chunks", async () => {
+    const stream = responses(
+      response({
+        candidates: [
+          {
+            content: { parts: [{ text: "It is sunny." }], role: "model" },
+            finishReason: GeminiFinishReason.STOP,
+            groundingMetadata: { webSearchQueries: ["weather paris"] },
+            index: 0,
+          },
+        ],
+        usageMetadata: {
+          candidatesTokenCount: 5,
+          promptTokenCount: 20,
+          totalTokenCount: 25,
+        },
+      }),
+    );
+    const sdk = fakeGemini({
+      generateContentStream: vi.fn().mockResolvedValue(stream),
+    });
+    const provider = new GeminiProvider({}, sdk.client);
+    const result = await provider.completion({
+      messages: [{ content: "Weather?", role: "user" }],
+      model: "gemini-test",
+      stream: true,
+    });
+    // SAFETY: stream is set, so completion returns AsyncIterable.
+    const chunks = await collect(result as AsyncIterable<ChatCompletionChunk>);
+    expect(chunks.at(-1)?.usage).toEqual({
+      completionTokens: 5,
+      promptTokens: 20,
+      serverToolUse: { webSearchRequests: 1 },
+      totalTokens: 25,
+    });
+  });
+
   it("mints a stable function-call id and omits synthetic ids on replay", async () => {
     const sdk = fakeGemini({
       generateContent: vi.fn().mockResolvedValue(

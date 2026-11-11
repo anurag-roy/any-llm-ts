@@ -49,6 +49,10 @@ returning one choice.
 
 Inspect `metadata.supportsCompletionN` to see which path a provider takes.
 
+`responseFormat` is advertised per provider on `metadata.supportsCompletionResponseFormat`, and per
+model on `AnyLLM.supportsCompletionResponseFormat(provider, model)`. Callers such as a model catalog
+can leave the parameter out where a request carrying it would raise.
+
 ## Reusable client
 
 ```ts

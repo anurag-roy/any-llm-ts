@@ -194,6 +194,16 @@ export abstract class BaseProvider {
   }
 
   /**
+   * Whether a chat completion for `model` may carry `responseFormat`.
+   *
+   * When this is false, a request with one raises `UnsupportedParameterError`
+   * before it reaches the provider, so a caller can leave the parameter out.
+   */
+  supportsCompletionResponseFormat(_model: string): boolean {
+    return this.metadata.supportsCompletionResponseFormat;
+  }
+
+  /**
    * The level `model` accepts in place of `reasoningEffort`.
    *
    * Hosts serving DeepSeek V4 or V4.1 render it with a chat template that
