@@ -9,10 +9,12 @@ import {
 import { AnthropicProvider } from "./anthropic.js";
 import { AzureProvider } from "./azure.js";
 import { AzureAnthropicProvider } from "./azureanthropic.js";
-import { BedrockProvider, isAnthropicBedrockModel } from "./bedrock.js";
+import { BedrockProvider, isAnthropicBedrockModel, isPegasusBedrockModel } from "./bedrock.js";
 import type { BaseProvider } from "./base.js";
 import { CohereProvider } from "./cohere.js";
+import { DeepinfraProvider } from "./deepinfra.js";
 import { FireworksProvider } from "./fireworks.js";
+import { OpenRouterProvider } from "./openrouter.js";
 import { GeminiProvider } from "./gemini.js";
 import { GitHubProvider } from "./github.js";
 import { HuggingFaceProvider } from "./huggingface.js";
@@ -69,6 +71,7 @@ const conservativeCapabilities: ProviderCapabilities = {
   rerank: false,
   responses: false,
   streaming: true,
+  videoGeneration: false,
   vision: false,
 };
 
@@ -131,19 +134,6 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
     name: "databricks",
   },
   {
-    apiBase: "https://api.deepinfra.com/v1/openai",
-    capabilities: capabilities({
-      embedding: true,
-      moderation: true,
-      reasoning: true,
-      vision: true,
-    }),
-    documentationUrl: "https://deepinfra.com/docs/openai_api",
-    envApiBase: "DEEPINFRA_API_BASE",
-    envApiKey: "DEEPINFRA_API_KEY",
-    name: "deepinfra",
-  },
-  {
     apiBase: "https://api.edenai.run/v3",
     capabilities: capabilities({
       embedding: true,
@@ -168,7 +158,7 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
   },
   {
     apiBase: "https://api.groq.com/openai/v1",
-    capabilities: capabilities({ reasoning: true, responses: true }),
+    capabilities: capabilities({ audioSpeech: true, reasoning: true, responses: true }),
     documentationUrl: "https://console.groq.com/docs/openai",
     envApiBase: "GROQ_BASE_URL",
     envApiKey: "GROQ_API_KEY",
@@ -176,7 +166,11 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
     quirks: {
       reasoningField: "reasoning",
       rejectResponsesMaxToolCalls: true,
+      rejectSpeechInstructions: true,
       rejectStreamingResponseFormat: true,
+      speechInstructionsHint:
+        "Groq steers delivery with bracketed direction tags inside `input`, such as `[cheerful]`.",
+      speechResponseFormats: ["flac", "mp3", "wav"],
     },
     supportsCompletionN: false,
   },
@@ -188,6 +182,7 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
     envApiKey: "INCEPTION_API_KEY",
     name: "inception",
     quirks: { rejectResponseFormat: true },
+    supportsCompletionResponseFormat: false,
   },
   {
     apiBase: "https://kenari.id/v1",
@@ -231,6 +226,7 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
     envApiBase: "LLAMAFILE_API_BASE",
     name: "llamafile",
     quirks: { rejectResponseFormat: true, xmlReasoning: true },
+    supportsCompletionResponseFormat: false,
     requiresApiKey: false,
   },
   {
@@ -254,6 +250,7 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
       rejectResponseFormat: true,
       xmlReasoning: true,
     },
+    supportsCompletionResponseFormat: false,
   },
   {
     apiBase: "https://api.moonshot.ai/v1",
@@ -311,7 +308,6 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
     apiBase: "http://localhost:11434/v1",
     capabilities: capabilities({
       embedding: true,
-      pdfInput: true,
       reasoning: true,
       vision: true,
     }),
@@ -322,26 +318,8 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
     supportsCompletionN: false,
   },
   {
-    apiBase: "https://openrouter.ai/api/v1",
-    capabilities: capabilities({
-      embedding: true,
-      pdfInput: true,
-      reasoning: true,
-      responses: true,
-      vision: true,
-    }),
-    documentationUrl: "https://openrouter.ai/docs/api-reference/overview",
-    envApiBase: "OPENROUTER_API_BASE",
-    envApiKey: "OPENROUTER_API_KEY",
-    name: "openrouter",
-    quirks: {
-      defaultModelOwner: "openrouter",
-      reasoningDirective: "openrouter",
-    },
-  },
-  {
     apiBase: "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
-    capabilities: capabilities({ reasoning: false, vision: false }),
+    capabilities: capabilities({ embedding: true, reasoning: false, vision: false }),
     documentationUrl:
       "https://docs.ovhcloud.com/en/guides/public-cloud/ai-machine-learning/ai-endpoints-getting-started",
     envApiBase: "OVHCLOUD_API_BASE",
@@ -431,6 +409,13 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
     name: "telnyx",
   },
   {
+    apiBase: "https://us-api.tokenhub.com/v1",
+    documentationUrl: "https://tokenhub.com/docs",
+    envApiBase: "TOKENHUB_API_BASE",
+    envApiKey: "TOKENHUB_API_KEY",
+    name: "tokenhub",
+  },
+  {
     apiBase: "http://localhost:8000/v1",
     capabilities: capabilities({
       embedding: true,
@@ -467,6 +452,7 @@ const openAICompatibleProviders: OpenAIProviderConfig[] = [
       },
       rejectResponseFormat: true,
     },
+    supportsCompletionResponseFormat: false,
   },
 ];
 
@@ -484,6 +470,7 @@ function metadataFromConfig(config: OpenAIProviderConfig): ProviderMetadata {
         promptCacheKeySupport: config.promptCacheKeySupport,
       }),
       supportsCompletionN: config.supportsCompletionN ?? true,
+      supportsCompletionResponseFormat: config.supportsCompletionResponseFormat !== false,
     },
     "openai",
   );
@@ -594,6 +581,7 @@ addBuiltIn("bedrock", {
     capabilities: capabilities({
       batch: true,
       embedding: true,
+      imageEdit: true,
       reasoning: true,
       vision: true,
     }),
@@ -621,6 +609,7 @@ addBuiltIn("sagemaker", {
     envApiKey: "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY",
     name: "sagemaker",
     requiresApiKey: false,
+    supportsCompletionResponseFormat: false,
   },
 });
 
@@ -644,11 +633,15 @@ addBuiltIn("gemini", {
   create: (options) => new GeminiProvider(options),
   metadata: {
     capabilities: capabilities({
+      audioSpeech: true,
       batch: true,
       embedding: true,
+      imageEdit: true,
+      imageGeneration: true,
       pdfInput: true,
       reasoning: true,
       responses: true,
+      videoGeneration: true,
       vision: true,
     }),
     documentationUrl: "https://ai.google.dev/gemini-api/docs",
@@ -686,6 +679,7 @@ addBuiltIn("mistral", {
   metadata: {
     apiBase: "https://api.mistral.ai/v1",
     capabilities: capabilities({
+      audioSpeech: true,
       batch: true,
       embedding: true,
       moderation: true,
@@ -700,22 +694,70 @@ addBuiltIn("mistral", {
   },
 });
 
+addBuiltIn("deepinfra", {
+  adapterFamily: "openai",
+  create: (options) => new DeepinfraProvider(options),
+  metadata: {
+    apiBase: "https://api.deepinfra.com/v1/openai",
+    capabilities: capabilities({
+      audioSpeech: true,
+      audioTranscription: true,
+      embedding: true,
+      imageGeneration: true,
+      moderation: true,
+      reasoning: true,
+      videoGeneration: true,
+      vision: true,
+    }),
+    documentationUrl: "https://deepinfra.com/docs/openai_api",
+    envApiBase: "DEEPINFRA_API_BASE",
+    envApiKey: "DEEPINFRA_API_KEY",
+    name: "deepinfra",
+    requiresApiKey: true,
+    supportsCompletionN: true,
+  },
+});
+
 addBuiltIn("together", {
   adapterFamily: "openai",
   create: (options) => new TogetherProvider(options),
   metadata: {
     apiBase: "https://api.together.xyz/v1",
     capabilities: capabilities({
+      audioSpeech: true,
       batch: true,
       embedding: true,
       reasoning: true,
       rerank: true,
+      videoGeneration: true,
       vision: true,
     }),
     documentationUrl: "https://docs.together.ai/reference/",
     envApiBase: "TOGETHER_API_BASE",
     envApiKey: "TOGETHER_API_KEY",
     name: "together",
+    requiresApiKey: true,
+    supportsCompletionN: true,
+  },
+});
+
+addBuiltIn("openrouter", {
+  adapterFamily: "openai",
+  create: (options) => new OpenRouterProvider(options),
+  metadata: {
+    apiBase: "https://openrouter.ai/api/v1",
+    capabilities: capabilities({
+      embedding: true,
+      pdfInput: true,
+      reasoning: true,
+      rerank: true,
+      responses: true,
+      vision: true,
+    }),
+    documentationUrl: "https://openrouter.ai/docs/api-reference/overview",
+    envApiBase: "OPENROUTER_API_BASE",
+    envApiKey: "OPENROUTER_API_KEY",
+    name: "openrouter",
     requiresApiKey: true,
     supportsCompletionN: true,
   },
@@ -999,6 +1041,14 @@ export function servesMessagesNatively(provider: string, model: string): boolean
   const name = normalizeName(provider);
   if (name === "bedrock") return isAnthropicBedrockModel(model);
   return getProviderMetadata(name).messagesNative;
+}
+
+export function supportsCompletionResponseFormat(provider: string, model: string): boolean {
+  const name = normalizeName(provider);
+  if (name === "bedrock") {
+    return isAnthropicBedrockModel(model) || isPegasusBedrockModel(model);
+  }
+  return getProviderMetadata(name).supportsCompletionResponseFormat;
 }
 
 export function getProviderDescriptor(name: string): ProviderMetadata {

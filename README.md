@@ -12,7 +12,7 @@ An independent TypeScript port inspired by [mozilla-ai/any-llm](https://github.c
 
 </div>
 
-`any-llm-ts` is a thin, framework-independent layer over official provider SDKs. It gives applications one API for chat completions, Messages, streaming, tools, structured output, embeddings, model discovery, the OpenAI Responses API, batches, reranking, images, moderation, audio, and provider-hosted files without requiring a hosted proxy.
+`any-llm-ts` is a thin, framework-independent layer over official provider SDKs. It gives applications one API for chat completions, Messages, streaming, tools, structured output, embeddings, model discovery, the OpenAI Responses API, batches, reranking, images, moderation, audio, video generation, and provider-hosted files without requiring a hosted proxy.
 
 The package uses official provider SDKs where native translation is required. OpenAI-compatible providers share a data-driven adapter, so switching providers is usually one string change.
 
@@ -137,7 +137,7 @@ Set `requiresApiKey: false` for a keyless local endpoint.
 
 ## Providers
 
-The port registers the same 53 provider names as the tracked Python source revision.
+The port registers the same 55 provider names as the tracked Python source revision.
 
 | Adapter                         | Providers                                                                                               |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------- |
@@ -213,6 +213,10 @@ await llm.listFiles();
 await llm.retrieveFile({ fileId });
 await llm.downloadFile({ fileId });
 await llm.deleteFile({ fileId });
+await llm.videoGeneration({ model, prompt });
+await llm.retrieveVideo(videoId);
+await llm.pollVideo(videoId);
+await llm.downloadVideo(output);
 ```
 
 Stateless camel-cased helpers with the same names are exported from the package. An unsupported operation rejects with `UnsupportedOperationError`. Provider-specific request fields can be added through `providerOptions` and SDK constructor fields through `clientOptions`. Use `maxRetries` on `AnyLLM.create()` to set the SDK retry count uniformly (`0` disables retries).

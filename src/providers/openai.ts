@@ -62,6 +62,7 @@ import type {
   TranscriptionParams,
   UploadFileParams,
 } from "../types.js";
+import { listedModel } from "../model.js";
 import { completeProviderMetadata, completionParamsWithValidatedN } from "../provider-metadata.js";
 import { resolveTranscriptionFile } from "../audio.js";
 import { resolveImages } from "../image.js";
@@ -112,6 +113,7 @@ export const openAICapabilities: ProviderCapabilities = {
   rerank: false,
   responses: true,
   streaming: true,
+  videoGeneration: false,
   vision: true,
 };
 
@@ -140,6 +142,7 @@ interface OpenAIProviderConfig {
   quirks?: OpenAIProviderQuirks;
   requiresApiKey?: boolean;
   supportsCompletionN?: boolean;
+  supportsCompletionResponseFormat?: boolean;
 }
 
 interface OpenAIProviderQuirks {
@@ -151,9 +154,13 @@ interface OpenAIProviderQuirks {
   rejectResponsesMaxToolCalls?: boolean;
   reasoningDirective?: "deepseek" | "openrouter" | "requesty";
   reasoningField?: "reasoning" | "reasoning_content";
+  rejectSpeechInstructions?: boolean;
+  rejectSpeechSpeed?: boolean;
   responseFormatMode?: "cerebras" | "together";
   rejectResponseFormat?: boolean;
   rejectStreamingResponseFormat?: boolean;
+  speechInstructionsHint?: string;
+  speechResponseFormats?: SpeechParams["responseFormat"][];
   xmlReasoning?: boolean;
   trimReasoningAtResponseTag?: boolean;
 }
@@ -998,6 +1005,7 @@ export class OpenAIProvider extends BaseProvider {
           promptCacheKeySupport: config.promptCacheKeySupport,
         }),
         supportsCompletionN: config.supportsCompletionN ?? true,
+        supportsCompletionResponseFormat: config.supportsCompletionResponseFormat !== false,
         fileOperations: config.fileOperations ?? [],
         ...includeWhen(config.messagesNative === true, { messagesNative: true }),
       },
@@ -1184,18 +1192,10 @@ export class OpenAIProvider extends BaseProvider {
     return this.execute(async () => {
       const page = await this.client.models.list(providerOptions);
       const models: Model[] = [];
+      const ownedBy = this.config.quirks?.defaultModelOwner ?? this.metadata.name;
       for await (const model of page) {
-        const raw = parseJsonObject(model);
-        if (!isString(raw.id)) continue;
-        models.push({
-          created: isNumber(raw.created) ? raw.created : 0,
-          id: raw.id,
-          object: "model",
-          ownedBy: isString(raw.owned_by)
-            ? raw.owned_by
-            : (this.config.quirks?.defaultModelOwner ?? this.metadata.name),
-          raw: model,
-        });
+        const listed = listedModel(model, { ownedBy });
+        if (listed !== undefined) models.push(listed);
       }
       return models;
     });
@@ -1241,6 +1241,10 @@ export class OpenAIProvider extends BaseProvider {
     return this.execute(async () => {
       const requestOptions = this.mediaRequestOptions(params.providerOptions);
       const image = await resolveImages(params.image, this.metadata.name);
+      const mask =
+        params.mask === undefined
+          ? undefined
+          : await resolveImages(params.mask, this.metadata.name);
       // SAFETY: The provider contract establishes the asserted representation at this boundary.
       const body = {
         image,
@@ -1251,6 +1255,7 @@ export class OpenAIProvider extends BaseProvider {
         response_format: params.responseFormat,
         size: params.size,
         user: params.user,
+        ...includeWhen(mask !== undefined, { mask }),
         ...withoutExtraQuery(params.providerOptions),
       } as never;
       const response =
@@ -1300,17 +1305,46 @@ export class OpenAIProvider extends BaseProvider {
     });
   }
 
-  override speech(params: SpeechParams): Promise<Uint8Array> {
+  protected refuseUnsupportedSpeech(params: SpeechParams): void {
+    const quirks = this.config.quirks;
+    if (quirks?.rejectSpeechInstructions === true && params.instructions !== undefined) {
+      throw new UnsupportedParameterError(
+        "instructions",
+        this.metadata.name,
+        quirks.speechInstructionsHint,
+      );
+    }
+    if (quirks?.rejectSpeechSpeed === true && params.speed !== undefined) {
+      throw new UnsupportedParameterError("speed", this.metadata.name);
+    }
+    const allowed = quirks?.speechResponseFormats;
+    if (
+      allowed !== undefined &&
+      params.responseFormat !== undefined &&
+      !allowed.includes(params.responseFormat)
+    ) {
+      throw new UnsupportedParameterError(
+        "response_format",
+        this.metadata.name,
+        `${this.metadata.name} speech returns ${[...allowed].toSorted().join(", ")}, not ${JSON.stringify(params.responseFormat)}.`,
+      );
+    }
+  }
+
+  override async speech(params: SpeechParams): Promise<Uint8Array> {
+    this.refuseUnsupportedSpeech(params);
     return this.execute(async () => {
       const requestOptions = this.mediaRequestOptions(params.providerOptions);
       // SAFETY: The provider contract establishes the asserted representation at this boundary.
       const body = {
         input: params.input,
-        instructions: params.instructions,
         model: params.model,
-        response_format: params.responseFormat,
-        speed: params.speed,
         voice: params.voice,
+        ...includeWhen(params.instructions !== undefined, { instructions: params.instructions }),
+        ...includeWhen(params.responseFormat !== undefined, {
+          response_format: params.responseFormat,
+        }),
+        ...includeWhen(params.speed !== undefined, { speed: params.speed }),
         ...withoutExtraQuery(params.providerOptions),
       } as never;
       const response =

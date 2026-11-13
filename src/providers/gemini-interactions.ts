@@ -27,6 +27,8 @@ export interface GeminiInteractionContent {
   mimeType?: unknown;
   text?: unknown;
   type?: unknown;
+  uri?: unknown;
+  url?: unknown;
 }
 
 export interface GeminiInteractionStep {
@@ -46,6 +48,8 @@ export interface GeminiInteraction {
   id?: unknown;
   labels?: unknown;
   model?: unknown;
+  output_video?: GeminiInteractionContent | null;
+  outputVideo?: GeminiInteractionContent | null;
   previous_interaction_id?: unknown;
   previousInteractionId?: unknown;
   status?: unknown;
@@ -57,11 +61,13 @@ export interface GeminiInteraction {
 
 export interface GeminiInteractionCreateParams {
   api_version?: string;
+  background?: boolean;
   extra_headers?: JsonObject;
   extra_query?: JsonObject;
-  generation_config?: { max_output_tokens: number };
-  input: string;
+  generation_config?: JsonObject;
+  input: string | object[];
   model: string;
+  response_format?: JsonObject | JsonObject[];
   stream?: true;
   system_instruction?: string;
   timeout?: number;

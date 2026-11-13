@@ -41,6 +41,7 @@ function job(overrides: JsonObject = {}) {
 }
 
 interface TogetherClientOverrides {
+  audio?: object;
   batches?: object;
   chat?: object;
   embeddings?: object;
@@ -68,7 +69,13 @@ describe("Together provider", () => {
   it("uses the native adapter and advertises embeddings and batches", () => {
     expect(createProvider("together", { apiKey: "secret" })).toBeInstanceOf(TogetherProvider);
     expect(AnyLLM.getProviderMetadata("together")).toMatchObject({
-      capabilities: { batch: true, embedding: true, rerank: true },
+      capabilities: {
+        audioSpeech: true,
+        batch: true,
+        embedding: true,
+        rerank: true,
+        videoGeneration: true,
+      },
       promptCacheKeySupport: "supported",
     });
   });
@@ -247,5 +254,76 @@ describe("Together provider", () => {
         { customId: "bad", error: { code: "invalid", message: "bad request" } },
       ],
     });
+  });
+
+  it("sends speech through the OpenAI-compatible audio endpoint", async () => {
+    const create = vi.fn().mockResolvedValue(new Response(new Uint8Array([9, 8, 7])));
+    const provider = new TogetherProvider(
+      { apiKey: "secret" },
+      client({ audio: { speech: { create } } }),
+    );
+    await expect(
+      provider.speech({ input: "Hello", model: "hexgrad/Kokoro-82M", voice: "af_bella" }),
+    ).resolves.toEqual(new Uint8Array([9, 8, 7]));
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: "Hello",
+        model: "hexgrad/Kokoro-82M",
+        voice: "af_bella",
+      }),
+    );
+  });
+
+  it.each(["mp3", "wav"] as const)("forwards Together speech format %s", async (responseFormat) => {
+    const create = vi.fn().mockResolvedValue(new Response(new Uint8Array([1])));
+    await new TogetherProvider(
+      { apiKey: "secret" },
+      client({ audio: { speech: { create } } }),
+    ).speech({ input: "Hello", model: "hexgrad/Kokoro-82M", responseFormat, voice: "af_bella" });
+    expect(create.mock.calls[0]?.[0]).toMatchObject({ response_format: responseFormat });
+  });
+
+  it.each(["opus", "aac", "flac", "pcm"] as const)(
+    "rejects Together speech format %s",
+    async (responseFormat) => {
+      const create = vi.fn();
+      await expect(
+        new TogetherProvider(
+          { apiKey: "secret" },
+          client({ audio: { speech: { create } } }),
+        ).speech({
+          input: "Hello",
+          model: "hexgrad/Kokoro-82M",
+          responseFormat,
+          voice: "af_bella",
+        }),
+      ).rejects.toBeInstanceOf(UnsupportedParameterError);
+      expect(create).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects Together speech instructions and speed", async () => {
+    const create = vi.fn();
+    const provider = new TogetherProvider(
+      { apiKey: "secret" },
+      client({ audio: { speech: { create } } }),
+    );
+    await expect(
+      provider.speech({
+        input: "Hello",
+        instructions: "Speak slowly",
+        model: "hexgrad/Kokoro-82M",
+        voice: "af_bella",
+      }),
+    ).rejects.toThrow(/instructions/u);
+    await expect(
+      provider.speech({
+        input: "Hello",
+        model: "hexgrad/Kokoro-82M",
+        speed: 1.5,
+        voice: "af_bella",
+      }),
+    ).rejects.toThrow(/speed/u);
+    expect(create).not.toHaveBeenCalled();
   });
 });

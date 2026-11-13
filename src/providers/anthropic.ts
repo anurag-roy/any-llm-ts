@@ -56,6 +56,7 @@ import {
   iterateClosing,
   mapAsyncIterable,
   notifyCompletionDispatch,
+  resolveOutputTokenLimit,
   resolvedMaxRetries,
   timeoutRequestOptions,
   unixTimestamp,
@@ -92,6 +93,7 @@ const anthropicCapabilities: ProviderCapabilities = {
   rerank: false,
   responses: false,
   streaming: true,
+  videoGeneration: false,
   vision: true,
 };
 
@@ -195,7 +197,7 @@ function assistantContent(message: ChatMessage): JsonObject[] {
   for (const toolCall of message.toolCalls ?? []) {
     let input: JsonValue;
     try {
-      input = parseJsonValue(JSON.parse(toolCall.function.arguments), "tool arguments");
+      input = parseJsonValue(JSON.parse(toolCall.function.arguments || "{}"), "tool arguments");
     } catch {
       input = { arguments: toolCall.function.arguments };
     }
@@ -209,20 +211,58 @@ function assistantContent(message: ChatMessage): JsonObject[] {
   return blocks;
 }
 
+function systemCacheControl(part: {
+  cacheControl?: JsonValue;
+  type: string;
+}): JsonObject | undefined {
+  if (isJsonObject(part.cacheControl)) return part.cacheControl;
+  if ("cache_control" in part && isJsonObject(part.cache_control)) return part.cache_control;
+  return undefined;
+}
+
+function systemTextBlocks(content: Exclude<ChatMessage["content"], string | null>): JsonObject[] {
+  return content.flatMap((part) => {
+    if (part.type !== "text" || !("text" in part) || !isString(part.text)) return [];
+    const cacheControl = systemCacheControl(part);
+    return [
+      {
+        text: part.text,
+        type: "text",
+        ...includeWhen(cacheControl !== undefined, { cache_control: cacheControl }),
+      },
+    ];
+  });
+}
+
+function systemFromContent(content: ChatMessage["content"]): JsonObject[] | string | undefined {
+  if (content === null) return undefined;
+  if (isString(content)) return content;
+  return systemTextBlocks(content);
+}
+
+function asSystemBlocks(value: JsonObject[] | string): JsonObject[] {
+  if (isString(value)) return value.length === 0 ? [] : [{ text: value, type: "text" }];
+  return [...value];
+}
+
+function appendSystemContent(
+  system: JsonObject[] | string | undefined,
+  content: ChatMessage["content"],
+): JsonObject[] | string | undefined {
+  const next = systemFromContent(content);
+  if (next === undefined) return system;
+  if (system === undefined) return next;
+  if (isString(system) && isString(next)) return `${system}\n${next}`;
+  return [...asSystemBlocks(system), ...asSystemBlocks(next)];
+}
+
 function convertMessages(messages: ChatMessage[]) {
-  const system = messages
-    .filter((message) => message.role === "developer" || message.role === "system")
-    .map((message) =>
-      isString(message.content)
-        ? message.content
-        : (message.content ?? [])
-            .flatMap((part): string[] =>
-              part.type === "text" && "text" in part && isString(part.text) ? [part.text] : [],
-            )
-            .join("\n"),
-    )
-    .filter((entry) => entry.length > 0)
-    .join("\n\n");
+  let system: JsonObject[] | string | undefined;
+  for (const message of messages) {
+    if (message.role === "developer" || message.role === "system") {
+      system = appendSystemContent(system, message.content);
+    }
+  }
 
   const converted = messages.flatMap((message): JsonObject[] => {
     if (message.role === "developer" || message.role === "system") return [];
@@ -252,7 +292,8 @@ function convertMessages(messages: ChatMessage[]) {
       },
     ];
   });
-  return system.length === 0 ? { messages: converted } : { messages: converted, system };
+  const emptySystem = system === undefined || system.length === 0;
+  return emptySystem ? { messages: converted } : { messages: converted, system };
 }
 
 function convertTools(tools: CompletionParams["tools"]) {
@@ -657,6 +698,7 @@ export function nativeMessagesRequest(params: MessagesParams) {
     model: params.model,
     output_config:
       params.outputFormat === undefined ? undefined : normalizeOutputConfig(params.outputFormat),
+    ...includeWhen(params.inferenceGeo !== undefined, { inference_geo: params.inferenceGeo }),
     service_tier: params.serviceTier,
     stop_sequences: params.stopSequences,
     stream: params.stream,
@@ -747,6 +789,8 @@ export function nativeMessage<Value>(value: Value): MessageResponse {
   if (isNumber(usage.cache_read_input_tokens)) {
     normalizedUsage.cacheReadInputTokens = usage.cache_read_input_tokens;
   }
+  if (isString(usage.inference_geo)) normalizedUsage.inferenceGeo = usage.inference_geo;
+  if (isString(usage.service_tier)) normalizedUsage.serviceTier = usage.service_tier;
   if (isObject(usage.cache_creation) && !Array.isArray(usage.cache_creation)) {
     const ttl = parseJsonObject(usage.cache_creation);
     const ephemeral5m = isNumber(ttl.ephemeral_5m_input_tokens)
@@ -818,6 +862,8 @@ export function nativeMessageEvent<Value>(value: Value): MessageStreamEvent {
     if (isNumber(usage.cache_read_input_tokens)) {
       normalizedUsage.cacheReadInputTokens = usage.cache_read_input_tokens;
     }
+    if (isString(usage.inference_geo)) normalizedUsage.inferenceGeo = usage.inference_geo;
+    if (isString(usage.service_tier)) normalizedUsage.serviceTier = usage.service_tier;
     const stopSequence = rawDelta.stop_sequence;
     const normalizedDelta: Extract<MessageStreamEvent, { type: "message_delta" }>["delta"] = {
       stopReason: messageStopReason(rawDelta.stop_reason),
@@ -937,16 +983,19 @@ function anthropicUsage(value: JsonObject): CompletionUsage {
           ...includeWhen(!(cacheWrite === undefined), { cacheWriteTokens: cacheWrite }),
           ...includeWhen(!(cacheCreationTokenDetails === undefined), { cacheCreationTokenDetails }),
         };
+  const inferenceGeo = isString(value.inference_geo) ? value.inference_geo : undefined;
   return {
     completionTokens,
     promptTokens,
     totalTokens: completionTokens + promptTokens,
     ...includeWhen(!(promptTokensDetails === undefined), { promptTokensDetails }),
+    ...includeWhen(inferenceGeo !== undefined, { inferenceGeo }),
   };
 }
 
 export class AnthropicProvider extends BaseProvider {
   override readonly supportsMessagesStructuredOutputStreaming = true;
+  override readonly supportsMessagesInferenceGeo: boolean;
   readonly metadata: ProviderMetadata;
   private readonly client: Anthropic;
   private readonly providerName: string;
@@ -958,6 +1007,7 @@ export class AnthropicProvider extends BaseProvider {
   ) {
     super(options);
     this.providerName = config.name ?? "anthropic";
+    this.supportsMessagesInferenceGeo = this.providerName === "anthropic";
     const apiBase =
       options.apiBase ?? getEnvironmentVariable(config.envApiBase ?? "ANTHROPIC_BASE_URL");
     // SAFETY: The provider contract establishes the asserted representation at this boundary.
@@ -1217,7 +1267,7 @@ export class AnthropicProvider extends BaseProvider {
 
   private completionRequest(params: CompletionParams) {
     const convertedMessages = convertMessages(params.messages);
-    const maxTokens = params.maxTokens ?? params.maxCompletionTokens ?? 8_192;
+    const maxTokens = resolveOutputTokenLimit(params) ?? 8_192;
     const reasoning = reasoningConfiguration(params, this.providerName, maxTokens);
     const structuredOutput = structuredOutputConfiguration(params.responseFormat);
     const outputConfig = {
@@ -1279,6 +1329,8 @@ export class AnthropicProvider extends BaseProvider {
           ]
         : [],
     );
+    const usage = parseJsonObject(response.usage);
+    const serviceTier = isString(usage.service_tier) ? usage.service_tier : undefined;
     return {
       choices: [
         {
@@ -1304,7 +1356,8 @@ export class AnthropicProvider extends BaseProvider {
       object: "chat.completion",
       provider: this.providerName,
       raw: value,
-      usage: anthropicUsage(parseJsonObject(response.usage)),
+      usage: anthropicUsage(usage),
+      ...includeWhen(serviceTier !== undefined, { serviceTier }),
     };
   }
 
@@ -1317,6 +1370,8 @@ export class AnthropicProvider extends BaseProvider {
     let created = unixTimestamp();
     let inputTokens = 0;
     let pendingUsage: CompletionUsage | undefined;
+    let inferenceGeo: string | undefined;
+    let serviceTier: string | undefined;
 
     for await (const event of iterateClosing(stream)) {
       if (event.type === "message_start") {
@@ -1326,6 +1381,10 @@ export class AnthropicProvider extends BaseProvider {
         model = stringValue(message.model, model);
         created = unixTimestamp();
         inputTokens = Number(messageUsage.input_tokens ?? 0);
+        inferenceGeo = isString(messageUsage.inference_geo)
+          ? messageUsage.inference_geo
+          : undefined;
+        serviceTier = isString(messageUsage.service_tier) ? messageUsage.service_tier : undefined;
         yield this.chunk(id, model, created, { role: "assistant" }, null, event);
         continue;
       }
@@ -1428,10 +1487,13 @@ export class AnthropicProvider extends BaseProvider {
       }
       if (event.type === "message_stop") {
         const message = parseOptionalJsonObject(event.message);
-        const usage =
+        let usage =
           message?.usage === undefined
             ? pendingUsage
             : anthropicUsage(parseJsonObject(message.usage));
+        if (usage !== undefined && inferenceGeo !== undefined && usage.inferenceGeo === undefined) {
+          usage = { ...usage, inferenceGeo };
+        }
         yield {
           choices: [],
           created,
@@ -1440,6 +1502,7 @@ export class AnthropicProvider extends BaseProvider {
           object: "chat.completion.chunk",
           provider: this.providerName,
           raw: event,
+          ...includeWhen(serviceTier !== undefined, { serviceTier }),
           ...includeWhen(!(usage === undefined), { usage }),
         };
       }

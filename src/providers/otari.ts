@@ -526,6 +526,7 @@ function parseBatchInput(content: string) {
 
 export class OtariProvider extends OpenAIProvider {
   override readonly supportsMessagesStructuredOutputStreaming = true;
+  override readonly supportsMessagesInferenceGeo = true;
   private readonly otari: OtariClientLike;
 
   constructor(options: ProviderOptions = {}, client?: OtariClientLike) {

@@ -44,14 +44,17 @@ import type {
   Transcription,
   TranscriptionParams,
   UploadFileParams,
+  VideoGenerationParams,
+  VideoJob,
 } from "../types.js";
+import { downloadVideoUrl } from "../video.js";
 import {
   completionStreamToMessageEvents,
   completionToMessageResponse,
   messagesToCompletionParams,
   normalizeMessagesContainer,
 } from "../messages-compat.js";
-import { includeWhen, mapAsyncIterableErrors } from "../utils.js";
+import { includeWhen, isNumber, mapAsyncIterableErrors } from "../utils.js";
 
 const deepSeekV4Model = /\bdeepseek-v4(?!\d)/iu;
 
@@ -71,6 +74,8 @@ export abstract class BaseProvider {
   abstract readonly metadata: ProviderMetadata;
   /** Whether a Messages `outputFormat` type can be streamed by this provider. */
   readonly supportsMessagesStructuredOutputStreaming: boolean = false;
+  /** Whether the Messages API accepts Anthropic's `inferenceGeo`; other providers reject it. */
+  readonly supportsMessagesInferenceGeo: boolean = false;
   /** Whether the Messages bridge should pass `cacheControl` breakpoints in `extraContent`. */
   protected readonly readsCacheControlSideChannel: boolean = false;
   protected readonly unifiedExceptions: boolean;
@@ -160,12 +165,42 @@ export abstract class BaseProvider {
     return Promise.reject(new UnsupportedOperationError("file downloads", this.metadata.name));
   }
 
+  videoGeneration(_params: VideoGenerationParams): Promise<VideoJob> {
+    return Promise.reject(new UnsupportedOperationError("video generation", this.metadata.name));
+  }
+
+  retrieveVideo(_videoId: string, _providerOptions?: JsonObject): Promise<VideoJob> {
+    return Promise.reject(new UnsupportedOperationError("video generation", this.metadata.name));
+  }
+
+  completeVideoJob(_payload: JsonObject, _model?: string): VideoJob {
+    throw new UnsupportedOperationError("video job webhooks", this.metadata.name);
+  }
+
+  downloadVideo(url: string, providerOptions: JsonObject = {}): Promise<Uint8Array> {
+    return this.execute(async () => {
+      const timeout = providerOptions.timeout;
+      if (!isNumber(timeout)) return downloadVideoUrl(url);
+      return downloadVideoUrl(url, { signal: AbortSignal.timeout(timeout * 1_000) });
+    });
+  }
+
   /**
    * Whether `messages()` for this model talks to a real Anthropic Messages
    * endpoint instead of the Completions compatibility bridge.
    */
   servesMessagesNatively(_model: string): boolean {
     return this.metadata.messagesNative;
+  }
+
+  /**
+   * Whether a chat completion for `model` may carry `responseFormat`.
+   *
+   * When this is false, a request with one raises `UnsupportedParameterError`
+   * before it reaches the provider, so a caller can leave the parameter out.
+   */
+  supportsCompletionResponseFormat(_model: string): boolean {
+    return this.metadata.supportsCompletionResponseFormat;
   }
 
   /**

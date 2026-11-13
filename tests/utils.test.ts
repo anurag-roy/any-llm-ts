@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   closeAsyncIterableQuietly,
@@ -21,6 +21,7 @@ import {
   parseJsonValue,
   parseOptionalJsonObject,
   rejectMaxRetries,
+  resolveOutputTokenLimit,
   resolvedMaxRetries,
   timeoutAbortOptions,
   validateMaxRetries,
@@ -74,6 +75,22 @@ describe("runtime utilities", () => {
     expect(() => parseJsonObjectArray([[]], "payload")).toThrow(
       "payload must be an array of JSON objects",
     );
+  });
+
+  it("lets maxCompletionTokens win over maxTokens", () => {
+    expect(resolveOutputTokenLimit({ messages: [], model: "m" })).toBeUndefined();
+    expect(resolveOutputTokenLimit({ maxTokens: 10, messages: [], model: "m" })).toBe(10);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    expect(
+      resolveOutputTokenLimit({
+        maxCompletionTokens: 20,
+        maxTokens: 10,
+        messages: [],
+        model: "m",
+      }),
+    ).toBe(20);
+    expect(warn).toHaveBeenCalledOnce();
+    warn.mockRestore();
   });
 
   it("compacts objects and reads optional environment values", () => {

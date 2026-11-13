@@ -185,6 +185,17 @@ describe("Gemini Files API", () => {
     });
     expect(get).toHaveBeenCalledWith({ name: "files/abc-123" });
     expect(remove).toHaveBeenCalledWith({ name: "files/abc-123" });
+    await expect(
+      provider.retrieveFile({ containerId: "cntr-test", fileId: "abc-123" }),
+    ).rejects.toMatchObject({ parameterName: "container_id" });
+    await expect(
+      provider.deleteFile({ containerId: "cntr-test", fileId: "abc-123" }),
+    ).rejects.toMatchObject({ parameterName: "container_id" });
+    await expect(
+      provider.downloadFile({ containerId: "cntr-test", fileId: "abc-123" }),
+    ).rejects.toMatchObject({ parameterName: "container_id" });
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(remove).toHaveBeenCalledTimes(1);
   });
 
   it("maps Gemini unknown-file 403 onto ProviderFileNotFoundError", async () => {

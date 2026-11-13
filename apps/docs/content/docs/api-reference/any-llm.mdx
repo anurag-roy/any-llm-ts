@@ -30,6 +30,7 @@ llm.responses(params)
 llm.embedding(params)
 llm.listModels(providerOptions?)
 llm.imageGeneration(params)
+llm.imageEdit(params)
 llm.transcription(params)
 llm.speech(params)
 llm.moderation(params)
@@ -45,6 +46,11 @@ llm.listFiles(params?)
 llm.retrieveFile(params)
 llm.downloadFile(params)
 llm.deleteFile(params)
+llm.videoGeneration(params)
+llm.retrieveVideo(videoId, providerOptions?)
+llm.completeVideoJob(payload, model?)
+llm.pollVideo(videoId, options?)
+llm.downloadVideo(output, providerOptions?)
 ```
 
 `messages()` uses native Messages support where available and translates through normalized chat
@@ -57,6 +63,8 @@ completions for compatible providers. Operations that an adapter does not suppor
 AnyLLM.getSupportedProviders();
 AnyLLM.getProviderMetadata("openai");
 AnyLLM.getAllProviderMetadata();
+AnyLLM.servesMessagesNatively("bedrock", "us.anthropic.claude-haiku-4-5-20251001-v1:0");
+AnyLLM.supportsCompletionResponseFormat("bedrock", "amazon.nova-lite-v1:0");
 ```
 
 ## Model parsing

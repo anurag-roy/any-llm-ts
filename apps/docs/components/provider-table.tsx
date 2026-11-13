@@ -12,12 +12,15 @@ const capabilityColumns = [
   ["vision", "Vision"],
   ["pdfInput", "PDF"],
   ["reasoning", "Reasoning"],
+  ["imageGeneration", "Image"],
+  ["imageEdit", "Edit"],
+  ["videoGeneration", "Video"],
 ] as const;
 
 export function ProviderTable() {
   return (
     <div className="my-6 overflow-x-auto rounded-lg border">
-      <table className="w-full min-w-[1300px] text-sm">
+      <table className="w-full min-w-[1500px] text-sm">
         <thead className="bg-fd-muted/50 text-left">
           <tr>
             <th className="px-3 py-2 font-medium">Provider</th>

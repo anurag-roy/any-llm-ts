@@ -17,6 +17,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://docs.anthropic.com/en/api/",
@@ -86,6 +87,7 @@
       "libraryVersion": "0.8.0"
     },
     "supportsCompletionN": false,
+    "supportsCompletionResponseFormat": true,
     "tier": "verified"
   },
   {
@@ -106,6 +108,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://www.atlascloud.ai/docs",
@@ -115,6 +118,7 @@
     "envApiBase": "ATLASCLOUD_API_BASE",
     "envApiKey": "ATLASCLOUD_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -166,6 +170,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://learn.microsoft.com/azure/foundry/foundry-models/concepts/models-sold-directly-by-azure",
@@ -205,6 +210,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "community"
   },
   {
@@ -225,6 +231,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://learn.microsoft.com/azure/ai-foundry/model-inference/concepts/models",
@@ -264,6 +271,7 @@
       "libraryVersion": "0.8.0"
     },
     "supportsCompletionN": false,
+    "supportsCompletionResponseFormat": true,
     "tier": "community"
   },
   {
@@ -284,6 +292,7 @@
       "rerank": false,
       "responses": true,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://learn.microsoft.com/azure/foundry/openai/api-version-lifecycle",
@@ -323,6 +332,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "verified"
   },
   {
@@ -333,7 +343,7 @@
       "completion": true,
       "embedding": true,
       "files": false,
-      "imageEdit": false,
+      "imageEdit": true,
       "imageGeneration": false,
       "listModels": true,
       "messages": true,
@@ -343,6 +353,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://aws.amazon.com/bedrock/",
@@ -382,6 +393,7 @@
       "libraryVersion": "0.8.0"
     },
     "supportsCompletionN": false,
+    "supportsCompletionResponseFormat": true,
     "tier": "verified"
   },
   {
@@ -402,6 +414,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://cascadia.to",
@@ -411,6 +424,7 @@
     "envApiBase": "CASCADIA_API_BASE",
     "envApiKey": "CASCADIA_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -462,6 +476,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://inference-docs.cerebras.ai/",
@@ -471,6 +486,7 @@
     "envApiBase": "CEREBRAS_API_BASE",
     "envApiKey": "CEREBRAS_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -523,6 +539,7 @@
       "rerank": true,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://docs.cohere.com/",
@@ -562,6 +579,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "community"
   },
   {
@@ -582,6 +600,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope",
@@ -591,6 +610,7 @@
     "envApiBase": "DASHSCOPE_API_BASE",
     "envApiKey": "DASHSCOPE_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -642,6 +662,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://docs.databricks.com/aws/en/machine-learning/model-serving/score-foundation-models",
@@ -650,6 +671,7 @@
     "envApiBase": "DATABRICKS_HOST",
     "envApiKey": "DATABRICKS_TOKEN",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -684,15 +706,16 @@
     "tier": "community"
   },
   {
+    "apiBase": "https://api.deepinfra.com/v1/openai",
     "capabilities": {
-      "audioSpeech": false,
-      "audioTranscription": false,
+      "audioSpeech": true,
+      "audioTranscription": true,
       "batch": false,
       "completion": true,
       "embedding": true,
       "files": false,
       "imageEdit": false,
-      "imageGeneration": false,
+      "imageGeneration": true,
       "listModels": true,
       "messages": true,
       "moderation": true,
@@ -701,14 +724,14 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": true,
       "vision": true
     },
     "documentationUrl": "https://deepinfra.com/docs/openai_api",
-    "name": "deepinfra",
-    "requiresApiKey": true,
-    "apiBase": "https://api.deepinfra.com/v1/openai",
     "envApiBase": "DEEPINFRA_API_BASE",
     "envApiKey": "DEEPINFRA_API_KEY",
+    "name": "deepinfra",
+    "requiresApiKey": true,
     "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
@@ -741,6 +764,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "community"
   },
   {
@@ -762,6 +786,7 @@
       "rerank": false,
       "responses": true,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://platform.deepseek.com/",
@@ -801,6 +826,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "verified"
   },
   {
@@ -821,6 +847,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://docs.edenai.co/",
@@ -830,6 +857,7 @@
     "envApiBase": "EDENAI_API_BASE",
     "envApiKey": "EDENAI_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -882,6 +910,7 @@
       "rerank": true,
       "responses": true,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://docs.fireworks.ai/api-reference/introduction",
@@ -921,18 +950,19 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "verified"
   },
   {
     "capabilities": {
-      "audioSpeech": false,
+      "audioSpeech": true,
       "audioTranscription": false,
       "batch": true,
       "completion": true,
       "embedding": true,
       "files": true,
-      "imageEdit": false,
-      "imageGeneration": false,
+      "imageEdit": true,
+      "imageGeneration": true,
       "listModels": true,
       "messages": true,
       "moderation": false,
@@ -941,6 +971,7 @@
       "rerank": false,
       "responses": true,
       "streaming": true,
+      "videoGeneration": true,
       "vision": true
     },
     "documentationUrl": "https://ai.google.dev/gemini-api/docs",
@@ -980,6 +1011,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "verified"
   },
   {
@@ -1001,6 +1033,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://docs.github.com/en/github-models",
@@ -1040,6 +1073,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "community"
   },
   {
@@ -1060,6 +1094,7 @@
       "rerank": false,
       "responses": true,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://docs.gmicloud.ai/inference-engine/llm-api",
@@ -1069,6 +1104,7 @@
     "envApiBase": "GMI_API_BASE",
     "envApiKey": "GMI_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1104,7 +1140,7 @@
   },
   {
     "capabilities": {
-      "audioSpeech": false,
+      "audioSpeech": true,
       "audioTranscription": false,
       "batch": false,
       "completion": true,
@@ -1120,6 +1156,7 @@
       "rerank": false,
       "responses": true,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://console.groq.com/docs/openai",
@@ -1129,6 +1166,7 @@
     "envApiBase": "GROQ_BASE_URL",
     "envApiKey": "GROQ_API_KEY",
     "supportsCompletionN": false,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1180,6 +1218,7 @@
       "rerank": false,
       "responses": true,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://huggingface.co/docs/huggingface.js/inference/README",
@@ -1219,6 +1258,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "community"
   },
   {
@@ -1239,6 +1279,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://docs.inceptionlabs.ai/",
@@ -1248,6 +1289,7 @@
     "envApiBase": "INCEPTION_API_BASE",
     "envApiKey": "INCEPTION_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": false,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1299,6 +1341,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://kenari.id/docs",
@@ -1308,6 +1351,7 @@
     "envApiBase": "KENARI_API_BASE",
     "envApiKey": "KENARI_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1360,6 +1404,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://liner.com/developers/docs",
@@ -1399,6 +1444,7 @@
       "libraryVersion": "0.8.0"
     },
     "supportsCompletionN": false,
+    "supportsCompletionResponseFormat": true,
     "tier": "community"
   },
   {
@@ -1419,6 +1465,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://www.llama.com/products/llama-api/",
@@ -1428,6 +1475,7 @@
     "envApiBase": "LLAMA_API_BASE",
     "envApiKey": "LLAMA_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1479,6 +1527,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://github.com/ggml-org/llama.cpp",
@@ -1488,6 +1537,7 @@
     "envApiBase": "LLAMACPP_API_BASE",
     "envApiKey": "LLAMACPP_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1539,6 +1589,7 @@
       "rerank": false,
       "responses": false,
       "streaming": false,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://github.com/Mozilla-Ocho/llamafile",
@@ -1547,6 +1598,7 @@
     "apiBase": "http://127.0.0.1:8080/v1",
     "envApiBase": "LLAMAFILE_API_BASE",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": false,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1598,6 +1650,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://lmstudio.ai/docs/developer/openai-compat",
@@ -1607,6 +1660,7 @@
     "envApiBase": "LM_STUDIO_API_BASE",
     "envApiKey": "LM_STUDIO_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1659,6 +1713,7 @@
       "rerank": false,
       "responses": true,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://dev.meta.ai/docs",
@@ -1698,6 +1753,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "community"
   },
   {
@@ -1718,6 +1774,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://platform.minimax.io/docs/api-reference/text-openai-api",
@@ -1727,6 +1784,7 @@
     "envApiBase": "MINIMAX_API_BASE",
     "envApiKey": "MINIMAX_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": false,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1763,7 +1821,7 @@
   {
     "apiBase": "https://api.mistral.ai/v1",
     "capabilities": {
-      "audioSpeech": false,
+      "audioSpeech": true,
       "audioTranscription": false,
       "batch": true,
       "completion": true,
@@ -1779,6 +1837,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://docs.mistral.ai/api/",
@@ -1818,6 +1877,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "verified"
   },
   {
@@ -1838,6 +1898,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://platform.moonshot.ai/docs/api/chat",
@@ -1847,6 +1908,7 @@
     "envApiBase": "MOONSHOT_API_BASE",
     "envApiKey": "MOONSHOT_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1898,6 +1960,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://any-llm.ai",
@@ -1907,6 +1970,7 @@
     "envApiBase": "ANY_LLM_PLATFORM_URL",
     "envApiKey": "ANY_LLM_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -1958,6 +2022,7 @@
       "rerank": false,
       "responses": true,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://studio.nebius.com/api-reference/",
@@ -1967,6 +2032,7 @@
     "envApiBase": "NEBIUS_API_BASE",
     "envApiKey": "NEBIUS_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2018,6 +2084,7 @@
       "rerank": false,
       "responses": true,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://docs.neosantara.xyz/",
@@ -2027,6 +2094,7 @@
     "envApiBase": "NEOSANTARA_API_BASE",
     "envApiKey": "NEOSANTARA_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2073,11 +2141,12 @@
       "listModels": true,
       "messages": true,
       "moderation": false,
-      "pdfInput": true,
+      "pdfInput": false,
       "reasoning": true,
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://docs.ollama.com/api/openai-compatibility",
@@ -2086,6 +2155,7 @@
     "apiBase": "http://localhost:11434/v1",
     "envApiBase": "OLLAMA_HOST",
     "supportsCompletionN": false,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2138,6 +2208,7 @@
       "rerank": false,
       "responses": true,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://platform.openai.com/docs/api-reference",
@@ -2208,9 +2279,11 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "verified"
   },
   {
+    "apiBase": "https://openrouter.ai/api/v1",
     "capabilities": {
       "audioSpeech": false,
       "audioTranscription": false,
@@ -2225,17 +2298,17 @@
       "moderation": false,
       "pdfInput": true,
       "reasoning": true,
-      "rerank": false,
+      "rerank": true,
       "responses": true,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://openrouter.ai/docs/api-reference/overview",
-    "name": "openrouter",
-    "requiresApiKey": true,
-    "apiBase": "https://openrouter.ai/api/v1",
     "envApiBase": "OPENROUTER_API_BASE",
     "envApiKey": "OPENROUTER_API_KEY",
+    "name": "openrouter",
+    "requiresApiKey": true,
     "supportsCompletionN": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
@@ -2268,6 +2341,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "verified"
   },
   {
@@ -2288,6 +2362,7 @@
       "rerank": true,
       "responses": true,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://mozilla-ai.github.io/otari/",
@@ -2327,6 +2402,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "verified"
   },
   {
@@ -2335,7 +2411,7 @@
       "audioTranscription": false,
       "batch": false,
       "completion": true,
-      "embedding": false,
+      "embedding": true,
       "files": false,
       "imageEdit": false,
       "imageGeneration": false,
@@ -2347,6 +2423,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://docs.ovhcloud.com/en/guides/public-cloud/ai-machine-learning/ai-endpoints-getting-started",
@@ -2356,6 +2433,7 @@
     "envApiBase": "OVHCLOUD_API_BASE",
     "envApiKey": "OVHCLOUD_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2387,7 +2465,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
-    "tier": "community"
+    "tier": "verified"
   },
   {
     "capabilities": {
@@ -2407,6 +2485,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://docs.perplexity.ai/api-reference/chat-completions-post",
@@ -2416,6 +2495,7 @@
     "envApiBase": "PERPLEXITY_BASE_URL",
     "envApiKey": "PERPLEXITY_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2467,6 +2547,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://portkey.ai/docs/api-reference/inference-api/introduction",
@@ -2476,6 +2557,7 @@
     "envApiBase": "PORTKEY_API_BASE",
     "envApiKey": "PORTKEY_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2527,6 +2609,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://developer.qiniu.com/aitokenapi",
@@ -2536,6 +2619,7 @@
     "envApiBase": "QINIU_API_BASE",
     "envApiKey": "QINIU_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2587,6 +2671,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://docs.requesty.ai/",
@@ -2596,6 +2681,7 @@
     "envApiBase": "REQUESTY_API_BASE",
     "envApiKey": "REQUESTY_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2647,6 +2733,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://aws.amazon.com/sagemaker/",
@@ -2654,6 +2741,7 @@
     "envApiKey": "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY",
     "name": "sagemaker",
     "requiresApiKey": false,
+    "supportsCompletionResponseFormat": false,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2706,6 +2794,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://docs.sambanova.ai/cloud/docs/api-reference/overview",
@@ -2715,6 +2804,7 @@
     "envApiBase": "SAMBANOVA_API_BASE",
     "envApiKey": "SAMBANOVA_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2766,6 +2856,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://developers.telnyx.com/docs/inference/getting-started",
@@ -2775,6 +2866,7 @@
     "envApiBase": "TELNYX_API_BASE",
     "envApiKey": "TELNYX_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -2811,7 +2903,7 @@
   {
     "apiBase": "https://api.together.xyz/v1",
     "capabilities": {
-      "audioSpeech": false,
+      "audioSpeech": true,
       "audioTranscription": false,
       "batch": true,
       "completion": true,
@@ -2827,6 +2919,7 @@
       "rerank": true,
       "responses": false,
       "streaming": true,
+      "videoGeneration": true,
       "vision": true
     },
     "documentationUrl": "https://docs.together.ai/reference/",
@@ -2866,7 +2959,70 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "verified"
+  },
+  {
+    "capabilities": {
+      "audioSpeech": false,
+      "audioTranscription": false,
+      "batch": false,
+      "completion": true,
+      "embedding": false,
+      "files": false,
+      "imageEdit": false,
+      "imageGeneration": false,
+      "listModels": true,
+      "messages": true,
+      "moderation": false,
+      "pdfInput": false,
+      "reasoning": false,
+      "rerank": false,
+      "responses": false,
+      "streaming": true,
+      "videoGeneration": false,
+      "vision": false
+    },
+    "documentationUrl": "https://tokenhub.com/docs",
+    "name": "tokenhub",
+    "requiresApiKey": true,
+    "apiBase": "https://us-api.tokenhub.com/v1",
+    "envApiBase": "TOKENHUB_API_BASE",
+    "envApiKey": "TOKENHUB_API_KEY",
+    "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "TokenHub",
+    "fileOperations": [],
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "tokenhub",
+    "messagesNative": false,
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.8.0"
+    },
+    "tier": "community"
   },
   {
     "capabilities": {
@@ -2886,6 +3042,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://cloud.google.com/vertex-ai/docs",
@@ -2925,6 +3082,7 @@
       "libraryName": "any-llm-ts",
       "libraryVersion": "0.8.0"
     },
+    "supportsCompletionResponseFormat": true,
     "tier": "community"
   },
   {
@@ -2945,6 +3103,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/use-claude",
@@ -2984,6 +3143,7 @@
       "libraryVersion": "0.8.0"
     },
     "supportsCompletionN": false,
+    "supportsCompletionResponseFormat": true,
     "tier": "community"
   },
   {
@@ -3004,6 +3164,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://docs.vllm.ai/en/latest/serving/openai_compatible_server/",
@@ -3013,6 +3174,7 @@
     "envApiBase": "VLLM_API_BASE",
     "envApiKey": "VLLM_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -3064,6 +3226,7 @@
       "rerank": true,
       "responses": false,
       "streaming": false,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://docs.voyageai.com/",
@@ -3103,6 +3266,7 @@
       "libraryVersion": "0.8.0"
     },
     "supportsCompletionN": false,
+    "supportsCompletionResponseFormat": true,
     "tier": "verified"
   },
   {
@@ -3123,6 +3287,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": true
     },
     "documentationUrl": "https://www.ibm.com/watsonx",
@@ -3162,6 +3327,7 @@
       "libraryVersion": "0.8.0"
     },
     "supportsCompletionN": false,
+    "supportsCompletionResponseFormat": true,
     "tier": "community"
   },
   {
@@ -3182,6 +3348,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://docs.x.ai/docs/api-reference",
@@ -3191,6 +3358,7 @@
     "envApiBase": "XAI_API_BASE",
     "envApiKey": "XAI_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": true,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"
@@ -3242,6 +3410,7 @@
       "rerank": false,
       "responses": false,
       "streaming": true,
+      "videoGeneration": false,
       "vision": false
     },
     "documentationUrl": "https://docs.z.ai/guides/develop/openai/introduction",
@@ -3251,6 +3420,7 @@
     "envApiBase": "ZAI_BASE_URL",
     "envApiKey": "ZAI_API_KEY",
     "supportsCompletionN": true,
+    "supportsCompletionResponseFormat": false,
     "configuration": {
       "reason": "provider_specific_contract_pending",
       "status": "unavailable"

@@ -60,6 +60,7 @@ const sagemakerCapabilities: ProviderCapabilities = {
   rerank: false,
   responses: false,
   streaming: true,
+  videoGeneration: false,
   vision: true,
 };
 
@@ -277,6 +278,7 @@ export class SageMakerProvider extends BaseProvider {
       envApiKey: "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY",
       name: "sagemaker",
       requiresApiKey: false,
+      supportsCompletionResponseFormat: false,
       ...includeWhen(!(apiBase === undefined), { apiBase }),
     });
   }

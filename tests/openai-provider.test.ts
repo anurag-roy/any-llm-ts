@@ -764,6 +764,31 @@ describe("OpenAI-compatible provider", () => {
     ]);
   });
 
+  it("reads the served context window from model listings", async () => {
+    const page = {
+      async *[Symbol.asyncIterator]() {
+        yield { id: "plain" };
+        yield { context_length: 512_000, id: "router", max_model_len: 256_000 };
+        yield { id: "engine", max_model_len: 8192 };
+        yield { context_window: "128k", id: "malformed" };
+      },
+    };
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ models: { list: vi.fn().mockResolvedValue(page) } }),
+    );
+    const models = await provider.listModels();
+    expect(models).toMatchObject([
+      { id: "plain" },
+      { contextWindow: 256_000, id: "router" },
+      { contextWindow: 8192, id: "engine" },
+      { id: "malformed" },
+    ]);
+    expect(models[0]).not.toHaveProperty("contextWindow");
+    expect(models[3]).not.toHaveProperty("contextWindow");
+  });
+
   it("normalizes image, transcription, speech, and moderation operations", async () => {
     const image = vi.fn().mockResolvedValue({
       created: 123,

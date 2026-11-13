@@ -91,10 +91,53 @@ describe("AnyLLM registry and facade", () => {
     expect(AnyLLM.getProviderMetadata("openai").messagesNative).toBe(false);
     expect(AnyLLM.getProviderMetadata("deepseek").messagesNative).toBe(true);
     expect(AnyLLM.getProviderMetadata("openai").capabilities.imageEdit).toBe(true);
+    expect(AnyLLM.getProviderMetadata("bedrock").capabilities.imageEdit).toBe(true);
+    expect(AnyLLM.getProviderMetadata("gemini").capabilities.imageGeneration).toBe(true);
+    expect(AnyLLM.getProviderMetadata("gemini").capabilities.audioSpeech).toBe(true);
+    expect(AnyLLM.getProviderMetadata("vertexai").capabilities.imageGeneration).toBe(false);
+    expect(AnyLLM.getProviderMetadata("vertexai").capabilities.audioSpeech).toBe(false);
+    expect(AnyLLM.getProviderMetadata("tokenhub")).toMatchObject({
+      apiBase: "https://us-api.tokenhub.com/v1",
+      capabilities: {
+        completion: true,
+        embedding: false,
+        imageGeneration: false,
+        listModels: true,
+        messages: true,
+        pdfInput: false,
+        reasoning: false,
+        streaming: true,
+        vision: false,
+      },
+      documentationUrl: "https://tokenhub.com/docs",
+      envApiBase: "TOKENHUB_API_BASE",
+      envApiKey: "TOKENHUB_API_KEY",
+      name: "tokenhub",
+      requiresApiKey: true,
+    });
+    expect(AnyLLM.getProviderMetadata("ollama").capabilities.pdfInput).toBe(false);
+    expect(() => AnyLLM.create("tokenhub")).toThrow(/TOKENHUB_API_KEY/u);
     expect(
       AnyLLM.servesMessagesNatively("bedrock", "us.anthropic.claude-haiku-4-5-20251001-v1:0"),
     ).toBe(true);
     expect(AnyLLM.servesMessagesNatively("bedrock", "amazon.nova-lite-v1:0")).toBe(false);
+    expect(AnyLLM.supportsCompletionResponseFormat("openai", "gpt-5-nano")).toBe(true);
+    expect(AnyLLM.supportsCompletionResponseFormat("inception", "any-model")).toBe(false);
+    expect(AnyLLM.supportsCompletionResponseFormat("llamafile", "any-model")).toBe(false);
+    expect(AnyLLM.supportsCompletionResponseFormat("minimax", "any-model")).toBe(false);
+    expect(AnyLLM.supportsCompletionResponseFormat("sagemaker", "any-model")).toBe(false);
+    expect(AnyLLM.supportsCompletionResponseFormat("zai", "any-model")).toBe(false);
+    expect(
+      AnyLLM.supportsCompletionResponseFormat(
+        "bedrock",
+        "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+      ),
+    ).toBe(true);
+    expect(AnyLLM.supportsCompletionResponseFormat("bedrock", "amazon.nova-lite-v1:0")).toBe(false);
+    expect(AnyLLM.supportsCompletionResponseFormat("bedrock", "openai.gpt-oss-120b")).toBe(false);
+    expect(
+      AnyLLM.supportsCompletionResponseFormat("bedrock", "us.twelvelabs.pegasus-1-5-v1:0"),
+    ).toBe(true);
   });
 
   it("treats cascadia, llamacpp, and vllm API keys as optional and honors their env vars", () => {
@@ -324,6 +367,18 @@ describe("AnyLLM registry and facade", () => {
         messages: [{ content: "Hi", role: "user" }],
         model: "model-a",
         promptCacheKey: "cache-key",
+      }),
+    ).rejects.toBeInstanceOf(UnsupportedParameterError);
+  });
+
+  it("rejects inferenceGeo for providers that do not support it", async () => {
+    const llm = AnyLLM.fromProvider(new FakeProvider());
+    await expect(
+      llm.messages({
+        inferenceGeo: "us",
+        maxTokens: 10,
+        messages: [{ content: "Hi", role: "user" }],
+        model: "model-a",
       }),
     ).rejects.toBeInstanceOf(UnsupportedParameterError);
   });
