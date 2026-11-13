@@ -26,6 +26,17 @@ export interface ImageUrlContentPart {
   image_url: string | { detail?: "auto" | "high" | "low"; url: string };
 }
 
+export interface VideoUrlContentPart {
+  type: "video_url";
+  video_url:
+    | string
+    | {
+        url: string;
+        bucketOwner?: string;
+        bucket_owner?: string;
+      };
+}
+
 export interface FileContentPart {
   type: "file";
   file: {
@@ -48,6 +59,7 @@ export type MessageContentPart =
   | ImageUrlContentPart
   | InputAudioContentPart
   | TextContentPart
+  | VideoUrlContentPart
   | ({ type: string } & JsonObject);
 
 export interface FunctionCall {
@@ -439,6 +451,7 @@ export interface ImageEditParams {
   image: ImageInput;
   model: string;
   prompt: string;
+  mask?: ImageFile;
   n?: number;
   providerOptions?: JsonObject;
   quality?: string;

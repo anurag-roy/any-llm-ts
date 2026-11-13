@@ -14,7 +14,7 @@ import {
   ProviderError,
   UnsupportedParameterError,
 } from "../errors.js";
-import { resolveImages, sniffImageFormat } from "../image.js";
+import { readImageContent, resolveImages, sniffImageFormat } from "../image.js";
 import type {
   ImageEditParams,
   ImageGenerationParams,
@@ -279,7 +279,7 @@ export function generationRequest(params: ImageGenerationParams, providerName: s
 }
 
 async function imagePart(image: Blob, providerName: string): Promise<Part> {
-  const bytes = new Uint8Array(await image.arrayBuffer());
+  const bytes = await readImageContent(image, providerName);
   const mimeType =
     image.type.length > 0 ? image.type : (sniffImageFormat(bytes)?.mimeType ?? undefined);
   if (mimeType === undefined) {

@@ -6,6 +6,7 @@ import { isJsonObject, isJsonValue, isNumber, isObject, isString } from "../util
 import {
   BedrockClient,
   CreateModelInvocationJobCommand,
+  GetInferenceProfileCommand,
   GetModelInvocationJobCommand,
   ListFoundationModelsCommand,
   ListInferenceProfilesCommand,
@@ -43,6 +44,8 @@ import type {
   EmbeddingResponse,
   FinishReason,
   FunctionTool,
+  ImageEditParams,
+  ImageGenerationResponse,
   ListBatchesParams,
   MessageResponse,
   MessageStreamEvent,
@@ -66,6 +69,13 @@ import {
   unixTimestamp,
 } from "../utils.js";
 import { BaseProvider } from "./base.js";
+import {
+  convertPegasusResponse,
+  convertPegasusStreamEvent,
+  isPegasusBedrockModel,
+  pegasusBody,
+} from "./bedrock-pegasus.js";
+import { convertStabilityResponse, stabilityEditBody } from "./bedrock-stability.js";
 import { completeProviderMetadata } from "../provider-metadata.js";
 import { isStructuredOutputFormat, normalizeOutputConfig } from "../structured-output.js";
 import {
@@ -98,7 +108,7 @@ const bedrockCapabilities: ProviderCapabilities = {
   completion: true,
   embedding: true,
   files: false,
-  imageEdit: false,
+  imageEdit: true,
   imageGeneration: false,
   listModels: true,
   messages: true,
@@ -217,6 +227,18 @@ export function isAnthropicBedrockModel(model: string): boolean {
 export function isGptOssBedrockModel(model: string): boolean {
   return model.includes("openai.gpt-oss");
 }
+
+export { isPegasusBedrockModel } from "./bedrock-pegasus.js";
+
+const APPLICATION_INFERENCE_PROFILE = ":application-inference-profile/";
+const INVOKE_MODEL_OPTIONS = new Set([
+  "guardrailIdentifier",
+  "guardrailVersion",
+  "performanceConfigLatency",
+  "requestMetadata",
+  "serviceTier",
+  "trace",
+]);
 
 const gptOssReasoningEfforts = new Set<ReasoningEffort>(["high", "low", "medium"]);
 
@@ -1234,6 +1256,44 @@ async function bodyText<Value>(value: Value): Promise<string> {
   throw new TypeError("AWS returned an unreadable response body.");
 }
 
+async function invokeModelJson(
+  runtime: BedrockClientLike,
+  request: ConstructorParameters<typeof InvokeModelCommand>[0],
+  requestOptions: { abortSignal: AbortSignal } | undefined,
+): Promise<{ payload: JsonObject; requestId: string }> {
+  const command = new InvokeModelCommand(request);
+  const response =
+    requestOptions === undefined
+      ? await runtime.send(command)
+      : await runtime.send(command, requestOptions);
+  return {
+    payload: parseJsonObject(
+      JSON.parse(await bodyText(response.body)),
+      "Bedrock InvokeModel response",
+    ),
+    requestId: requestIdOf(response),
+  };
+}
+
+function requestIdOf(response: { $metadata?: { requestId?: string } }): string {
+  return isString(response.$metadata?.requestId)
+    ? response.$metadata.requestId
+    : `bedrock-${String(unixTimestamp())}`;
+}
+
+async function* pegasusResponseStream(
+  stream: AsyncIterable<BedrockNativeStreamEvent>,
+  modelId: string,
+  requestId: string,
+): AsyncIterable<ChatCompletionChunk> {
+  const created = unixTimestamp();
+  for await (const event of iterateClosing(stream)) {
+    const payload = bedrockStreamPayload(event);
+    if (payload === undefined) continue;
+    yield* convertPegasusStreamEvent(payload, modelId, requestId, created);
+  }
+}
+
 function batchResults(text: string, model: string): BatchResult {
   const results: BatchResult["results"] = [];
   for (const line of text.split("\n")) {
@@ -1288,6 +1348,7 @@ export class BedrockProvider extends BaseProvider {
   private readonly control: BedrockControlClientLike;
   private readonly runtime: BedrockClientLike;
   private readonly s3: BedrockS3ClientLike;
+  private readonly profileModelIds = new Map<string, Promise<string>>();
 
   constructor(options: ProviderOptions = {}, clients: BedrockProviderClients = {}) {
     if (options.maxRetries !== undefined) rejectMaxRetries("bedrock");
@@ -1314,7 +1375,7 @@ export class BedrockProvider extends BaseProvider {
   }
 
   override supportsCompletionResponseFormat(model: string): boolean {
-    return isAnthropicBedrockModel(model);
+    return isAnthropicBedrockModel(model) || isPegasusBedrockModel(model);
   }
 
   override messages(
@@ -1350,14 +1411,8 @@ export class BedrockProvider extends BaseProvider {
         }
         return this.protectStream(nativeMessagesStream(response.body));
       }
-      const command = new InvokeModelCommand(request);
-      const response =
-        requestOptions === undefined
-          ? await this.runtime.send(command)
-          : await this.runtime.send(command, requestOptions);
-      return nativeMessage(
-        parseJsonValue(JSON.parse(await bodyText(response.body)), "Bedrock Messages response"),
-      );
+      const { payload } = await invokeModelJson(this.runtime, request, requestOptions);
+      return nativeMessage(payload);
     });
   }
 
@@ -1367,28 +1422,153 @@ export class BedrockProvider extends BaseProvider {
     if (params.messages.length === 0) {
       return Promise.reject(new TypeError("The messages array cannot be empty."));
     }
-    const request = completionRequest(params);
-    return this.execute(async () => {
-      const requestOptions = timeoutAbortOptions(params.timeout);
-      if (params.stream === true) {
-        // SAFETY: The provider contract establishes the asserted representation at this boundary.
-        const command = new ConverseStreamCommand(request as never);
-        const response = await (requestOptions === undefined
-          ? this.runtime.send(command)
-          : this.runtime.send(command, requestOptions));
-        if (!isAsyncIterable(response.stream)) {
-          throw new TypeError("Bedrock returned an empty Converse stream.");
-        }
-        return this.protectStream(normalizeStream(response.stream, params.model));
+    if (!params.model.startsWith("arn:") || !params.model.includes(APPLICATION_INFERENCE_PROFILE)) {
+      if (isPegasusBedrockModel(params.model)) {
+        return this.execute(async () => await this.pegasusCompletion(params, params.model));
       }
+      const request = completionRequest(params);
+      return this.execute(async () => await this.converseCompletion(params, request));
+    }
+    return this.execute(async () => {
+      const modelId = await this.profileModelId(params.model, params.timeout);
+      if (isPegasusBedrockModel(modelId)) {
+        return await this.pegasusCompletion(params, modelId);
+      }
+      return await this.converseCompletion(params, completionRequest(params));
+    });
+  }
+
+  override imageEdit(params: ImageEditParams): Promise<ImageGenerationResponse> {
+    return this.execute(async () => {
+      const options = { ...params.providerOptions };
+      const timeout = isNumber(options.timeout) ? options.timeout : undefined;
+      const invokeOptions: JsonObject = {};
+      const bodyFields: JsonObject = {};
+      for (const [key, value] of Object.entries(options)) {
+        if (key === "timeout") continue;
+        if (INVOKE_MODEL_OPTIONS.has(key)) invokeOptions[key] = value;
+        else bodyFields[key] = value;
+      }
+      const body = await stabilityEditBody(params, bodyFields);
+      const { payload } = await invokeModelJson(
+        this.runtime,
+        {
+          ...invokeOptions,
+          accept: "application/json",
+          body: JSON.stringify(body),
+          contentType: "application/json",
+          modelId: params.model,
+        },
+        timeoutAbortOptions(timeout),
+      );
+      return convertStabilityResponse(payload, body.output_format);
+    });
+  }
+
+  private async converseCompletion(
+    params: CompletionParams,
+    request: ReturnType<typeof completionRequest>,
+  ): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion> {
+    const requestOptions = timeoutAbortOptions(params.timeout);
+    if (params.stream === true) {
       // SAFETY: The provider contract establishes the asserted representation at this boundary.
-      const command = new ConverseCommand(request as never);
+      const command = new ConverseStreamCommand(request as never);
+      const response = await (requestOptions === undefined
+        ? this.runtime.send(command)
+        : this.runtime.send(command, requestOptions));
+      if (!isAsyncIterable(response.stream)) {
+        throw new TypeError("Bedrock returned an empty Converse stream.");
+      }
+      return this.protectStream(normalizeStream(response.stream, params.model));
+    }
+    // SAFETY: The provider contract establishes the asserted representation at this boundary.
+    const command = new ConverseCommand(request as never);
+    const response =
+      requestOptions === undefined
+        ? await this.runtime.send(command)
+        : await this.runtime.send(command, requestOptions);
+    return normalizeCompletion(response, params.model);
+  }
+
+  private async pegasusCompletion(
+    params: CompletionParams,
+    pegasusModelId: string,
+  ): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion> {
+    const options = { ...params.providerOptions };
+    const extraFields = isJsonObject(options.additionalModelRequestFields)
+      ? parseJsonObject(options.additionalModelRequestFields)
+      : {};
+    delete options.additionalModelRequestFields;
+    const body = pegasusBody(params, pegasusModelId, extraFields);
+    // SAFETY: Remaining provider options are extra InvokeModel fields such as guardrailIdentifier.
+    const request = {
+      ...options,
+      accept: "application/json",
+      body: JSON.stringify(body),
+      contentType: "application/json",
+      modelId: params.model,
+    } as never;
+    const requestOptions = timeoutAbortOptions(params.timeout);
+    if (params.stream === true) {
+      const command = new InvokeModelWithResponseStreamCommand(request);
       const response =
         requestOptions === undefined
           ? await this.runtime.send(command)
           : await this.runtime.send(command, requestOptions);
-      return normalizeCompletion(response, params.model);
-    });
+      if (!isAsyncIterable(response.body)) {
+        throw new TypeError("Bedrock returned an empty Pegasus stream.");
+      }
+      return this.protectStream(
+        pegasusResponseStream(response.body, params.model, requestIdOf(response)),
+      );
+    }
+    const { payload, requestId } = await invokeModelJson(this.runtime, request, requestOptions);
+    return convertPegasusResponse(payload, params.model, requestId);
+  }
+
+  private async profileModelId(modelId: string, timeout: number | undefined): Promise<string> {
+    if (!modelId.startsWith("arn:") || !modelId.includes(APPLICATION_INFERENCE_PROFILE)) {
+      return modelId;
+    }
+    const cached = this.profileModelIds.get(modelId);
+    if (cached !== undefined) return cached;
+    const lookup = this.lookUpProfileModelId(modelId, timeout);
+    this.profileModelIds.set(modelId, lookup);
+    try {
+      return await lookup;
+    } catch (error) {
+      if (this.profileModelIds.get(modelId) === lookup) this.profileModelIds.delete(modelId);
+      throw error;
+    }
+  }
+
+  private async lookUpProfileModelId(
+    profileArn: string,
+    timeout: number | undefined,
+  ): Promise<string> {
+    const requestOptions = timeoutAbortOptions(timeout);
+    try {
+      const command = new GetInferenceProfileCommand({
+        inferenceProfileIdentifier: profileArn,
+      });
+      const profile =
+        requestOptions === undefined
+          ? await this.control.send(command)
+          : await this.control.send(command, requestOptions);
+      const models = Array.isArray(profile.models) ? profile.models : [];
+      const first = models[0];
+      const modelArn = isObject(first) && isString(first.modelArn) ? first.modelArn : undefined;
+      if (modelArn === undefined) {
+        throw new TypeError("Bedrock inference profile did not name a foundation model.");
+      }
+      return foundationModelId(modelArn);
+    } catch (error) {
+      if (!(error instanceof Error) || !isAccessDenied(error)) throw error;
+      console.warn(
+        `Reading Bedrock inference profile ${profileArn} was denied, so its requests go to Converse, which rejects the TwelveLabs Pegasus models. Grant bedrock:GetInferenceProfile to send Pegasus requests to InvokeModel.`,
+      );
+      return profileArn;
+    }
   }
 
   override embedding(params: EmbeddingParams): Promise<EmbeddingResponse> {

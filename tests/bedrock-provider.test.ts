@@ -889,7 +889,10 @@ describe("Bedrock provider", () => {
       output: { message: { content: [{ text: "ok" }], role: "assistant" } },
       stopReason: "end_turn",
     });
-    await provider(send).completion({
+    const controlSend = vi.fn().mockResolvedValue({
+      models: [{ modelArn: "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-lite-v1:0" }],
+    });
+    await provider(send, controlSend).completion({
       messages: [{ content: "hi", role: "user" }],
       model,
       reasoningEffort: "low",

@@ -91,6 +91,7 @@ describe("AnyLLM registry and facade", () => {
     expect(AnyLLM.getProviderMetadata("openai").messagesNative).toBe(false);
     expect(AnyLLM.getProviderMetadata("deepseek").messagesNative).toBe(true);
     expect(AnyLLM.getProviderMetadata("openai").capabilities.imageEdit).toBe(true);
+    expect(AnyLLM.getProviderMetadata("bedrock").capabilities.imageEdit).toBe(true);
     expect(AnyLLM.getProviderMetadata("gemini").capabilities.imageGeneration).toBe(true);
     expect(AnyLLM.getProviderMetadata("gemini").capabilities.audioSpeech).toBe(true);
     expect(AnyLLM.getProviderMetadata("vertexai").capabilities.imageGeneration).toBe(false);
@@ -134,6 +135,9 @@ describe("AnyLLM registry and facade", () => {
     ).toBe(true);
     expect(AnyLLM.supportsCompletionResponseFormat("bedrock", "amazon.nova-lite-v1:0")).toBe(false);
     expect(AnyLLM.supportsCompletionResponseFormat("bedrock", "openai.gpt-oss-120b")).toBe(false);
+    expect(
+      AnyLLM.supportsCompletionResponseFormat("bedrock", "us.twelvelabs.pegasus-1-5-v1:0"),
+    ).toBe(true);
   });
 
   it("treats cascadia, llamacpp, and vllm API keys as optional and honors their env vars", () => {

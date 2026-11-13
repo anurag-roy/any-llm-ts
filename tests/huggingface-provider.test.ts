@@ -195,7 +195,7 @@ describe("Hugging Face provider", () => {
       },
     );
     await expect(provider.listModels()).resolves.toMatchObject([
-      { id: "swiss-ai/Apertus-70B-Instruct-2509", ownedBy: "swiss-ai" },
+      { id: "swiss-ai/Apertus-70B-Instruct-2509", object: "model", ownedBy: "swiss-ai" },
     ]);
     expect(list).toHaveBeenCalledOnce();
     expect(fetch).not.toHaveBeenCalled();

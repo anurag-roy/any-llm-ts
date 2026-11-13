@@ -44,6 +44,11 @@ Pass a Nano Banana or `*-image-*` model, map `size` to an aspect ratio Gemini ac
 `b64Json` plus optional `usage`. Gemini rejects `responseFormat: "url"` because it returns image
 bytes. Vertex AI does not implement this path.
 
+Bedrock edits images with Stability AI image services such as
+`us.stability.stable-image-inpaint-v1:0`. Style Transfer takes two images; Fast Upscale, Remove
+Background, and Erase Object take an empty prompt. Pass `mask` on the request, and `seed` or
+`output_format` in `providerOptions`. Bedrock returns `b64Json` and rejects `responseFormat: "url"`.
+
 ## Audio transcription
 
 ```ts

@@ -2,7 +2,7 @@ import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
 
 import { InvalidRequestError } from "../src/index.js";
-import { resolveImages, sniffImageFormat } from "../src/image.js";
+import { readImageContent, resolveImages, sniffImageFormat } from "../src/image.js";
 
 describe("image helpers", () => {
   it("sniffs PNG, JPEG, and WEBP signatures", () => {
@@ -20,6 +20,11 @@ describe("image helpers", () => {
     webp.set([0x52, 0x49, 0x46, 0x46], 0);
     webp.set([0x57, 0x45, 0x42, 0x50], 8);
     expect(sniffImageFormat(webp)).toEqual({ extension: "webp", mimeType: "image/webp" });
+  });
+
+  it("reads image bytes and paths", async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    await expect(readImageContent(png, "bedrock")).resolves.toEqual(png);
   });
 
   it("rejects an empty image list", async () => {

@@ -1241,6 +1241,10 @@ export class OpenAIProvider extends BaseProvider {
     return this.execute(async () => {
       const requestOptions = this.mediaRequestOptions(params.providerOptions);
       const image = await resolveImages(params.image, this.metadata.name);
+      const mask =
+        params.mask === undefined
+          ? undefined
+          : await resolveImages(params.mask, this.metadata.name);
       // SAFETY: The provider contract establishes the asserted representation at this boundary.
       const body = {
         image,
@@ -1251,6 +1255,7 @@ export class OpenAIProvider extends BaseProvider {
         response_format: params.responseFormat,
         size: params.size,
         user: params.user,
+        ...includeWhen(mask !== undefined, { mask }),
         ...withoutExtraQuery(params.providerOptions),
       } as never;
       const response =

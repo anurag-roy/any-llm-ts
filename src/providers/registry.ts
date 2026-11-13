@@ -9,7 +9,7 @@ import {
 import { AnthropicProvider } from "./anthropic.js";
 import { AzureProvider } from "./azure.js";
 import { AzureAnthropicProvider } from "./azureanthropic.js";
-import { BedrockProvider, isAnthropicBedrockModel } from "./bedrock.js";
+import { BedrockProvider, isAnthropicBedrockModel, isPegasusBedrockModel } from "./bedrock.js";
 import type { BaseProvider } from "./base.js";
 import { CohereProvider } from "./cohere.js";
 import { DeepinfraProvider } from "./deepinfra.js";
@@ -581,6 +581,7 @@ addBuiltIn("bedrock", {
     capabilities: capabilities({
       batch: true,
       embedding: true,
+      imageEdit: true,
       reasoning: true,
       vision: true,
     }),
@@ -1044,7 +1045,9 @@ export function servesMessagesNatively(provider: string, model: string): boolean
 
 export function supportsCompletionResponseFormat(provider: string, model: string): boolean {
   const name = normalizeName(provider);
-  if (name === "bedrock") return isAnthropicBedrockModel(model);
+  if (name === "bedrock") {
+    return isAnthropicBedrockModel(model) || isPegasusBedrockModel(model);
+  }
   return getProviderMetadata(name).supportsCompletionResponseFormat;
 }
 

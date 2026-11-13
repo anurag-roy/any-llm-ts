@@ -87,6 +87,7 @@ export {
   BedrockProvider,
   isAnthropicBedrockModel,
   isGptOssBedrockModel,
+  isPegasusBedrockModel,
 } from "./providers/bedrock.js";
 export type {
   BedrockClientLike,

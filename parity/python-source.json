@@ -1,7 +1,7 @@
 {
   "source": {
     "repository": "mozilla-ai/any-llm",
-    "commit": "9b43bbca41025d39513f98405a5f26ff6e36ff5b"
+    "commit": "b8d10c4316e18513d5b7c94b517dbfa88d374d63"
   },
   "providers": [
     "anthropic",
@@ -239,7 +239,7 @@
       "voyage"
     ],
     "files": ["anthropic", "azureopenai", "gemini", "openai"],
-    "imageEdit": ["gemini", "openai"],
+    "imageEdit": ["bedrock", "gemini", "openai"],
     "imageGeneration": ["azureopenai", "deepinfra", "gemini", "neosantara", "openai", "otari"],
     "listModels": [
       "anthropic",
