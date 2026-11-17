@@ -527,7 +527,7 @@ function dataImage(value: string) {
 
 type BedrockToolResultBlock =
   | { image: ReturnType<typeof dataImage> }
-  | { json: JsonValue }
+  | { json: JsonObject }
   | { text: string };
 
 type BedrockContentBlock =
@@ -603,12 +603,14 @@ function toolResult(message: ChatMessage) {
     };
   }
   const text = isString(message.content) ? message.content : JSON.stringify(message.content);
-  let content: BedrockToolResultBlock;
+  let parsed: JsonValue | undefined;
   try {
-    content = { json: parseJsonValue(JSON.parse(text), "Bedrock tool result") };
+    parsed = parseJsonValue(JSON.parse(text), "Bedrock tool result");
   } catch {
-    content = { text };
+    parsed = undefined;
   }
+  // A json block holds an object only; Converse refuses an array, a string or a number there.
+  const content: BedrockToolResultBlock = isJsonObject(parsed) ? { json: parsed } : { text };
   return {
     toolResult: { content: [content], toolUseId: message.toolCallId },
   };

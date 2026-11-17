@@ -23,6 +23,7 @@ import {
 import type {
   ChatCompletion,
   ChatCompletionChunk,
+  ChatCompletionDelta,
   CompletionParams,
   MessageStreamEvent,
   MessagesParams,
@@ -862,7 +863,45 @@ describe("Messages compatibility API", () => {
     expect(events.at(-2)).toMatchObject({ delta: { stopReason: "tool_use" } });
   });
 
-  it("emits held text when the stream ends without a finish reason", async () => {
+  it.each<ChatCompletionDelta>([
+    { content: "The capital of France is Par" },
+    {
+      toolCalls: [
+        {
+          function: { arguments: '{"city": "Par', name: "get_weather" },
+          id: "call_1",
+          index: 0,
+        },
+      ],
+    },
+    { refusal: "I can't help with" },
+  ])("does not complete a stream that ends without a finish reason ($#)", async (delta) => {
+    const events: MessageStreamEvent[] = [];
+    for await (const event of completionStreamToMessageEvents(
+      (async function* () {
+        yield {
+          ...chunk(delta),
+          usage: { completionTokens: 10, promptTokens: 100, totalTokens: 110 },
+        };
+      })(),
+    )) {
+      events.push(event);
+    }
+    expect(events.map((event) => event.type)).toEqual([
+      "message_start",
+      "content_block_start",
+      "content_block_delta",
+      "message_delta",
+    ]);
+    const deltaEvent = events.at(-1);
+    expect(deltaEvent).toMatchObject({
+      delta: { stopReason: null },
+      type: "message_delta",
+      usage: { outputTokens: 10 },
+    });
+  });
+
+  it("does not flush held text when a cut stream never sends a finish reason", async () => {
     const events: MessageStreamEvent[] = [];
     for await (const event of completionStreamToMessageEvents(
       (async function* () {
@@ -880,18 +919,21 @@ describe("Messages compatibility API", () => {
     )) {
       events.push(event);
     }
-    expect(events.slice(-6).map((event) => event.type)).toEqual([
-      "content_block_stop",
+    expect(events.map((event) => event.type)).toEqual([
+      "message_start",
       "content_block_start",
       "content_block_delta",
-      "content_block_stop",
       "message_delta",
-      "message_stop",
     ]);
-    expect(events.at(-4)).toMatchObject({
-      delta: { text: "Checking.", type: "text_delta" },
-      index: 1,
-    });
+    expect(events.at(-1)).toMatchObject({ delta: { stopReason: null }, type: "message_delta" });
+    expect(
+      events.some(
+        (event) =>
+          event.type === "content_block_delta" &&
+          "delta" in event &&
+          event.delta.type === "text_delta",
+      ),
+    ).toBe(false);
   });
 
   it("drops an unknown tool-argument fragment instead of filing it under text", async () => {
@@ -1001,11 +1043,8 @@ describe("Messages compatibility API", () => {
     )) {
       events.push(event);
     }
-    expect(events.map((event) => event.type)).toEqual([
-      "message_start",
-      "message_delta",
-      "message_stop",
-    ]);
+    expect(events.map((event) => event.type)).toEqual(["message_start", "message_delta"]);
+    expect(events.at(-1)).toMatchObject({ delta: { stopReason: null }, type: "message_delta" });
   });
 
   it("routes interleaved parallel tool-call arguments to their own content blocks", async () => {

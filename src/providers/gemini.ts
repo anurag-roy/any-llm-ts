@@ -271,6 +271,9 @@ interface GeminiClientHttpOptions {
   api_version?: string;
 }
 
+const DEFAULT_GEMINI_API_VERSION = "v1beta";
+type GeminiHttpOptions = NonNullable<GoogleGenAIOptions["httpOptions"]>;
+
 function geminiClientOptions(
   clientOptions: ProviderOptions["clientOptions"],
 ): { httpOptions?: GeminiClientHttpOptions } | undefined {
@@ -281,6 +284,32 @@ function geminiClientOptions(
   if (isString(httpOptions.apiVersion)) http.apiVersion = httpOptions.apiVersion;
   if (isString(httpOptions.api_version)) http.api_version = httpOptions.api_version;
   return { httpOptions: http };
+}
+
+function incomingGeminiHttpOptions(options: ProviderOptions): GeminiHttpOptions | undefined {
+  // SAFETY: The provider contract establishes the asserted representation at this boundary.
+  // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- TypeScript needs the SDK owner type after spreading generic JSON options.
+  return ({ ...options.clientOptions } as GoogleGenAIOptions).httpOptions;
+}
+
+function namedGeminiApiVersion(httpOptions: GeminiHttpOptions | undefined): string | undefined {
+  if (httpOptions === undefined) return undefined;
+  if (isJsonObject(httpOptions)) {
+    if (isString(httpOptions.apiVersion)) return httpOptions.apiVersion;
+    if (isString(httpOptions.api_version)) return httpOptions.api_version;
+    return undefined;
+  }
+  return isString(httpOptions.apiVersion) ? httpOptions.apiVersion : undefined;
+}
+
+function namedGeminiBaseUrl(httpOptions: GeminiHttpOptions | undefined): string | undefined {
+  if (httpOptions === undefined) return undefined;
+  if (isJsonObject(httpOptions)) {
+    if (isString(httpOptions.baseUrl)) return httpOptions.baseUrl;
+    if (isString(httpOptions.base_url)) return httpOptions.base_url;
+    return undefined;
+  }
+  return isString(httpOptions.baseUrl) ? httpOptions.baseUrl : undefined;
 }
 
 function resolveApiKey(options: ProviderOptions): string {
@@ -314,6 +343,32 @@ export function geminiHttpOptionsWithRetries(
   return httpOptions;
 }
 
+/**
+ * Copy caller httpOptions, fill `baseUrl` from `apiBase`, and pin `v1beta` unless a version
+ * is already named here or through `GOOGLE_GENAI_API_VERSION`.
+ *
+ * google-genai 3 (and later JS SDK defaults) moved from v1beta to v1, which does not carry
+ * preview models. A client that names no version keeps v1beta, as before.
+ * https://ai.google.dev/gemini-api/docs/api-versions
+ */
+export function geminiDeveloperHttpOptions(
+  httpOptions: GeminiHttpOptions | undefined,
+  apiBase: string | undefined,
+  maxRetries: number | undefined,
+): GeminiHttpOptions {
+  const copied: GeminiHttpOptions = httpOptions === undefined ? {} : { ...httpOptions };
+  const withBase: GeminiHttpOptions =
+    apiBase !== undefined && namedGeminiBaseUrl(copied) === undefined
+      ? { ...copied, baseUrl: apiBase }
+      : copied;
+  const withVersion: GeminiHttpOptions =
+    namedGeminiApiVersion(withBase) === undefined &&
+    getEnvironmentVariable("GOOGLE_GENAI_API_VERSION") === undefined
+      ? { ...withBase, apiVersion: DEFAULT_GEMINI_API_VERSION }
+      : withBase;
+  return geminiHttpOptionsWithRetries(withVersion, maxRetries) ?? withVersion;
+}
+
 function mergeClientOptions(
   options: ProviderOptions,
   apiBase: string | undefined,
@@ -323,16 +378,14 @@ function mergeClientOptions(
   const clientOptions = {
     ...options.clientOptions,
   } as GoogleGenAIOptions;
-  const existingHttpOptions = clientOptions.httpOptions;
-  const httpOptions = geminiHttpOptionsWithRetries(
-    apiBase === undefined ? existingHttpOptions : { baseUrl: apiBase, ...existingHttpOptions },
-    resolvedMaxRetries(options),
-  );
-
   return {
     ...clientOptions,
     apiKey: resolveApiKey(options),
-    ...includeWhen(!(httpOptions === undefined), { httpOptions }),
+    httpOptions: geminiDeveloperHttpOptions(
+      clientOptions.httpOptions,
+      apiBase,
+      resolvedMaxRetries(options),
+    ),
   };
 }
 
@@ -1491,7 +1544,16 @@ export class GeminiProvider extends BaseProvider {
       location: isString(clientOptions?.location) ? clientOptions.location : undefined,
       project: isString(clientOptions?.project) ? clientOptions.project : undefined,
     });
-    this.interactionsVersion = interactionsApiVersion(geminiClientOptions(options.clientOptions));
+    this.interactionsVersion =
+      this.providerName === "gemini"
+        ? interactionsApiVersion({
+            httpOptions: geminiDeveloperHttpOptions(
+              incomingGeminiHttpOptions(options),
+              apiBase,
+              resolvedMaxRetries(options),
+            ),
+          })
+        : interactionsApiVersion(geminiClientOptions(options.clientOptions));
     this.metadata = completeProviderMetadata({
       capabilities: {
         ...geminiCapabilities,

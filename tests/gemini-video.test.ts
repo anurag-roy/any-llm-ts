@@ -321,6 +321,7 @@ describe("Gemini video provider methods", () => {
       }),
     ).resolves.toMatchObject({ id: "int-123", status: "in_progress" });
     expect(create).toHaveBeenCalledWith({
+      api_version: "v1beta",
       background: true,
       input: "a paper boat",
       model: MODEL,
@@ -332,7 +333,7 @@ describe("Gemini video provider methods", () => {
       done: true,
       outputs: [{ b64Data: VIDEO_B64 }],
     });
-    expect(get).toHaveBeenCalledWith("int-123", { timeout: 5 });
+    expect(get).toHaveBeenCalledWith("int-123", { api_version: "v1beta", timeout: 5 });
   });
 
   it("rejects a response_format that contradicts size before creating", async () => {

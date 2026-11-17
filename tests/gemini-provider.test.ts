@@ -22,7 +22,10 @@ import {
   RateLimitError,
   UnsupportedParameterError,
 } from "../src/index.js";
-import { geminiHttpOptionsWithRetries } from "../src/providers/gemini.js";
+import {
+  geminiDeveloperHttpOptions,
+  geminiHttpOptionsWithRetries,
+} from "../src/providers/gemini.js";
 import type {
   ChatCompletion,
   ChatCompletionChunk,
@@ -132,6 +135,7 @@ afterEach(() => {
   delete process.env.GEMINI_API_KEY;
   delete process.env.GOOGLE_API_KEY;
   delete process.env.GOOGLE_GEMINI_BASE_URL;
+  delete process.env.GOOGLE_GENAI_API_VERSION;
 });
 
 describe("Gemini provider", () => {
@@ -2377,6 +2381,46 @@ describe("Gemini provider", () => {
     expect(geminiHttpOptionsWithRetries({ retryOptions: { attempts: 9 } }, 0)).toEqual({
       retryOptions: { attempts: 9 },
     });
+  });
+
+  it("pins v1beta when no API version is named", () => {
+    expect(geminiDeveloperHttpOptions(undefined, undefined, undefined)).toEqual({
+      apiVersion: "v1beta",
+    });
+    expect(
+      geminiDeveloperHttpOptions({ timeout: 30 }, "https://custom.endpoint.com", undefined),
+    ).toEqual({
+      apiVersion: "v1beta",
+      baseUrl: "https://custom.endpoint.com",
+      timeout: 30,
+    });
+  });
+
+  it("keeps the version the caller names and does not mutate httpOptions", () => {
+    const httpOptions = { apiVersion: "v1", timeout: 30 };
+    expect(
+      geminiDeveloperHttpOptions(httpOptions, "https://custom.endpoint.com", undefined),
+    ).toEqual({
+      apiVersion: "v1",
+      baseUrl: "https://custom.endpoint.com",
+      timeout: 30,
+    });
+    expect(httpOptions).toEqual({ apiVersion: "v1", timeout: 30 });
+    expect(
+      geminiDeveloperHttpOptions(
+        { baseUrl: "https://kept.example" },
+        "https://custom.endpoint.com",
+        undefined,
+      ),
+    ).toEqual({
+      apiVersion: "v1beta",
+      baseUrl: "https://kept.example",
+    });
+  });
+
+  it("leaves the version to the SDK environment variable", () => {
+    process.env.GOOGLE_GENAI_API_VERSION = "v1alpha";
+    expect(geminiDeveloperHttpOptions(undefined, undefined, undefined)).toEqual({});
   });
 
   it("rejects an unblocked generateContent response that has no candidates", async () => {

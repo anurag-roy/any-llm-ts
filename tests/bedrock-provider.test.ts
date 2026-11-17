@@ -307,6 +307,44 @@ describe("Bedrock provider", () => {
     ).toThrow(/toolChoice with reasoningEffort/u);
   });
 
+  it.each([
+    ['{"temp": 18}', { json: { temp: 18 } }],
+    ["18 degrees", { text: "18 degrees" }],
+    ['[{"name": "README.md"}]', { text: '[{"name": "README.md"}]' }],
+    ['"done"', { text: '"done"' }],
+    ["18", { text: "18" }],
+    ["null", { text: "null" }],
+  ] as const)(
+    "sends string tool result %s as a json object or as text",
+    async (content, expected) => {
+      const send = vi.fn(async (_command: BedrockTestCommand) => ({
+        output: { message: { content: [{ text: "ok" }] } },
+        stopReason: "end_turn",
+      }));
+      const bedrock = provider(send);
+      await bedrock.completion({
+        messages: [
+          { content: "plot it", role: "user" },
+          {
+            content: null,
+            role: "assistant",
+            toolCalls: [
+              { function: { arguments: "{}", name: "plot" }, id: "t1", type: "function" },
+            ],
+          },
+          { content, role: "tool", toolCallId: "t1" },
+        ],
+        model: "anthropic.claude-test",
+      });
+      // SAFETY: This test double implements the provider surface exercised by this test.
+      const command = send.mock.calls[0]?.[0] as ConverseCommand;
+      expect(parseJsonObjectArray(command.input.messages)[2]).toMatchObject({
+        content: [{ toolResult: { content: [expected], toolUseId: "t1" } }],
+        role: "user",
+      });
+    },
+  );
+
   it("sends tool-result content parts as Converse toolResult blocks", async () => {
     const send = vi.fn(async (_command: BedrockTestCommand) => ({
       output: { message: { content: [{ text: "ok" }] } },

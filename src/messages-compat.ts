@@ -794,6 +794,8 @@ interface StreamState {
   cacheCreationInputTokens?: number;
   cacheReadInputTokens?: number;
   codeResultIds: Set<string>;
+  /** Whether a chunk carried a finish_reason, which a stream cut short never does. */
+  finished: boolean;
   inputTokens: number;
   outputTokens: number;
   pendingCodeResult?: { item: JsonObject; outputs: JsonObject[] };
@@ -1009,7 +1011,8 @@ function chunkEvents(chunk: ChatCompletionChunk, state: StreamState): MessageStr
     });
   }
   for (const call of choice.delta.toolCalls ?? []) events.push(...toolDeltaEvents(state, call));
-  if (choice.finishReason !== null) {
+  if (isString(choice.finishReason) && choice.finishReason.length > 0) {
+    state.finished = true;
     events.push(...closeBlock(state));
     if (state.stopReason !== "refusal") state.stopReason = stopReason(choice.finishReason);
   }
@@ -1038,12 +1041,21 @@ function finalUsage(state: StreamState): MessageUsage {
   );
 }
 
+function unfinishedUsageDelta(state: StreamState): MessageDeltaEvent {
+  return {
+    delta: { stopReason: null },
+    type: "message_delta",
+    usage: finalUsage(state),
+  };
+}
+
 async function* messageEventsFromCompletionStream(
   stream: AsyncIterable<ChatCompletionChunk>,
 ): AsyncIterable<MessageStreamEvent> {
   const state: StreamState = {
     blockIndex: -1,
     codeResultIds: new Set(),
+    finished: false,
     inputTokens: 0,
     outputTokens: 0,
     pendingText: "",
@@ -1057,14 +1069,14 @@ async function* messageEventsFromCompletionStream(
       for (const event of chunkEvents(chunk, state)) yield event;
     }
   } catch (error) {
-    if (state.started) {
-      yield {
-        delta: { stopReason: null },
-        type: "message_delta",
-        usage: finalUsage(state),
-      };
-    }
+    if (state.started) yield unfinishedUsageDelta(state);
     throw error;
+  }
+  if (state.started && !state.finished) {
+    // Without a finish_reason a complete message cannot be told from a cut one, so end it
+    // like the failure path above: usage, but no stop_reason and no message_stop.
+    yield unfinishedUsageDelta(state);
+    return;
   }
   if (state.started) {
     for (const event of closeBlock(state)) yield event;

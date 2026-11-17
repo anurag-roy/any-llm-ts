@@ -262,6 +262,7 @@ describe("Gemini Interactions Responses provider", () => {
       expect(response.output_text).toBe("Hello");
     }
     expect(create).toHaveBeenCalledWith({
+      api_version: "v1beta",
       extra_headers: { "x-request-id": "request-123" },
       extra_query: { trace: "enabled" },
       generation_config: { max_output_tokens: 32 },
@@ -315,6 +316,7 @@ describe("Gemini Interactions Responses provider", () => {
       },
     });
     expect(create.mock.calls[0]?.[0]).toEqual({
+      api_version: "v1beta",
       input: "Hello",
       model: "gemini-3.8-flash",
     });
