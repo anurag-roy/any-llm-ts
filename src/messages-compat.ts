@@ -775,12 +775,21 @@ export function completionToMessageResponse(completion: ChatCompletion): Message
     );
   }
   if (content.length === 0) content.push(textBlock("", textSignature));
+  let mappedStopReason: MessageStopReason =
+    refusal === undefined ? stopReason(choice?.finishReason ?? null) : "refusal";
+  if (
+    mappedStopReason === "end_turn" &&
+    choice?.finishReason === "stop" &&
+    content.some((block) => block.type === "tool_use")
+  ) {
+    mappedStopReason = "tool_use";
+  }
   return {
     content,
     id: completion.id,
     model: completion.model,
     role: "assistant",
-    stopReason: refusal === undefined ? stopReason(choice?.finishReason ?? null) : "refusal",
+    stopReason: mappedStopReason,
     type: "message",
     usage: usageFromCompletion(completion),
     raw: completion,
@@ -1014,7 +1023,12 @@ function chunkEvents(chunk: ChatCompletionChunk, state: StreamState): MessageStr
   if (isString(choice.finishReason) && choice.finishReason.length > 0) {
     state.finished = true;
     events.push(...closeBlock(state));
-    if (state.stopReason !== "refusal") state.stopReason = stopReason(choice.finishReason);
+    if (state.stopReason !== "refusal") {
+      state.stopReason = stopReason(choice.finishReason);
+      if (choice.finishReason === "stop" && state.toolCallBlocks.size > 0) {
+        state.stopReason = "tool_use";
+      }
+    }
   }
   return events;
 }

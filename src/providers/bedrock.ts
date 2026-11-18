@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { includeWhen } from "../utils.js";
 import type { JsonValue } from "../types.js";
 import { parseJsonObject, parseJsonValue, parseOptionalJsonObject } from "../utils.js";
@@ -1038,8 +1040,8 @@ function normalizeCompletion<Value>(value: Value, model: string): ChatCompletion
         },
       },
     ],
-    created: isNumber(response.created) ? response.created : unixTimestamp(),
-    id: isString(response.id) ? response.id : `bedrock-${unixTimestamp()}`,
+    created: unixTimestamp(),
+    id: requestIdOf(isObject(value) && !Array.isArray(value) ? value : {}),
     model: isString(response.model) ? response.model : model,
     object: "chat.completion",
     provider: "bedrock",
@@ -1141,10 +1143,11 @@ function streamChunk<Value>(
 async function* normalizeStream<Event>(
   stream: AsyncIterable<Event>,
   model: string,
+  responseId: string,
 ): AsyncIterable<ChatCompletionChunk> {
   const state = {
     created: unixTimestamp(),
-    id: `bedrock-stream-${unixTimestamp()}`,
+    id: responseId,
     model,
     toolIndices: new Map<number, number>(),
   };
@@ -1277,10 +1280,14 @@ async function invokeModelJson(
   };
 }
 
+function mintedCompletionId(): string {
+  return `chatcmpl-${randomUUID().replaceAll("-", "")}`;
+}
+
 function requestIdOf(response: { $metadata?: { requestId?: string } }): string {
-  return isString(response.$metadata?.requestId)
+  return isString(response.$metadata?.requestId) && response.$metadata.requestId.length > 0
     ? response.$metadata.requestId
-    : `bedrock-${String(unixTimestamp())}`;
+    : mintedCompletionId();
 }
 
 async function* pegasusResponseStream(
@@ -1481,7 +1488,9 @@ export class BedrockProvider extends BaseProvider {
       if (!isAsyncIterable(response.stream)) {
         throw new TypeError("Bedrock returned an empty Converse stream.");
       }
-      return this.protectStream(normalizeStream(response.stream, params.model));
+      return this.protectStream(
+        normalizeStream(response.stream, params.model, requestIdOf(response)),
+      );
     }
     // SAFETY: The provider contract establishes the asserted representation at this boundary.
     const command = new ConverseCommand(request as never);

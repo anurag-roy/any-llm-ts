@@ -2901,6 +2901,67 @@
     "tier": "community"
   },
   {
+    "capabilities": {
+      "audioSpeech": false,
+      "audioTranscription": false,
+      "batch": false,
+      "completion": true,
+      "embedding": true,
+      "files": false,
+      "imageEdit": false,
+      "imageGeneration": false,
+      "listModels": true,
+      "messages": true,
+      "moderation": false,
+      "pdfInput": false,
+      "reasoning": true,
+      "rerank": false,
+      "responses": true,
+      "streaming": true,
+      "videoGeneration": false,
+      "vision": true
+    },
+    "documentationUrl": "https://docs.tinfoil.sh/sdk/javascript-sdk",
+    "envApiBase": "TINFOIL_API_BASE",
+    "envApiKey": "TINFOIL_API_KEY",
+    "name": "tinfoil",
+    "requiresApiKey": true,
+    "supportsCompletionN": false,
+    "configuration": {
+      "reason": "provider_specific_contract_pending",
+      "status": "unavailable"
+    },
+    "displayName": "Tinfoil",
+    "fileOperations": [],
+    "gateway": {
+      "completion": {
+        "abortSignal": "supported",
+        "dispatchEvidence": "provider_sdk",
+        "normalizedOutput": {
+          "safeErrors": true,
+          "streaming": true,
+          "text": true,
+          "tools": true,
+          "usage": true
+        },
+        "providerOptions": "normalized_fields_win",
+        "retryControl": "per_operation"
+      },
+      "version": 1
+    },
+    "id": "tinfoil",
+    "messagesNative": false,
+    "promptCacheKeySupport": "unsupported",
+    "provenance": {
+      "adapterId": "any-llm-ts/openai",
+      "adapterVersion": "1",
+      "libraryName": "any-llm-ts",
+      "libraryVersion": "0.8.0"
+    },
+    "supportsCompletionResponseFormat": true,
+    "tier": "community"
+  },
+  {
     "apiBase": "https://api.together.xyz/v1",
     "capabilities": {
       "audioSpeech": true,

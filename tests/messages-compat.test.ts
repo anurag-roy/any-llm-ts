@@ -661,7 +661,7 @@ describe("Messages compatibility API", () => {
         { text: "done", type: "text" },
         { input: {}, type: "tool_use" },
       ],
-      stopReason: "end_turn",
+      stopReason: "tool_use",
     });
     expect(completionToMessageResponse(completion("content_filter", "partial"))).toMatchObject({
       content: [{ text: "partial", type: "text" }],
@@ -862,6 +862,77 @@ describe("Messages compatibility API", () => {
     ).toEqual(["Checking. Done."]);
     expect(events.at(-2)).toMatchObject({ delta: { stopReason: "tool_use" } });
   });
+
+  it.each([
+    ["tool_calls", "tool_use"],
+    ["stop", "tool_use"],
+    ["length", "max_tokens"],
+    ["content_filter", "refusal"],
+  ] as const)(
+    "maps a tool-call completion with finish_reason %s to stop_reason %s",
+    (finishReason, expectedStop) => {
+      expect(
+        completionToMessageResponse({
+          choices: [
+            {
+              finishReason,
+              index: 0,
+              message: {
+                content: null,
+                role: "assistant",
+                toolCalls: [
+                  {
+                    function: { arguments: '{"city":"London"}', name: "get_weather" },
+                    id: "call_weather",
+                    type: "function",
+                  },
+                ],
+              },
+            },
+          ],
+          created: 1,
+          id: "chatcmpl-456",
+          model: "model-a",
+          object: "chat.completion",
+          provider: "messages-fake",
+        }),
+      ).toMatchObject({ stopReason: expectedStop });
+    },
+  );
+
+  it.each([
+    [false, "tool_calls", "tool_use"],
+    [true, "tool_calls", "tool_use"],
+    [false, "stop", "tool_use"],
+    [true, "stop", "tool_use"],
+    [false, "length", "max_tokens"],
+    [true, "length", "max_tokens"],
+    [false, "content_filter", "refusal"],
+    [true, "content_filter", "refusal"],
+  ] as const)(
+    "maps streamed tool use with finish_reason %s (separate finish %s) to %s",
+    async (separateFinish, finishReason, expectedStop) => {
+      const toolDelta: ChatCompletionChunk["choices"][number]["delta"] = {
+        toolCalls: [
+          {
+            function: { arguments: '{"city":"London"}', name: "get_weather" },
+            id: "call_weather",
+            index: 0,
+          },
+        ],
+      };
+      const events: MessageStreamEvent[] = [];
+      for await (const event of completionStreamToMessageEvents(
+        (async function* () {
+          yield chunk(toolDelta, separateFinish ? null : finishReason);
+          if (separateFinish) yield chunk({}, finishReason);
+        })(),
+      )) {
+        events.push(event);
+      }
+      expect(events.at(-2)).toMatchObject({ delta: { stopReason: expectedStop } });
+    },
+  );
 
   it.each<ChatCompletionDelta>([
     { content: "The capital of France is Par" },

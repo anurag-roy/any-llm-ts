@@ -269,6 +269,43 @@ describe("Bedrock provider", () => {
     });
   });
 
+  it("takes the completion id from the AWS request id", async () => {
+    const send = vi.fn(async () => ({
+      $metadata: { requestId: "req-1" },
+      output: { message: { content: [{ text: "Hello!" }] } },
+      stopReason: "end_turn",
+    }));
+    // SAFETY: The non-streaming request makes this completion result concrete in the test.
+    const result = (await provider(send).completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "model",
+    })) as ChatCompletion;
+
+    expect(result.id).toBe("req-1");
+    expect(result.created).toBeGreaterThan(0);
+  });
+
+  it("mints a chatcmpl id when Converse has no request id", async () => {
+    const send = vi.fn(async () => ({
+      output: { message: { content: [{ text: "Hello!" }] } },
+      stopReason: "end_turn",
+    }));
+    const bedrock = provider(send);
+    // SAFETY: The non-streaming request makes this completion result concrete in the test.
+    const first = (await bedrock.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "model",
+    })) as ChatCompletion;
+    // SAFETY: The non-streaming request makes this completion result concrete in the test.
+    const second = (await bedrock.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "model",
+    })) as ChatCompletion;
+
+    expect(first.id.startsWith("chatcmpl-")).toBe(true);
+    expect(first.id).not.toBe(second.id);
+  });
+
   it("sends required toolChoice as Converse any without reasoning", async () => {
     const send = vi.fn(async (_command: BedrockTestCommand) => ({
       output: { message: { content: [{ text: "ok" }] } },
@@ -1044,6 +1081,35 @@ describe("Bedrock provider", () => {
     expect(chunks[6]?.usage).toBeUndefined();
     expect(chunks[7]?.choices).toEqual([]);
     expect(chunks[7]?.usage).toMatchObject({ promptTokens: 3, totalTokens: 6 });
+  });
+
+  it("shares the AWS request id and a creation time across Converse stream chunks", async () => {
+    const send = vi.fn(async () => ({
+      $metadata: { requestId: "req-1" },
+      stream: events(
+        { messageStart: { role: "assistant" } },
+        { contentBlockDelta: { contentBlockIndex: 0, delta: { text: "hi" } } },
+        { messageStop: { stopReason: "end_turn" } },
+        {
+          metadata: {
+            metrics: {},
+            usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+          },
+        },
+      ),
+    }));
+    const result = await provider(send).completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "model",
+      stream: true,
+    });
+    const chunks: ChatCompletionChunk[] = [];
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    for await (const chunk of result as AsyncIterable<ChatCompletionChunk>) chunks.push(chunk);
+
+    expect(new Set(chunks.map((chunk) => chunk.id))).toEqual(new Set(["req-1"]));
+    expect(new Set(chunks.map((chunk) => chunk.created)).size).toBe(1);
+    expect(chunks[0]?.created).toBeGreaterThan(0);
   });
 
   it("reports streamed usage on a chunk with no choices", async () => {

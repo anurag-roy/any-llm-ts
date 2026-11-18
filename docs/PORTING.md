@@ -46,12 +46,12 @@ Composition keeps the public client stable even when a provider adapter has a co
 
 ## Current scope
 
-The port now tracks the Python source at commit `4bac8d398418ab8056c25ceff4d229f70002517e` with:
+The port now tracks the Python source at commit `a3311316bd88dd3117716e47b7cd97337f0bb5f9` with:
 
-- the same 55 registered provider names and the same stateless operation set
+- the same 56 registered provider names and the same stateless operation set
   (`typesafe` is omitted: Python-only SDK and a `decide` API, not chat completions);
 - native adapters for Anthropic, Google Gen AI, Bedrock, SageMaker, Azure AI Inference, Cohere,
-  DeepSeek, DeepInfra, GitHub Models, Hugging Face, Liner, Meta, Mistral, OpenRouter, Otari, Together, Voyage, and watsonx;
+  DeepSeek, DeepInfra, GitHub Models, Hugging Face, Liner, Meta, Mistral, OpenRouter, Otari, Tinfoil, Together, Voyage, and watsonx;
 - normalized completions, Messages compatibility, streaming, tools, structured output, Responses,
   embeddings, models, batches, reranking, images, audio, moderation, video generation, and
   provider-hosted files;

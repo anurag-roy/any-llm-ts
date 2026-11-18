@@ -22,6 +22,7 @@ import { DeepseekProvider } from "./deepseek.js";
 import { LinerProvider } from "./liner.js";
 import { MistralProvider } from "./mistral.js";
 import { TogetherProvider } from "./together.js";
+import { TinfoilProvider } from "./tinfoil.js";
 import { MetaProvider } from "./meta.js";
 import { OtariProvider } from "./otari.js";
 import { SageMakerProvider } from "./sagemaker.js";
@@ -715,6 +716,25 @@ addBuiltIn("deepinfra", {
     name: "deepinfra",
     requiresApiKey: true,
     supportsCompletionN: true,
+  },
+});
+
+addBuiltIn("tinfoil", {
+  adapterFamily: "openai",
+  create: (options) => new TinfoilProvider(options),
+  metadata: {
+    capabilities: capabilities({
+      embedding: true,
+      reasoning: true,
+      responses: true,
+      vision: true,
+    }),
+    documentationUrl: "https://docs.tinfoil.sh/sdk/javascript-sdk",
+    envApiBase: "TINFOIL_API_BASE",
+    envApiKey: "TINFOIL_API_KEY",
+    name: "tinfoil",
+    requiresApiKey: true,
+    supportsCompletionN: false,
   },
 });
 

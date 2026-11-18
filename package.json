@@ -74,6 +74,7 @@
     "@ibm-cloud/watsonx-ai": "^1.7.16",
     "@mistralai/mistralai": "^2.6.1",
     "openai": "^7.4.0",
+    "tinfoil": "^1.4.0",
     "voyageai": "^0.4.0"
   },
   "devDependencies": {

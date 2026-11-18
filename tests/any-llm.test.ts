@@ -116,7 +116,20 @@ describe("AnyLLM registry and facade", () => {
       requiresApiKey: true,
     });
     expect(AnyLLM.getProviderMetadata("ollama").capabilities.pdfInput).toBe(false);
+    expect(AnyLLM.getProviderMetadata("tinfoil")).toMatchObject({
+      capabilities: {
+        embedding: true,
+        reasoning: true,
+        responses: true,
+        streaming: true,
+        vision: true,
+      },
+      envApiKey: "TINFOIL_API_KEY",
+      name: "tinfoil",
+      supportsCompletionN: false,
+    });
     expect(() => AnyLLM.create("tokenhub")).toThrow(/TOKENHUB_API_KEY/u);
+    expect(() => AnyLLM.create("tinfoil")).toThrow(/TINFOIL_API_KEY/u);
     expect(
       AnyLLM.servesMessagesNatively("bedrock", "us.anthropic.claude-haiku-4-5-20251001-v1:0"),
     ).toBe(true);

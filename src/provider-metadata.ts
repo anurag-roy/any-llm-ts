@@ -59,6 +59,7 @@ const displayNames = {
   openai: "OpenAI",
   openrouter: "OpenRouter",
   sagemaker: "Amazon SageMaker",
+  tinfoil: "Tinfoil",
   tokenhub: "TokenHub",
   vertexai: "Google Vertex AI",
   vertexaianthropic: "Vertex AI Anthropic",

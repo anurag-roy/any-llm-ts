@@ -119,6 +119,13 @@ export type { DeepseekProviderClients } from "./providers/deepseek.js";
 export { LinerProvider } from "./providers/liner.js";
 export { MistralProvider } from "./providers/mistral.js";
 export { TogetherProvider } from "./providers/together.js";
+export { TinfoilProvider, tinfoilSdkOptions } from "./providers/tinfoil.js";
+export type {
+  TinfoilProviderClients,
+  TinfoilSdkOptions,
+  TinfoilSecureClientLike,
+  TinfoilSecureClientOptions,
+} from "./providers/tinfoil.js";
 export { MetaProvider } from "./providers/meta.js";
 export type { MetaProviderClients } from "./providers/meta.js";
 export { OtariProvider } from "./providers/otari.js";

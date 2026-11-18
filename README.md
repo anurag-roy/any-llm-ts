@@ -137,15 +137,15 @@ Set `requiresApiKey: false` for a keyless local endpoint.
 
 ## Providers
 
-The port registers the same 55 provider names as the tracked Python source revision.
+The port registers the same 56 provider names as the tracked Python source revision.
 
-| Adapter                         | Providers                                                                                               |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| OpenAI and OpenAI-compatible    | `openai`, `azureopenai`, plus the data-driven compatible-provider registry                              |
-| Anthropic                       | `anthropic`, `azureanthropic`, `vertexaianthropic`                                                      |
-| Google Gen AI                   | `gemini`, `vertexai`                                                                                    |
-| AWS                             | `bedrock`, `sagemaker`                                                                                  |
-| Other native SDKs and protocols | `azure`, `cohere`, `github`, `huggingface`, `meta`, `mistral`, `otari`, `together`, `voyage`, `watsonx` |
+| Adapter                         | Providers                                                                                                          |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| OpenAI and OpenAI-compatible    | `openai`, `azureopenai`, plus the data-driven compatible-provider registry                                         |
+| Anthropic                       | `anthropic`, `azureanthropic`, `vertexaianthropic`                                                                 |
+| Google Gen AI                   | `gemini`, `vertexai`                                                                                               |
+| AWS                             | `bedrock`, `sagemaker`                                                                                             |
+| Other native SDKs and protocols | `azure`, `cohere`, `github`, `huggingface`, `meta`, `mistral`, `otari`, `tinfoil`, `together`, `voyage`, `watsonx` |
 
 Registry metadata is intentionally conservative. Inspect capabilities at runtime instead of assuming every provider implements every OpenAI endpoint:
 
