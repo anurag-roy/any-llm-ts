@@ -1,8 +1,9 @@
 import { parseJsonObject, parseJsonObjectArray } from "../src/utils.js";
 import type { JsonObject } from "../src/types.js";
-import { isObject, isString } from "../src/utils.js";
+import { isAsyncIterable, isObject, isString } from "../src/utils.js";
 import {
   CreateModelInvocationJobCommand,
+  GetInferenceProfileCommand,
   GetModelInvocationJobCommand,
   ListFoundationModelsCommand,
   ListInferenceProfilesCommand,
@@ -33,6 +34,8 @@ import type {
   ChatCompletion,
   ChatCompletionChunk,
   ChatMessage,
+  CompletionParams,
+  FunctionTool,
 } from "../src/index.js";
 
 type BedrockTestCommand =
@@ -1585,5 +1588,155 @@ describe("Bedrock provider", () => {
       name: "bedrock",
       requiresApiKey: false,
     });
+  });
+});
+
+const CODE_TOOL: FunctionTool = {
+  type: "function",
+  function: {
+    name: "code_execution",
+    description: "Run Python code.",
+    parameters: {
+      type: "object",
+      properties: { code: { type: "string" } },
+      required: ["code"],
+    },
+  },
+};
+const LLAMA = "us.meta.llama3-3-70b-instruct-v1:0";
+const LLAMA_TEXT_CALL =
+  '{"type": "function", "name": "code_execution", "parameters": {"code": "print(1)"}}';
+const LLAMA_PROFILE_ARN =
+  "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc123";
+
+async function converseText(
+  text: string,
+  model: string,
+  tools: FunctionTool[] | undefined,
+  toolChoice?: string,
+): Promise<ChatCompletion> {
+  const runtimeSend = vi.fn(async (command: ConverseCommand) => {
+    expect(command).toBeInstanceOf(ConverseCommand);
+    expect(command.input.modelId).toBe(model);
+    return {
+      output: { message: { role: "assistant", content: [{ text }] } },
+      stopReason: "end_turn",
+    };
+  });
+  const controlSend = vi.fn(async (command: GetInferenceProfileCommand) => {
+    expect(command).toBeInstanceOf(GetInferenceProfileCommand);
+    return {
+      models: [
+        {
+          modelArn: "arn:aws:bedrock:us-east-1::foundation-model/meta.llama3-3-70b-instruct-v1:0",
+        },
+      ],
+    };
+  });
+  const params: CompletionParams = {
+    messages: [{ content: "Run it", role: "user" }],
+    model,
+  };
+  if (tools !== undefined) params.tools = tools;
+  if (toolChoice !== undefined) params.toolChoice = toolChoice;
+  const result = await provider(runtimeSend, controlSend).completion(params);
+  if (isAsyncIterable(result)) {
+    throw new TypeError("expected a non-streaming completion");
+  }
+  return result;
+}
+
+describe("Bedrock Llama text tool calls", () => {
+  it.each([LLAMA, LLAMA_PROFILE_ARN])(
+    "returns a Llama tool call written as text as a tool call (%s)",
+    async (model) => {
+      const completion = await converseText(LLAMA_TEXT_CALL, model, [CODE_TOOL]);
+      const choice = completion.choices[0];
+      expect(choice?.finishReason).toBe("tool_calls");
+      expect(choice?.message.content).toBeNull();
+      const call = choice?.message.toolCalls?.[0];
+      expect(call?.id).toMatch(/^call_[0-9a-f]{32}$/u);
+      expect(call?.function.name).toBe("code_execution");
+      expect(JSON.parse(call?.function.arguments ?? "")).toEqual({ code: "print(1)" });
+    },
+  );
+
+  it("returns a Llama tool call without a type as a tool call", async () => {
+    const completion = await converseText(
+      '{"name": "code_execution", "parameters": {"code": "print(1)"}}',
+      LLAMA,
+      [CODE_TOOL],
+    );
+    expect(completion.choices[0]?.finishReason).toBe("tool_calls");
+  });
+
+  it.each([
+    ["prose", "The digest is 3f2a."],
+    ["undeclared tool", '{"type": "function", "name": "web_search", "parameters": {"query": "x"}}'],
+    [
+      "extra keys",
+      '{"name": "code_execution", "parameters": {"code": "print(1)"}, "note": "extra"}',
+    ],
+    ["parameters string", '{"name": "code_execution", "parameters": "print(1)"}'],
+    ["name array", '{"name": ["code_execution"], "parameters": {}}'],
+    ["NaN", '{"name": "code_execution", "parameters": {"x": NaN}}'],
+    ["non-finite number", '{"name": "code_execution", "parameters": {"x": 1e400}}'],
+    ["deeply nested json", "[".repeat(100_000) + "]".repeat(100_000)],
+    ["embedded in a sentence", `Calling it now: ${LLAMA_TEXT_CALL}`],
+  ])("leaves Llama text that is not one declared call as the answer (%s)", async (_label, text) => {
+    const completion = await converseText(text, LLAMA, [CODE_TOOL]);
+    const choice = completion.choices[0];
+    expect(choice?.finishReason).toBe("stop");
+    expect(choice?.message.content).toBe(text);
+    expect(choice?.message.toolCalls).toBeUndefined();
+  });
+
+  it.each([
+    [LLAMA, undefined, undefined],
+    [LLAMA, [CODE_TOOL], "none"],
+    ["amazon.nova-lite-v1:0", [CODE_TOOL], undefined],
+  ] as const)(
+    "leaves a text call alone without tools or off Llama",
+    async (model, tools, toolChoice) => {
+      const completion = await converseText(
+        LLAMA_TEXT_CALL,
+        model,
+        tools === undefined ? undefined : [...tools],
+        toolChoice,
+      );
+      const choice = completion.choices[0];
+      expect(choice?.finishReason).toBe("stop");
+      expect(choice?.message.content).toBe(LLAMA_TEXT_CALL);
+      expect(choice?.message.toolCalls).toBeUndefined();
+    },
+  );
+
+  it("returns a Llama toolUse block as Converse gave it", async () => {
+    const send = vi.fn(async () => ({
+      output: {
+        message: {
+          role: "assistant",
+          content: [
+            {
+              toolUse: {
+                toolUseId: "tooluse_1",
+                name: "code_execution",
+                input: { code: "1" },
+              },
+            },
+          ],
+        },
+      },
+      stopReason: "tool_use",
+    }));
+    // SAFETY: The non-streaming request makes this completion result concrete in the test.
+    const completion = (await provider(send).completion({
+      messages: [{ content: "Run it", role: "user" }],
+      model: LLAMA,
+      tools: [CODE_TOOL],
+    })) as ChatCompletion;
+    const choice = completion.choices[0];
+    expect(choice?.finishReason).toBe("tool_calls");
+    expect(choice?.message.toolCalls?.map((call) => call.id)).toEqual(["tooluse_1"]);
   });
 });

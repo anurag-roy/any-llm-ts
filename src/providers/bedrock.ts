@@ -57,6 +57,7 @@ import type {
   ProviderMetadata,
   ProviderOptions,
   ReasoningEffort,
+  Tool,
   ToolCall,
   ToolCallDelta,
 } from "../types.js";
@@ -228,6 +229,11 @@ export function isAnthropicBedrockModel(model: string): boolean {
 
 export function isGptOssBedrockModel(model: string): boolean {
   return model.includes("openai.gpt-oss");
+}
+
+/** Meta Llama ids, including cross-region and inference-profile forms that name Llama. */
+export function isLlamaBedrockModel(model: string): boolean {
+  return model.includes("meta.llama");
 }
 
 export { isPegasusBedrockModel } from "./bedrock-pegasus.js";
@@ -1050,6 +1056,78 @@ function normalizeCompletion<Value>(value: Value, model: string): ChatCompletion
   };
 }
 
+function jsonHasNonFinite(value: JsonValue): boolean {
+  if (isNumber(value)) return !Number.isFinite(value);
+  if (Array.isArray(value)) return value.some(jsonHasNonFinite);
+  if (!isJsonObject(value)) return false;
+  return Object.values(value).some((entry) => entry !== undefined && jsonHasNonFinite(entry));
+}
+
+function declaredToolNames(tools: Tool[]): Set<string> {
+  return new Set(
+    tools.flatMap((tool) => {
+      if (tool.type !== "function" || !("function" in tool)) return [];
+      // SAFETY: Function tools carry a name on the nested function object.
+      const functionTool = tool as FunctionTool;
+      return [functionTool.function.name];
+    }),
+  );
+}
+
+function recoverTextToolCall(completion: ChatCompletion, toolNames: Set<string>): ChatCompletion {
+  const choice = completion.choices[0];
+  if (choice === undefined) return completion;
+  const message = choice.message;
+  if (
+    choice.finishReason !== "stop" ||
+    message.toolCalls !== undefined ||
+    !isString(message.content) ||
+    message.content.length === 0
+  ) {
+    return completion;
+  }
+  let call: JsonObject;
+  try {
+    call = parseJsonObject(JSON.parse(message.content));
+  } catch {
+    return completion;
+  }
+  const keys = Object.keys(call);
+  if (
+    !keys.every((key) => key === "name" || key === "parameters" || key === "type") ||
+    (call.type ?? "function") !== "function" ||
+    !isString(call.name) ||
+    !toolNames.has(call.name) ||
+    !isJsonObject(call.parameters) ||
+    jsonHasNonFinite(call.parameters)
+  ) {
+    return completion;
+  }
+  return {
+    ...completion,
+    choices: [
+      {
+        ...choice,
+        finishReason: "tool_calls",
+        message: {
+          ...message,
+          content: null,
+          toolCalls: [
+            {
+              function: {
+                arguments: JSON.stringify(call.parameters),
+                name: call.name,
+              },
+              id: `call_${randomUUID().replaceAll("-", "")}`,
+              type: "function",
+            },
+          ],
+        },
+      },
+    ],
+  };
+}
+
 function streamChunk<Value>(
   value: Value,
   state: {
@@ -1436,14 +1514,14 @@ export class BedrockProvider extends BaseProvider {
         return this.execute(async () => await this.pegasusCompletion(params, params.model));
       }
       const request = completionRequest(params);
-      return this.execute(async () => await this.converseCompletion(params, request));
+      return this.execute(async () => await this.converseCompletion(params, request, params.model));
     }
     return this.execute(async () => {
       const modelId = await this.profileModelId(params.model, params.timeout);
       if (isPegasusBedrockModel(modelId)) {
         return await this.pegasusCompletion(params, modelId);
       }
-      return await this.converseCompletion(params, completionRequest(params));
+      return await this.converseCompletion(params, completionRequest(params), modelId);
     });
   }
 
@@ -1477,6 +1555,7 @@ export class BedrockProvider extends BaseProvider {
   private async converseCompletion(
     params: CompletionParams,
     request: ReturnType<typeof completionRequest>,
+    modelId: string,
   ): Promise<AsyncIterable<ChatCompletionChunk> | ChatCompletion> {
     const requestOptions = timeoutAbortOptions(params.timeout);
     if (params.stream === true) {
@@ -1498,7 +1577,16 @@ export class BedrockProvider extends BaseProvider {
       requestOptions === undefined
         ? await this.runtime.send(command)
         : await this.runtime.send(command, requestOptions);
-    return normalizeCompletion(response, params.model);
+    const completion = normalizeCompletion(response, params.model);
+    if (
+      params.tools !== undefined &&
+      params.tools.length > 0 &&
+      params.toolChoice !== "none" &&
+      isLlamaBedrockModel(modelId)
+    ) {
+      return recoverTextToolCall(completion, declaredToolNames(params.tools));
+    }
+    return completion;
   }
 
   private async pegasusCompletion(
