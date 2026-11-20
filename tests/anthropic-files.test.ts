@@ -222,6 +222,15 @@ describe("Anthropic Files API", () => {
       InvalidRequestError,
     );
     await expect(
+      provider.retrieveFile({ containerId: "cntr-test", fileId: "file_123" }),
+    ).rejects.toMatchObject({ parameterName: "container_id" });
+    await expect(
+      provider.downloadFile({ containerId: "cntr-test", fileId: "file_123" }),
+    ).rejects.toMatchObject({ parameterName: "container_id" });
+    await expect(
+      provider.deleteFile({ containerId: "cntr-test", fileId: "file_123" }),
+    ).rejects.toMatchObject({ parameterName: "container_id" });
+    await expect(
       provider.listFiles({ providerOptions: { betas: ["files-api-2025-04-14"] } }),
     ).rejects.toMatchObject({ parameterName: "betas" });
     expect(list).not.toHaveBeenCalled();

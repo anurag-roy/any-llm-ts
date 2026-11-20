@@ -80,6 +80,23 @@ You can pass OpenAI SDK constructor fields through `clientOptions`, including
 `azureADTokenProvider` for Entra ID. `apiKey`, `azureADToken`, and `azureADTokenProvider` are
 mutually exclusive.
 
+## Hugging Face billing
+
+Team and Enterprise organizations can pay for Inference Providers usage instead of the token's
+own account. Pass the organization name (or resource-group id) as `clientOptions.billTo`.
+Completions send it to `@huggingface/inference` as `billTo`. Responses send `X-HF-Bill-To` on the
+OpenResponses client, merged with any existing `clientOptions.openAI.defaultHeaders`.
+
+```ts
+const huggingface = AnyLLM.create("huggingface", {
+  clientOptions: { billTo: "my-org" },
+});
+```
+
+Omit `billTo` to keep billing on the token's own account. Hugging Face only honors the header for
+an organization the token's user belongs to and which is allowed to be billed for Inference
+Providers.
+
 ## Inspect effective metadata
 
 ```ts
@@ -91,6 +108,7 @@ console.log(metadata.capabilities.streaming);
 console.log(metadata.capabilities.pdfInput);
 console.log(metadata.promptCacheKeySupport);
 console.log(metadata.supportsCompletionN);
+console.log(metadata.supportsCompletionResponseFormat);
 console.log(metadata.tier);
 ```
 
@@ -104,3 +122,7 @@ directly; `passthrough` means a router or custom compatible endpoint receives it
 
 `n=1` is dropped for every provider. Other values of `n` are forwarded only when
 `supportsCompletionN` is true; otherwise they raise `UnsupportedParameterError`.
+
+`supportsCompletionResponseFormat` is true when a chat completion may carry `responseFormat`.
+Inception, Llamafile, MiniMax, SageMaker, and Z.AI clear it for every model. Bedrock answers per
+model in `AnyLLM.supportsCompletionResponseFormat(provider, model)` (Claude only).

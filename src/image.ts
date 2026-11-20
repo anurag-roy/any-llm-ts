@@ -35,7 +35,7 @@ export function sniffImageFormat(
   return undefined;
 }
 
-function isBinaryFileInput(value: FileInput | ImageFile): value is Exclude<FileInput, string> {
+function isBinaryFileInput<Value>(value: Value): value is Value & Exclude<FileInput, string> {
   if (isString(value)) return false;
   return (
     value instanceof Blob ||
@@ -45,17 +45,19 @@ function isBinaryFileInput(value: FileInput | ImageFile): value is Exclude<FileI
   );
 }
 
-function isImageTuple(
-  value: ImageInput,
-): value is
-  | readonly [string | null, FileInput]
-  | readonly [string | null, FileInput, string | null] {
+/** A `(filename, content[, mimeType])` upload tuple, as opposed to a list of images. */
+export function isImageTuple<Value>(
+  value: Value,
+): value is Value &
+  (readonly [string | null, FileInput] | readonly [string | null, FileInput, string | null]) {
   if (!Array.isArray(value) || value.length < 2 || value.length > 3) return false;
-  const filename: unknown = value[0];
-  const content = value[1];
-  return (
-    (filename === null || isString(filename)) && content !== undefined && isBinaryFileInput(content)
-  );
+  const filename = value[0];
+  return (filename === null || isString(filename)) && isBinaryFileInput(value[1]);
+}
+
+/** One image: a path, bytes, Blob, stream, or upload tuple. */
+export function isImageFile<Value>(value: Value): value is Value & ImageFile {
+  return isString(value) || isBinaryFileInput(value) || isImageTuple(value);
 }
 
 function asFileInput(value: ImageFile): FileInput {
@@ -84,6 +86,11 @@ function tupleMimeType(value: ImageFile): string | undefined {
 
 function isReadableStream(value: FileInput): value is NodeJS.ReadableStream {
   return isObject(value) && "pipe" in value && "read" in value;
+}
+
+/** Read one image: bytes, a path, a Blob, or a binary stream. */
+export async function readImageContent(file: FileInput, providerName: string): Promise<Uint8Array> {
+  return bytesFromInput(file, providerName);
 }
 
 async function bytesFromInput(file: FileInput, providerName: string): Promise<Uint8Array> {

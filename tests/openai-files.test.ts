@@ -20,6 +20,8 @@ import {
   convertOpenAIFileMetadata,
   convertOpenAIFilePage,
   fileRequestOptions,
+  readContainerId,
+  rejectContainerId,
   validateOpenAIFileId,
   validatePositiveInteger,
 } from "../src/providers/openai-files.js";
@@ -55,9 +57,35 @@ interface FilesClient {
   retrieve: ReturnType<typeof vi.fn>;
 }
 
-function fakeOpenAI(files: Partial<FilesClient> = {}) {
+interface ContainerFilesClient {
+  contentRetrieve: ReturnType<typeof vi.fn>;
+  retrieve: ReturnType<typeof vi.fn>;
+}
+
+const CONTAINER_META = {
+  bytes: 8,
+  container_id: "cntr-test",
+  created_at: 1_700_000_000,
+  id: "cfile-test",
+  object: "container.file",
+  path: "/mnt/data/output.csv",
+  source: "assistant",
+};
+
+function fakeOpenAI(
+  files: Partial<FilesClient> = {},
+  containers: Partial<ContainerFilesClient> = {},
+) {
   const withOptions = vi.fn();
   const client = Object.assign(new OpenAI({ apiKey: "test" }), {
+    containers: {
+      files: {
+        content: {
+          retrieve: containers.contentRetrieve ?? vi.fn(),
+        },
+        retrieve: containers.retrieve ?? vi.fn(),
+      },
+    },
     defaultHeaders: {},
     files: {
       content: vi.fn(),
@@ -393,6 +421,145 @@ describe("OpenAI Files API", () => {
     await empty.close();
     expect(emptyChunks).toEqual([]);
   });
+
+  it("retrieves and downloads container files through the containers client", async () => {
+    const retrieve = vi.fn().mockResolvedValue({ ...CONTAINER_META, future_field: "preserved" });
+    const contentRetrieve = vi.fn().mockResolvedValue(
+      new Response(new Uint8Array([1, 2, 3, 4]), {
+        headers: { "Content-Type": "text/csv" },
+        status: 200,
+      }),
+    );
+    const filesRetrieve = vi.fn();
+    const filesContent = vi.fn();
+    const client = fakeOpenAI(
+      { content: filesContent, retrieve: filesRetrieve },
+      { contentRetrieve, retrieve },
+    );
+    const provider = new OpenAIProvider(config, {}, client);
+
+    const metadata = await provider.retrieveFile({
+      containerId: "cntr-test",
+      fileId: "cfile-test",
+      providerOptions: { extraHeaders: { "x-test": "yes" }, timeout: 7 },
+    });
+    expect(metadata).toMatchObject({
+      container_id: "cntr-test",
+      createdAt: "2023-11-14T22:13:20.000Z",
+      future_field: "preserved",
+      id: "cfile-test",
+      object: "container.file",
+      path: "/mnt/data/output.csv",
+      sizeBytes: 8,
+      source: "assistant",
+    });
+    expect(metadata.filename).toBeUndefined();
+    expect(metadata.mimeType).toBeUndefined();
+    expect(retrieve).toHaveBeenCalledWith(
+      "cfile-test",
+      { container_id: "cntr-test" },
+      expect.objectContaining({
+        headers: expect.objectContaining({ "x-test": "yes" }),
+        timeout: 7_000,
+      }),
+    );
+    expect(filesRetrieve).not.toHaveBeenCalled();
+
+    const download = await provider.downloadFile({
+      chunkSize: 2,
+      containerId: "cntr-test",
+      fileId: "cfile-test",
+      providerOptions: { extraHeaders: { "x-test": "yes" }, timeout: 7 },
+    });
+    const chunks: Uint8Array[] = [];
+    try {
+      expect(download.statusCode).toBe(200);
+      expect(download.headers["content-type"]).toBe("text/csv");
+      for await (const chunk of download) chunks.push(chunk);
+    } finally {
+      await download.close();
+    }
+    expect(Buffer.concat(chunks)).toEqual(Buffer.from([1, 2, 3, 4]));
+    expect(contentRetrieve).toHaveBeenCalledWith(
+      "cfile-test",
+      { container_id: "cntr-test" },
+      expect.objectContaining({
+        headers: expect.objectContaining({ "x-test": "yes" }),
+        timeout: 7_000,
+      }),
+    );
+    expect(filesContent).not.toHaveBeenCalled();
+  });
+
+  it("keeps ordinary file routes when containerId is omitted", async () => {
+    const retrieve = vi.fn().mockResolvedValue({ id: "file-test", object: "file" });
+    const content = vi.fn().mockResolvedValue(new Response(new Uint8Array([9]), { status: 200 }));
+    const containerRetrieve = vi.fn();
+    const contentRetrieve = vi.fn();
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeOpenAI({ content, retrieve }, { contentRetrieve, retrieve: containerRetrieve }),
+    );
+    await expect(provider.retrieveFile({ fileId: "file-test" })).resolves.toMatchObject({
+      id: "file-test",
+    });
+    const download = await provider.downloadFile({ fileId: "file-test" });
+    await download.close();
+    expect(retrieve).toHaveBeenCalledWith("file-test", undefined);
+    expect(content).toHaveBeenCalledWith("file-test", undefined);
+    expect(containerRetrieve).not.toHaveBeenCalled();
+    expect(contentRetrieve).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid container IDs and leftover options before calling the SDK", async () => {
+    const retrieve = vi.fn();
+    const contentRetrieve = vi.fn();
+    const deleteFile = vi.fn();
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeOpenAI({ delete: deleteFile }, { contentRetrieve, retrieve }),
+    );
+    for (const containerId of [
+      "",
+      ".",
+      "..",
+      "../cntr",
+      "cntr/bad",
+      "cntr\\bad",
+      "cntr?bad",
+      "cntr#bad",
+      "cntr%2fbad",
+      "cntr bad",
+    ]) {
+      await expect(
+        provider.retrieveFile({ containerId, fileId: "cfile-test" }),
+      ).rejects.toBeInstanceOf(InvalidRequestError);
+      await expect(
+        provider.downloadFile({ containerId, fileId: "cfile-test" }),
+      ).rejects.toBeInstanceOf(InvalidRequestError);
+    }
+    await expect(
+      provider.retrieveFile({
+        containerId: "cntr-test",
+        fileId: "cfile-test",
+        providerOptions: { unknown: true },
+      }),
+    ).rejects.toBeInstanceOf(UnsupportedParameterError);
+    await expect(
+      provider.downloadFile({
+        containerId: "cntr-test",
+        fileId: "../file",
+      }),
+    ).rejects.toBeInstanceOf(InvalidRequestError);
+    await expect(
+      provider.deleteFile({ containerId: "cntr-test", fileId: "cfile-test" }),
+    ).rejects.toMatchObject({ parameterName: "container_id" });
+    expect(retrieve).not.toHaveBeenCalled();
+    expect(contentRetrieve).not.toHaveBeenCalled();
+    expect(deleteFile).not.toHaveBeenCalled();
+  });
 });
 
 describe("OpenAI file converters and request options", () => {
@@ -481,5 +648,15 @@ describe("OpenAI file converters and request options", () => {
     const uploadRequest = fileRequestOptions(client, {}, "openai", true);
     expect(client.withOptions).toHaveBeenCalledWith({ maxRetries: 0 });
     expect(uploadRequest.requestOptions).toBeUndefined();
+
+    expect(readContainerId(undefined, "openai")).toBeUndefined();
+    expect(readContainerId("cntr-test", "openai")).toBe("cntr-test");
+    expect(() => {
+      readContainerId("", "openai");
+    }).toThrow(InvalidRequestError);
+    expect(() => {
+      rejectContainerId("cntr-test", "openai");
+    }).toThrow(UnsupportedParameterError);
+    rejectContainerId(undefined, "openai");
   });
 });

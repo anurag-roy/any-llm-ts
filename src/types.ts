@@ -26,6 +26,17 @@ export interface ImageUrlContentPart {
   image_url: string | { detail?: "auto" | "high" | "low"; url: string };
 }
 
+export interface VideoUrlContentPart {
+  type: "video_url";
+  video_url:
+    | string
+    | {
+        url: string;
+        bucketOwner?: string;
+        bucket_owner?: string;
+      };
+}
+
 export interface FileContentPart {
   type: "file";
   file: {
@@ -48,6 +59,7 @@ export type MessageContentPart =
   | ImageUrlContentPart
   | InputAudioContentPart
   | TextContentPart
+  | VideoUrlContentPart
   | ({ type: string } & JsonObject);
 
 export interface FunctionCall {
@@ -202,6 +214,11 @@ export interface PromptTokensDetails {
   [key: string]: JsonValue | undefined;
 }
 
+export interface ServerToolUsage {
+  /** Web searches the provider ran, each one a query it sent to its search engine. */
+  webSearchRequests?: number;
+}
+
 export interface CompletionUsage {
   completionTokens: number;
   promptTokens: number;
@@ -209,11 +226,15 @@ export interface CompletionUsage {
   completionTime?: number;
   completionTokensDetails?: JsonObject;
   evalDuration?: number;
+  /** The region the request ran in, as Anthropic reports it (such as `us` or `global`). */
+  inferenceGeo?: string;
   loadDuration?: number;
   promptEvalDuration?: number;
   promptTime?: number;
   promptTokensDetails?: PromptTokensDetails;
   queueTime?: number;
+  /** Calls to tools the provider ran itself during the request, named as in Anthropic's usage. */
+  serverToolUse?: ServerToolUsage;
   totalDuration?: number;
   totalTime?: number;
 }
@@ -346,6 +367,12 @@ export interface Model {
   id: string;
   object: "model";
   ownedBy: string;
+  /**
+   * How many tokens the model's context holds as this provider serves it.
+   * Self-hosted engines such as vLLM report the length they were started with,
+   * which can be below the model's own maximum.
+   */
+  contextWindow?: number;
   raw?: unknown;
 }
 
@@ -424,12 +451,21 @@ export interface ImageEditParams {
   image: ImageInput;
   model: string;
   prompt: string;
+  mask?: ImageFile;
   n?: number;
   providerOptions?: JsonObject;
   quality?: string;
   responseFormat?: "b64_json" | "url";
   size?: string;
   user?: string;
+}
+
+export interface ImageUsage {
+  inputTokens: number;
+  inputTokensDetails: { imageTokens: number; textTokens: number };
+  outputTokens: number;
+  outputTokensDetails: { imageTokens: number; textTokens: number };
+  totalTokens: number;
 }
 
 export interface ImageGenerationResponse {
@@ -439,8 +475,109 @@ export interface ImageGenerationResponse {
     revisedPrompt?: string;
     url?: string;
   }[];
+  outputFormat?: "jpeg" | "png" | "webp";
   provider: string;
   raw?: unknown;
+  usage?: ImageUsage;
+}
+
+/** Lifecycle of a video job. Providers' own words (`pending`, `processing`, `success`) map onto these. */
+export type VideoStatus = "queued" | "in_progress" | "completed" | "failed";
+
+export interface VideoError {
+  /** What went wrong, in the provider's words. */
+  message: string;
+  /** The provider's error code, when it gives one. */
+  code?: string;
+}
+
+export interface VideoOutput {
+  /** Where the video can be fetched. Some providers' URLs need their credentials; `downloadVideo` adds them. */
+  url?: string;
+  /** The video, base64-encoded, when the provider returns it inline. */
+  b64Data?: string;
+  /** Media type of the video. */
+  mimeType?: string;
+}
+
+export interface VideoJob {
+  /** Provider-assigned job ID; pass it to `retrieveVideo`. */
+  id: string;
+  /** Model that renders the video. */
+  model: string;
+  /** Where the job is. Providers' own words map onto these four. */
+  status: VideoStatus;
+  /** `true` once `status` is `completed` or `failed`. */
+  done: boolean;
+  /** Unix timestamp of the request, when the provider reports it. */
+  createdAt?: number;
+  /** Unix timestamp of completion, when the provider reports it. */
+  completedAt?: number;
+  /** Percent complete, when the provider reports it. */
+  progress?: number;
+  /** Length of the video in seconds, when the provider reports it. */
+  seconds?: number;
+  /** `WIDTHxHEIGHT` of the output, when the provider reports it. */
+  size?: string;
+  /** What the provider charged for the job, in USD, when it reports it. */
+  cost?: number;
+  /** The units the provider bills the job by, when it bills video by tokens and reports them. */
+  tokens?: number;
+  /** Why a `failed` job failed. */
+  error?: VideoError;
+  /** The rendered videos; empty until `completed`. */
+  outputs: VideoOutput[];
+}
+
+export interface VideoGeometry {
+  /** What the caller wrote, for error messages. */
+  described: string;
+  /** Exact `(width, height)`, only when the shape came from `size`. */
+  dimensions?: [number, number];
+  /** Width over height, so 16:9 is about 1.78 and a portrait video is below 1. */
+  ratio?: number;
+  /** Pixels on the short side, which names the resolution tier (720 for `720p`). */
+  shortSide?: number;
+}
+
+export interface VideoGenerationParams {
+  /** The provider's own model ID, without a `provider:` prefix. */
+  model: string;
+  /** What the video shows. */
+  prompt: string;
+  /** Length of the video in seconds. */
+  seconds?: number;
+  /** `WIDTHxHEIGHT`, such as `1280x720`. Says both how sharp and what shape; not combined with `resolution` or `aspectRatio`. */
+  size?: string;
+  /** How sharp, by short side: `480p`, `720p`, `1080p` or `4k`. Pair it with `aspectRatio` for the shape. */
+  resolution?: string;
+  /** What shape, as `WIDTH:HEIGHT` such as `16:9` or `9:16`. */
+  aspectRatio?: string;
+  /** Seed for reproducible generation. */
+  seed?: number;
+  /** What the video should not contain. */
+  negativePrompt?: string;
+  /** Image URLs, provider file URIs or `data:` URLs the video takes its subjects or style from. */
+  referenceImages?: string[];
+  /** Audio URLs the video follows, for lip sync, beat-matched motion or a sound track. */
+  referenceAudios?: string[];
+  /** Video URLs or provider file URIs the video takes its motion, subjects or style from. */
+  referenceVideos?: string[];
+  /** Image the video starts from, in the same forms as `referenceImages`. */
+  firstFrame?: string;
+  /** Image the video ends on, in the same forms as `referenceImages`. */
+  lastFrame?: string;
+  /** Whether the video carries a sound track. `undefined` leaves the provider's default. */
+  generateAudio?: boolean;
+  providerOptions?: JsonObject;
+}
+
+export interface PollVideoOptions {
+  /** Seconds to wait between retrievals. */
+  pollInterval?: number;
+  /** Seconds to wait in total before giving up, or `null` to wait forever. */
+  timeout?: number | null;
+  providerOptions?: JsonObject;
 }
 
 export interface TranscriptionParams {
@@ -626,6 +763,8 @@ export interface ListFilesParams {
 
 export interface FileResourceParams {
   fileId: string;
+  /** OpenAI and Azure OpenAI Code Interpreter container that produced this file. */
+  containerId?: string;
   providerOptions?: JsonObject;
 }
 
@@ -780,6 +919,12 @@ export interface MessagesParams {
   promptCacheKey?: string;
   providerOptions?: JsonObject;
   serviceTier?: string;
+  /**
+   * Anthropic's region to run the request in, such as `us`. When omitted, Anthropic uses the
+   * workspace's `default_inference_geo`. The response reports where it ran in
+   * `usage.inferenceGeo`. Providers without a matching option raise.
+   */
+  inferenceGeo?: string;
   stopSequences?: string[];
   stream?: boolean;
   system?: MessagesTextBlock[] | string;
@@ -818,6 +963,8 @@ export interface MessageUsage {
   cacheCreation?: CacheCreationTokenDetails;
   cacheCreationInputTokens?: number;
   cacheReadInputTokens?: number;
+  inferenceGeo?: string;
+  serviceTier?: string;
 }
 
 export interface MessageResponse {
@@ -916,6 +1063,7 @@ export interface ProviderCapabilities {
   rerank: boolean;
   responses: boolean;
   streaming: boolean;
+  videoGeneration: boolean;
   vision: boolean;
 }
 
@@ -1033,6 +1181,12 @@ export interface ProviderMetadata {
    * request. Any other value is forwarded only when this flag is true.
    */
   supportsCompletionN: boolean;
+  /**
+   * Whether a chat completion may carry `responseFormat`. A provider that
+   * clears it rejects one for every model. Bedrock answers per model in
+   * `AnyLLM.supportsCompletionResponseFormat`.
+   */
+  supportsCompletionResponseFormat: boolean;
   tier: ProviderTier;
 }
 

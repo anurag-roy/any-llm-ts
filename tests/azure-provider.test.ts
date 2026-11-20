@@ -5,6 +5,7 @@ import {
   AzureProvider,
   MissingApiKeyError,
   UnsupportedParameterError,
+  accumulateChunks,
 } from "../src/index.js";
 import type { AzureInferenceClientLike } from "../src/providers/azure.js";
 import type { ChatCompletion, ChatCompletionChunk } from "../src/types.js";
@@ -256,6 +257,93 @@ describe("Azure AI inference provider", () => {
         usage: { totalTokens: 5 },
       },
     ]);
+  });
+
+  it("keeps finish_reason on a streamed chunk whose delta is empty", async () => {
+    const complete = vi.fn().mockResolvedValue(
+      events({
+        choices: [{ delta: {}, finish_reason: "stop", index: 0 }],
+        created: 1,
+        id: "stream-1",
+        model: "model",
+      }),
+    );
+    const provider = new AzureProvider({}, fakeAzure(complete));
+    const stream = await provider.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "model",
+      stream: true,
+    });
+    const chunks: ChatCompletionChunk[] = [];
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    for await (const chunk of stream as AsyncIterable<ChatCompletionChunk>) chunks.push(chunk);
+
+    expect(chunks).toMatchObject([{ choices: [{ delta: {}, finishReason: "stop" }] }]);
+  });
+
+  it("accumulates a tool-call stream that finishes on an empty delta", async () => {
+    const complete = vi.fn().mockResolvedValue(
+      events(
+        {
+          choices: [
+            {
+              delta: {
+                role: "assistant",
+                tool_calls: [
+                  {
+                    function: { arguments: "", name: "get_weather" },
+                    id: "call_1",
+                    index: 0,
+                    type: "function",
+                  },
+                ],
+              },
+              finish_reason: null,
+              index: 0,
+            },
+          ],
+          created: 1,
+          id: "stream-1",
+          model: "model",
+        },
+        {
+          choices: [
+            {
+              delta: {
+                tool_calls: [{ function: { arguments: '{"city": "Paris"}' }, index: 0 }],
+              },
+              finish_reason: null,
+              index: 0,
+            },
+          ],
+          created: 1,
+          id: "stream-1",
+          model: "model",
+        },
+        {
+          choices: [{ delta: {}, finish_reason: "tool_calls", index: 0 }],
+          created: 1,
+          id: "stream-1",
+          model: "model",
+        },
+      ),
+    );
+    const provider = new AzureProvider({}, fakeAzure(complete));
+    const stream = await provider.completion({
+      messages: [{ content: "Weather in Paris?", role: "user" }],
+      model: "model",
+      stream: true,
+    });
+    const chunks: ChatCompletionChunk[] = [];
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    for await (const chunk of stream as AsyncIterable<ChatCompletionChunk>) chunks.push(chunk);
+    const completion = accumulateChunks(chunks);
+
+    expect(completion.choices[0]?.finishReason).toBe("tool_calls");
+    expect(completion.choices[0]?.message.toolCalls?.[0]).toMatchObject({
+      function: { arguments: '{"city": "Paris"}', name: "get_weather" },
+      id: "call_1",
+    });
   });
 
   it("normalizes float and JSON-string embeddings", async () => {

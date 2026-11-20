@@ -146,8 +146,8 @@ Native fields such as `uri`, `downloadUri`, `source`, `sha256Hash`, and `error` 
 | ------------------------------------------------------------------------------------ | -------------- |
 | `uploadFile({ file, filename?, mimeType?, purpose?, expiresIn?, providerOptions? })` | `FileMetadata` |
 | `listFiles({ limit?, cursor?, purpose?, providerOptions? })`                         | `FilePage`     |
-| `retrieveFile({ fileId, providerOptions? })`                                         | `FileMetadata` |
-| `downloadFile({ fileId, chunkSize?, providerOptions? })`                             | `FileDownload` |
+| `retrieveFile({ fileId, containerId?, providerOptions? })`                           | `FileMetadata` |
+| `downloadFile({ fileId, chunkSize?, containerId?, providerOptions? })`               | `FileDownload` |
 | `deleteFile({ fileId, providerOptions? })`                                           | `FileDeleted`  |
 
 These are instance methods. Reuse the client configured for the originating provider account; file
@@ -210,6 +210,34 @@ try {
 
 Always close the download after full consumption, early exit, or cancellation. `await using` also
 works where `Symbol.asyncDispose` is available.
+
+## OpenAI and Azure container files
+
+For a file produced by a Code Interpreter container, pass its `containerId` together with its file
+ID to the existing retrieve and download methods:
+
+```ts
+const containerId = "cntr_abc123"; // From the container_file_citation annotation
+const fileId = "cfile_abc123";
+
+const metadata = await openai.retrieveFile({ fileId, containerId });
+const download = await openai.downloadFile({ fileId, containerId });
+try {
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of download) chunks.push(chunk);
+} finally {
+  await download.close();
+}
+```
+
+The same option works with Azure OpenAI using its v1 endpoint. Metadata preserves the native
+`container_id`, `path`, and `source` fields; `sizeBytes` and `createdAt` use the shared fields. A
+container path is not a Files `filename`, so unavailable shared fields stay unset.
+
+Omit `containerId` for ordinary Files requests. Container IDs must be nonempty IDs without path
+separators, URL delimiters, or whitespace. Only retrieval and download accept this option; it does
+not change upload, listing, deletion, Anthropic Files, or Gemini Files. These calls read an existing
+file; they do not create a container or run code.
 
 ## Provider options and errors
 

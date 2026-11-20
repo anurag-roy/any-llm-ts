@@ -68,6 +68,11 @@ The library does not execute tools or run an agent loop. Your application remain
 validating arguments, authorizing operations, executing functions, limiting iterations, and
 returning results.
 
+Amazon Bedrock Converse still requires `toolConfig` when the converted messages already contain
+`toolUse` or `toolResult` blocks. If you omit `tools` on that follow-up, the adapter declares the
+tool names already present in the history (unique, first-seen order) so Converse accepts the turn.
+Passed `tools` and structured-output tool configs are unchanged.
+
 ## Force or disable tool use
 
 ```ts

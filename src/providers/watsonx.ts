@@ -65,6 +65,7 @@ const watsonxCapabilities: ProviderCapabilities = {
   rerank: false,
   responses: false,
   streaming: true,
+  videoGeneration: false,
   vision: true,
 };
 
