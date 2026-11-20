@@ -72,6 +72,24 @@ describe("listed model context window", () => {
     expect(listedModel({ id: "model-1" }, { ownedBy: "openrouter" })?.ownedBy).toBe("openrouter");
   });
 
+  it("fills object, created, and an omitted owner", () => {
+    expect(listedModel({ id: "bare-model" }, { ownedBy: "unknown" })).toMatchObject({
+      created: 0,
+      id: "bare-model",
+      object: "model",
+      ownedBy: "unknown",
+    });
+  });
+
+  it("keeps a stated owner and created", () => {
+    expect(
+      listedModel(
+        { created: 1_687_882_411, id: "gpt-4", object: "model", owned_by: "openai" },
+        { ownedBy: "unknown" },
+      ),
+    ).toMatchObject({ created: 1_687_882_411, ownedBy: "openai" });
+  });
+
   it("skips input that is not a model object", () => {
     expect(listedModel("m", { ownedBy: "test" })).toBeUndefined();
     expect(listedModel(null, { ownedBy: "test" })).toBeUndefined();

@@ -1192,7 +1192,8 @@ export class OpenAIProvider extends BaseProvider {
     return this.execute(async () => {
       const page = await this.client.models.list(providerOptions);
       const models: Model[] = [];
-      const ownedBy = this.config.quirks?.defaultModelOwner ?? this.metadata.name;
+      // Gateways such as TokenHub omit owned_by; GitHub already used "unknown".
+      const ownedBy = this.config.quirks?.defaultModelOwner ?? "unknown";
       for await (const model of page) {
         const listed = listedModel(model, { ownedBy });
         if (listed !== undefined) models.push(listed);

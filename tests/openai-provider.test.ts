@@ -789,6 +789,43 @@ describe("OpenAI-compatible provider", () => {
     expect(models[3]).not.toHaveProperty("contextWindow");
   });
 
+  it("fills the model fields a gateway listing omits", async () => {
+    const page = {
+      async *[Symbol.asyncIterator]() {
+        yield {
+          context_length: 1_024_000,
+          created: 1_786_665_600,
+          id: "glm-5.3",
+          name: "GLM-5.3",
+          object: "model",
+        };
+        yield { id: "bare-model" };
+        yield {
+          created: 1_687_882_411,
+          id: "gpt-4",
+          object: "model",
+          owned_by: "openai",
+        };
+      },
+    };
+    const provider = new OpenAIProvider(
+      config,
+      {},
+      fakeClient({ models: { list: vi.fn().mockResolvedValue(page) } }),
+    );
+    await expect(provider.listModels()).resolves.toMatchObject([
+      {
+        contextWindow: 1_024_000,
+        created: 1_786_665_600,
+        id: "glm-5.3",
+        object: "model",
+        ownedBy: "unknown",
+      },
+      { created: 0, id: "bare-model", object: "model", ownedBy: "unknown" },
+      { created: 1_687_882_411, id: "gpt-4", ownedBy: "openai" },
+    ]);
+  });
+
   it("normalizes image, transcription, speech, and moderation operations", async () => {
     const image = vi.fn().mockResolvedValue({
       created: 123,
@@ -1387,6 +1424,60 @@ describe("Azure OpenAI provider", () => {
     });
     expect(requests[0]?.searchParams.get("api-version")).toBe("v1");
     expect(requests[0]?.searchParams.get("request")).toBe("yes");
+  });
+
+  it("keeps Azure's own Responses reply, including cache_write_tokens", async () => {
+    const requests: URL[] = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const href = isString(input) ? input : input instanceof URL ? input.href : input.url;
+      requests.push(new URL(href));
+      return new Response(
+        JSON.stringify({
+          background: false,
+          created_at: 1,
+          frequency_penalty: 0,
+          id: "resp-test",
+          model: "deployment-name",
+          object: "response",
+          output: [],
+          parallel_tool_calls: true,
+          presence_penalty: 0,
+          service_tier: "default",
+          status: "completed",
+          store: true,
+          temperature: 1,
+          text: { format: { type: "text" } },
+          tool_choice: "auto",
+          tools: [],
+          top_logprobs: 0,
+          top_p: 1,
+          truncation: "disabled",
+          usage: {
+            input_tokens: 10,
+            input_tokens_details: { cache_write_tokens: 8, cached_tokens: 2 },
+            output_tokens: 1,
+            output_tokens_details: { reasoning_tokens: 0 },
+            total_tokens: 11,
+          },
+        }),
+        { headers: { "content-type": "application/json" }, status: 200 },
+      );
+    });
+    const provider = new AzureOpenAIProvider({
+      apiBase: "https://resource.openai.azure.com",
+      apiKey: "secret",
+      clientOptions: { fetch: fetchMock, maxRetries: 0 },
+    });
+    const response = await provider.responses({ input: "Hello", model: "deployment-name" });
+    expect(requests[0]?.pathname).toBe("/openai/v1/responses");
+    expect(Symbol.asyncIterator in response).toBe(false);
+    expect(response).toMatchObject({
+      id: "resp-test",
+      usage: {
+        input_tokens: 10,
+        input_tokens_details: { cache_write_tokens: 8, cached_tokens: 2 },
+      },
+    });
   });
 });
 
