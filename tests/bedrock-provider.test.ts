@@ -1,8 +1,9 @@
 import { parseJsonObject, parseJsonObjectArray } from "../src/utils.js";
 import type { JsonObject } from "../src/types.js";
-import { isObject, isString } from "../src/utils.js";
+import { isAsyncIterable, isObject, isString } from "../src/utils.js";
 import {
   CreateModelInvocationJobCommand,
+  GetInferenceProfileCommand,
   GetModelInvocationJobCommand,
   ListFoundationModelsCommand,
   ListInferenceProfilesCommand,
@@ -32,6 +33,9 @@ import type {
   BedrockS3ClientLike,
   ChatCompletion,
   ChatCompletionChunk,
+  ChatMessage,
+  CompletionParams,
+  FunctionTool,
 } from "../src/index.js";
 
 type BedrockTestCommand =
@@ -83,6 +87,27 @@ function job(status = "Completed", overrides: JsonObject = {}) {
     totalRecordCount: 3,
     ...overrides,
   };
+}
+
+function replayedSearch(repeat = false): ChatMessage[] {
+  const turns: ChatMessage[] = [{ content: "find it", role: "user" }];
+  for (let index = 0; index < (repeat ? 2 : 1); index += 1) {
+    const callId = `call_${index}`;
+    turns.push({
+      content: null,
+      role: "assistant",
+      toolCalls: [
+        {
+          function: { arguments: "{}", name: "web_search" },
+          id: callId,
+          type: "function",
+        },
+      ],
+    });
+    turns.push({ content: "results", role: "tool", toolCallId: callId });
+  }
+  turns.push({ content: "Answer now.", role: "user" });
+  return turns;
 }
 
 async function* events<Value>(...values: Value[]): AsyncIterable<Value> {
@@ -167,7 +192,6 @@ describe("Bedrock provider", () => {
       reasoningEffort: "high",
       stop: "END",
       temperature: 0,
-      toolChoice: "required",
       tools: [
         {
           function: {
@@ -200,7 +224,6 @@ describe("Bedrock provider", () => {
       performanceConfig: { latency: "optimized" },
       system: [{ text: "Be concise." }, { text: "Use tools." }],
       toolConfig: {
-        toolChoice: { any: {} },
         tools: [{ toolSpec: { name: "weather" } }],
       },
     });
@@ -249,6 +272,235 @@ describe("Bedrock provider", () => {
     });
   });
 
+  it("takes the completion id from the AWS request id", async () => {
+    const send = vi.fn(async () => ({
+      $metadata: { requestId: "req-1" },
+      output: { message: { content: [{ text: "Hello!" }] } },
+      stopReason: "end_turn",
+    }));
+    // SAFETY: The non-streaming request makes this completion result concrete in the test.
+    const result = (await provider(send).completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "model",
+    })) as ChatCompletion;
+
+    expect(result.id).toBe("req-1");
+    expect(result.created).toBeGreaterThan(0);
+  });
+
+  it("mints a chatcmpl id when Converse has no request id", async () => {
+    const send = vi.fn(async () => ({
+      output: { message: { content: [{ text: "Hello!" }] } },
+      stopReason: "end_turn",
+    }));
+    const bedrock = provider(send);
+    // SAFETY: The non-streaming request makes this completion result concrete in the test.
+    const first = (await bedrock.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "model",
+    })) as ChatCompletion;
+    // SAFETY: The non-streaming request makes this completion result concrete in the test.
+    const second = (await bedrock.completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "model",
+    })) as ChatCompletion;
+
+    expect(first.id.startsWith("chatcmpl-")).toBe(true);
+    expect(first.id).not.toBe(second.id);
+  });
+
+  it("sends required toolChoice as Converse any without reasoning", async () => {
+    const send = vi.fn(async (_command: BedrockTestCommand) => ({
+      output: { message: { content: [{ text: "ok" }] } },
+      stopReason: "end_turn",
+    }));
+    const bedrock = provider(send);
+    await bedrock.completion({
+      messages: [{ content: "Hello", role: "user" }],
+      model: "anthropic.claude-test",
+      toolChoice: "required",
+      tools: [
+        {
+          function: { name: "weather" },
+          type: "function",
+        },
+      ],
+    });
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    const command = send.mock.calls[0]?.[0] as ConverseCommand;
+    expect(command.input.toolConfig).toMatchObject({
+      toolChoice: { any: {} },
+      tools: [{ toolSpec: { name: "weather" } }],
+    });
+  });
+
+  it("rejects forced toolChoice together with manual reasoningEffort", () => {
+    const bedrock = provider();
+    expect(() =>
+      bedrock.completion({
+        messages: [{ content: "Hello", role: "user" }],
+        model: "anthropic.claude-test",
+        reasoningEffort: "high",
+        toolChoice: "required",
+        tools: [{ function: { name: "weather" }, type: "function" }],
+      }),
+    ).toThrow(/toolChoice with reasoningEffort/u);
+  });
+
+  it.each([
+    ['{"temp": 18}', { json: { temp: 18 } }],
+    ["18 degrees", { text: "18 degrees" }],
+    ['[{"name": "README.md"}]', { text: '[{"name": "README.md"}]' }],
+    ['"done"', { text: '"done"' }],
+    ["18", { text: "18" }],
+    ["null", { text: "null" }],
+  ] as const)(
+    "sends string tool result %s as a json object or as text",
+    async (content, expected) => {
+      const send = vi.fn(async (_command: BedrockTestCommand) => ({
+        output: { message: { content: [{ text: "ok" }] } },
+        stopReason: "end_turn",
+      }));
+      const bedrock = provider(send);
+      await bedrock.completion({
+        messages: [
+          { content: "plot it", role: "user" },
+          {
+            content: null,
+            role: "assistant",
+            toolCalls: [
+              { function: { arguments: "{}", name: "plot" }, id: "t1", type: "function" },
+            ],
+          },
+          { content, role: "tool", toolCallId: "t1" },
+        ],
+        model: "anthropic.claude-test",
+      });
+      // SAFETY: This test double implements the provider surface exercised by this test.
+      const command = send.mock.calls[0]?.[0] as ConverseCommand;
+      expect(parseJsonObjectArray(command.input.messages)[2]).toMatchObject({
+        content: [{ toolResult: { content: [expected], toolUseId: "t1" } }],
+        role: "user",
+      });
+    },
+  );
+
+  it("sends tool-result content parts as Converse toolResult blocks", async () => {
+    const send = vi.fn(async (_command: BedrockTestCommand) => ({
+      output: { message: { content: [{ text: "ok" }] } },
+      stopReason: "end_turn",
+    }));
+    const bedrock = provider(send);
+    const png = `data:image/png;base64,${Buffer.from("chart bytes").toString("base64")}`;
+    await bedrock.completion({
+      messages: [
+        { content: "plot it", role: "user" },
+        {
+          content: null,
+          role: "assistant",
+          toolCalls: [{ function: { arguments: "{}", name: "plot" }, id: "t1", type: "function" }],
+        },
+        {
+          content: [
+            { text: "done", type: "text" },
+            { image_url: { url: png }, type: "image_url" },
+          ],
+          role: "tool",
+          toolCallId: "t1",
+        },
+      ],
+      model: "anthropic.claude-test",
+    });
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    const command = send.mock.calls[0]?.[0] as ConverseCommand;
+    expect(parseJsonObjectArray(command.input.messages)[2]).toMatchObject({
+      content: [
+        {
+          toolResult: {
+            content: [
+              { text: "done" },
+              {
+                image: {
+                  format: "png",
+                  source: { bytes: new Uint8Array(Buffer.from("chart bytes")) },
+                },
+              },
+            ],
+            toolUseId: "t1",
+          },
+        },
+      ],
+      role: "user",
+    });
+  });
+
+  it("omits empty stop sequences and preserves system text parts", async () => {
+    const send = vi.fn(async (_command: BedrockTestCommand) => ({
+      output: { message: { content: [{ text: "ok" }] } },
+      stopReason: "end_turn",
+    }));
+    const bedrock = provider(send);
+    await bedrock.completion({
+      messages: [
+        { content: [{ text: "Be terse.", type: "text" }], role: "system" },
+        { content: "Hello", role: "user" },
+      ],
+      model: "anthropic.claude-test",
+      stop: [],
+    });
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    const command = send.mock.calls[0]?.[0] as ConverseCommand;
+    expect(command.input.system).toEqual([{ text: "Be terse." }]);
+    expect(command.input.inferenceConfig?.stopSequences).toBeUndefined();
+  });
+
+  it("withholds tools when toolChoice is none unless history must replay them", async () => {
+    const send = vi.fn(async (_command: BedrockTestCommand) => ({
+      output: { message: { content: [{ text: "ok" }] } },
+      stopReason: "end_turn",
+    }));
+    const bedrock = provider(send);
+    const tools = [{ function: { name: "lookup" }, type: "function" as const }];
+    await bedrock.completion({
+      messages: [{ content: "Look up the answer", role: "user" }],
+      model: "anthropic.claude-test",
+      toolChoice: "none",
+      tools,
+    });
+    const withheld = send.mock.calls[0]?.[0];
+    if (!(withheld instanceof ConverseCommand)) {
+      throw new Error("expected a ConverseCommand");
+    }
+    expect(withheld.input.toolConfig).toBeUndefined();
+
+    await bedrock.completion({
+      messages: [
+        { content: "Look up the answer", role: "user" },
+        {
+          content: null,
+          role: "assistant",
+          toolCalls: [
+            { function: { arguments: "{}", name: "lookup" }, id: "t1", type: "function" },
+          ],
+        },
+        { content: "The answer", role: "tool", toolCallId: "t1" },
+      ],
+      model: "anthropic.claude-test",
+      toolChoice: "none",
+      tools,
+    });
+    const replayed = send.mock.calls[1]?.[0];
+    if (!(replayed instanceof ConverseCommand)) {
+      throw new Error("expected a ConverseCommand");
+    }
+    expect(replayed.input.toolConfig).toMatchObject({
+      tools: [{ toolSpec: { name: "lookup" } }],
+    });
+    expect(
+      replayed.input.toolConfig === undefined ? undefined : replayed.input.toolConfig.toolChoice,
+    ).toBeUndefined();
+  });
+
   it("keeps assistant text when a non-streaming turn also calls a tool", async () => {
     const send = vi.fn(async () => ({
       output: {
@@ -278,6 +530,67 @@ describe("Bedrock provider", () => {
       { function: { name: "get_weather" }, id: "tool-123" },
     ]);
     expect(result.choices[0]?.finishReason).toBe("tool_calls");
+  });
+
+  it("declares replayed tools when a request passes none", async () => {
+    const send = vi.fn().mockResolvedValue({
+      output: { message: { content: [{ text: "Here it is." }] } },
+      stopReason: "end_turn",
+    });
+    await provider(send).completion({
+      messages: replayedSearch(true),
+      model: "nvidia.nemotron-super-3-120b",
+    });
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    const command = send.mock.calls[0]?.[0] as ConverseCommand;
+    expect(command.input.toolConfig).toEqual({
+      tools: [
+        {
+          toolSpec: {
+            description: " ",
+            inputSchema: { json: { properties: {}, type: "object" } },
+            name: "web_search",
+          },
+        },
+      ],
+    });
+  });
+
+  it("keeps the passed tools over replayed ones", async () => {
+    const send = vi.fn().mockResolvedValue({
+      output: { message: { content: [{ text: "Sunny." }] } },
+      stopReason: "end_turn",
+    });
+    await provider(send).completion({
+      messages: replayedSearch(),
+      model: "nvidia.nemotron-super-3-120b",
+      tools: [
+        {
+          function: { name: "get_weather" },
+          type: "function",
+        },
+      ],
+    });
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    const command = send.mock.calls[0]?.[0] as ConverseCommand;
+    expect(command.input.toolConfig).toMatchObject({
+      tools: [{ toolSpec: { name: "get_weather" } }],
+    });
+    expect(command.input.toolConfig?.tools).toHaveLength(1);
+  });
+
+  it("sends no toolConfig without tools or tool calls", async () => {
+    const send = vi.fn().mockResolvedValue({
+      output: { message: { content: [{ text: "hi" }] } },
+      stopReason: "end_turn",
+    });
+    await provider(send).completion({
+      messages: [{ content: "hi", role: "user" }],
+      model: "nvidia.nemotron-super-3-120b",
+    });
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    const command = send.mock.calls[0]?.[0] as ConverseCommand;
+    expect(command.input.toolConfig).toBeUndefined();
   });
 
   it("joins every text block before a tool call", async () => {
@@ -556,7 +869,7 @@ describe("Bedrock provider", () => {
         model: "model",
       }),
     ).toThrow(InvalidRequestError);
-    for (const model of ["xai.grok-4-fast", "deepseek.v3-v1:0", "openai.gpt-oss-120b-1:0"]) {
+    for (const model of ["xai.grok-4-fast", "deepseek.v3-v1:0"]) {
       expect(() =>
         bedrock.completion({
           messages: [{ content: "hi", role: "user" }],
@@ -570,7 +883,7 @@ describe("Bedrock provider", () => {
     );
   });
 
-  it.each(["xai.grok-4-fast", "deepseek.v3-v1:0", "openai.gpt-oss-120b-1:0"])(
+  it.each(["xai.grok-4-fast", "deepseek.v3-v1:0"])(
     "refuses Claude reasoning_config for non-Claude model %s",
     (model) => {
       expect(() =>
@@ -584,6 +897,68 @@ describe("Bedrock provider", () => {
   );
 
   it.each([
+    "openai.gpt-oss-20b-1:0",
+    "us.openai.gpt-oss-120b-1:0",
+    "openai.gpt-oss-safeguard-120b",
+  ])("sends reasoning_effort for gpt-oss model %s", async (model) => {
+    const send = vi.fn().mockResolvedValue({
+      output: { message: { content: [{ text: "ok" }], role: "assistant" } },
+      stopReason: "end_turn",
+    });
+    await provider(send).completion({
+      messages: [{ content: "hi", role: "user" }],
+      model,
+      reasoningEffort: "low",
+    });
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    const command = send.mock.calls[0]?.[0] as ConverseCommand;
+    expect(command.input.additionalModelRequestFields).toEqual({ reasoning_effort: "low" });
+  });
+
+  it.each(["minimal", "xhigh"] as const)(
+    "refuses gpt-oss reasoningEffort %s that has no Bedrock level",
+    (effort) => {
+      expect(() =>
+        provider().completion({
+          messages: [{ content: "hi", role: "user" }],
+          model: "openai.gpt-oss-20b-1:0",
+          reasoningEffort: effort,
+        }),
+      ).toThrow(`reasoning_effort '${effort}'`);
+    },
+  );
+
+  it("keeps a forced tool with gpt-oss reasoningEffort", async () => {
+    const send = vi.fn().mockResolvedValue({
+      output: { message: { content: [{ text: "ok" }], role: "assistant" } },
+      stopReason: "end_turn",
+    });
+    await provider(send).completion({
+      messages: [{ content: "hi", role: "user" }],
+      model: "openai.gpt-oss-20b-1:0",
+      reasoningEffort: "low",
+      toolChoice: "required",
+      tools: [
+        { function: { name: "get_weather", parameters: { type: "object" } }, type: "function" },
+      ],
+    });
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    const command = send.mock.calls[0]?.[0] as ConverseCommand;
+    expect(command.input.toolConfig).toMatchObject({ toolChoice: { any: {} } });
+    expect(command.input.additionalModelRequestFields).toEqual({ reasoning_effort: "low" });
+  });
+
+  it("refuses responseFormat for gpt-oss", () => {
+    expect(() =>
+      provider().completion({
+        messages: [{ content: "hi", role: "user" }],
+        model: "openai.gpt-oss-20b-1:0",
+        responseFormat: { json_schema: { schema: { type: "object" } }, type: "json_schema" },
+      }),
+    ).toThrow(/responseFormat/u);
+  });
+
+  it.each([
     "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/a1b2c3d4e5f6",
     "arn:aws:bedrock:us-east-1:123456789012:provisioned-model/a1b2c3d4e5f6",
     "arn:aws:bedrock:us-east-1:123456789012:imported-model/a1b2c3d4e5f6",
@@ -592,7 +967,10 @@ describe("Bedrock provider", () => {
       output: { message: { content: [{ text: "ok" }], role: "assistant" } },
       stopReason: "end_turn",
     });
-    await provider(send).completion({
+    const controlSend = vi.fn().mockResolvedValue({
+      models: [{ modelArn: "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-lite-v1:0" }],
+    });
+    await provider(send, controlSend).completion({
       messages: [{ content: "hi", role: "user" }],
       model,
       reasoningEffort: "low",
@@ -703,7 +1081,67 @@ describe("Bedrock provider", () => {
       { function: { arguments: '{"city":' }, index: 0 },
     ]);
     expect(chunks[6]?.choices[0]?.finishReason).toBe("tool_calls");
+    expect(chunks[6]?.usage).toBeUndefined();
+    expect(chunks[7]?.choices).toEqual([]);
     expect(chunks[7]?.usage).toMatchObject({ promptTokens: 3, totalTokens: 6 });
+  });
+
+  it("shares the AWS request id and a creation time across Converse stream chunks", async () => {
+    const send = vi.fn(async () => ({
+      $metadata: { requestId: "req-1" },
+      stream: events(
+        { messageStart: { role: "assistant" } },
+        { contentBlockDelta: { contentBlockIndex: 0, delta: { text: "hi" } } },
+        { messageStop: { stopReason: "end_turn" } },
+        {
+          metadata: {
+            metrics: {},
+            usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+          },
+        },
+      ),
+    }));
+    const result = await provider(send).completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "model",
+      stream: true,
+    });
+    const chunks: ChatCompletionChunk[] = [];
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    for await (const chunk of result as AsyncIterable<ChatCompletionChunk>) chunks.push(chunk);
+
+    expect(new Set(chunks.map((chunk) => chunk.id))).toEqual(new Set(["req-1"]));
+    expect(new Set(chunks.map((chunk) => chunk.created)).size).toBe(1);
+    expect(chunks[0]?.created).toBeGreaterThan(0);
+  });
+
+  it("reports streamed usage on a chunk with no choices", async () => {
+    const send = vi.fn(async () => ({
+      stream: events(
+        { contentBlockDelta: { delta: { text: "hi" } } },
+        { messageStop: { stopReason: "max_tokens" } },
+        { metadata: { metrics: {}, usage: { inputTokens: 18, outputTokens: 5, totalTokens: 23 } } },
+      ),
+    }));
+    const result = await provider(send).completion({
+      messages: [{ content: "Hi", role: "user" }],
+      model: "model",
+      stream: true,
+    });
+    const chunks: ChatCompletionChunk[] = [];
+    // SAFETY: This test double implements the provider surface exercised by this test.
+    for await (const chunk of result as AsyncIterable<ChatCompletionChunk>) chunks.push(chunk);
+
+    const finish = chunks.at(-2);
+    const usage = chunks.at(-1);
+    expect(finish?.choices[0]?.finishReason).toBe("length");
+    expect(finish?.usage).toBeUndefined();
+    expect(usage?.choices).toEqual([]);
+    expect(usage?.usage).toEqual({
+      completionTokens: 5,
+      promptTokens: 18,
+      totalTokens: 23,
+    });
   });
 
   const bedrockStopReasons = {
@@ -1150,5 +1588,155 @@ describe("Bedrock provider", () => {
       name: "bedrock",
       requiresApiKey: false,
     });
+  });
+});
+
+const CODE_TOOL: FunctionTool = {
+  type: "function",
+  function: {
+    name: "code_execution",
+    description: "Run Python code.",
+    parameters: {
+      type: "object",
+      properties: { code: { type: "string" } },
+      required: ["code"],
+    },
+  },
+};
+const LLAMA = "us.meta.llama3-3-70b-instruct-v1:0";
+const LLAMA_TEXT_CALL =
+  '{"type": "function", "name": "code_execution", "parameters": {"code": "print(1)"}}';
+const LLAMA_PROFILE_ARN =
+  "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc123";
+
+async function converseText(
+  text: string,
+  model: string,
+  tools: FunctionTool[] | undefined,
+  toolChoice?: string,
+): Promise<ChatCompletion> {
+  const runtimeSend = vi.fn(async (command: ConverseCommand) => {
+    expect(command).toBeInstanceOf(ConverseCommand);
+    expect(command.input.modelId).toBe(model);
+    return {
+      output: { message: { role: "assistant", content: [{ text }] } },
+      stopReason: "end_turn",
+    };
+  });
+  const controlSend = vi.fn(async (command: GetInferenceProfileCommand) => {
+    expect(command).toBeInstanceOf(GetInferenceProfileCommand);
+    return {
+      models: [
+        {
+          modelArn: "arn:aws:bedrock:us-east-1::foundation-model/meta.llama3-3-70b-instruct-v1:0",
+        },
+      ],
+    };
+  });
+  const params: CompletionParams = {
+    messages: [{ content: "Run it", role: "user" }],
+    model,
+  };
+  if (tools !== undefined) params.tools = tools;
+  if (toolChoice !== undefined) params.toolChoice = toolChoice;
+  const result = await provider(runtimeSend, controlSend).completion(params);
+  if (isAsyncIterable(result)) {
+    throw new TypeError("expected a non-streaming completion");
+  }
+  return result;
+}
+
+describe("Bedrock Llama text tool calls", () => {
+  it.each([LLAMA, LLAMA_PROFILE_ARN])(
+    "returns a Llama tool call written as text as a tool call (%s)",
+    async (model) => {
+      const completion = await converseText(LLAMA_TEXT_CALL, model, [CODE_TOOL]);
+      const choice = completion.choices[0];
+      expect(choice?.finishReason).toBe("tool_calls");
+      expect(choice?.message.content).toBeNull();
+      const call = choice?.message.toolCalls?.[0];
+      expect(call?.id).toMatch(/^call_[0-9a-f]{32}$/u);
+      expect(call?.function.name).toBe("code_execution");
+      expect(JSON.parse(call?.function.arguments ?? "")).toEqual({ code: "print(1)" });
+    },
+  );
+
+  it("returns a Llama tool call without a type as a tool call", async () => {
+    const completion = await converseText(
+      '{"name": "code_execution", "parameters": {"code": "print(1)"}}',
+      LLAMA,
+      [CODE_TOOL],
+    );
+    expect(completion.choices[0]?.finishReason).toBe("tool_calls");
+  });
+
+  it.each([
+    ["prose", "The digest is 3f2a."],
+    ["undeclared tool", '{"type": "function", "name": "web_search", "parameters": {"query": "x"}}'],
+    [
+      "extra keys",
+      '{"name": "code_execution", "parameters": {"code": "print(1)"}, "note": "extra"}',
+    ],
+    ["parameters string", '{"name": "code_execution", "parameters": "print(1)"}'],
+    ["name array", '{"name": ["code_execution"], "parameters": {}}'],
+    ["NaN", '{"name": "code_execution", "parameters": {"x": NaN}}'],
+    ["non-finite number", '{"name": "code_execution", "parameters": {"x": 1e400}}'],
+    ["deeply nested json", "[".repeat(100_000) + "]".repeat(100_000)],
+    ["embedded in a sentence", `Calling it now: ${LLAMA_TEXT_CALL}`],
+  ])("leaves Llama text that is not one declared call as the answer (%s)", async (_label, text) => {
+    const completion = await converseText(text, LLAMA, [CODE_TOOL]);
+    const choice = completion.choices[0];
+    expect(choice?.finishReason).toBe("stop");
+    expect(choice?.message.content).toBe(text);
+    expect(choice?.message.toolCalls).toBeUndefined();
+  });
+
+  it.each([
+    [LLAMA, undefined, undefined],
+    [LLAMA, [CODE_TOOL], "none"],
+    ["amazon.nova-lite-v1:0", [CODE_TOOL], undefined],
+  ] as const)(
+    "leaves a text call alone without tools or off Llama",
+    async (model, tools, toolChoice) => {
+      const completion = await converseText(
+        LLAMA_TEXT_CALL,
+        model,
+        tools === undefined ? undefined : [...tools],
+        toolChoice,
+      );
+      const choice = completion.choices[0];
+      expect(choice?.finishReason).toBe("stop");
+      expect(choice?.message.content).toBe(LLAMA_TEXT_CALL);
+      expect(choice?.message.toolCalls).toBeUndefined();
+    },
+  );
+
+  it("returns a Llama toolUse block as Converse gave it", async () => {
+    const send = vi.fn(async () => ({
+      output: {
+        message: {
+          role: "assistant",
+          content: [
+            {
+              toolUse: {
+                toolUseId: "tooluse_1",
+                name: "code_execution",
+                input: { code: "1" },
+              },
+            },
+          ],
+        },
+      },
+      stopReason: "tool_use",
+    }));
+    // SAFETY: The non-streaming request makes this completion result concrete in the test.
+    const completion = (await provider(send).completion({
+      messages: [{ content: "Run it", role: "user" }],
+      model: LLAMA,
+      tools: [CODE_TOOL],
+    })) as ChatCompletion;
+    const choice = completion.choices[0];
+    expect(choice?.finishReason).toBe("tool_calls");
+    expect(choice?.message.toolCalls?.map((call) => call.id)).toEqual(["tooluse_1"]);
   });
 });

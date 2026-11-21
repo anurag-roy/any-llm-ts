@@ -24,6 +24,7 @@ const metadata: ProviderMetadata = {
   promptCacheKeySupport: "unsupported",
   requiresApiKey: true,
   supportsCompletionN: false,
+  supportsCompletionResponseFormat: true,
   tier: "community",
   envApiKey: "COMPANY_LLM_API_KEY",
   capabilities: {
@@ -38,6 +39,8 @@ const metadata: ProviderMetadata = {
     moderation: false,
     pdfInput: false,
     imageGeneration: false,
+    imageEdit: false,
+    videoGeneration: false,
     audioSpeech: false,
     audioTranscription: false,
     batch: false,

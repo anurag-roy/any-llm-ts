@@ -84,6 +84,10 @@ private tool call and returning that tool's JSON input as normal assistant conte
 direct and cross-region model IDs containing `anthropic.`. It is non-streaming and cannot be
 combined with enabled extended reasoning; omit `reasoningEffort` or use `none` or `auto`.
 
+TwelveLabs Pegasus on Bedrock sends `json_schema` through InvokeModel `responseFormat`. Pegasus 1.5
+includes `type: "json_schema"` beside the schema; 1.2 sends the schema alone. Tools, `topP`, and
+`json_object` are not available on that path.
+
 Gemini accepts `json_schema`, `json_object`, and `text`. For `json_schema`, the adapter sends the
 schema through the native Google Gen AI SDK and requests the `application/json` response MIME type.
 If Gemini reports truncation or content filtering before structured output is complete, the adapter

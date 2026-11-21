@@ -8,6 +8,7 @@ import { Readable } from "node:stream";
 
 import { toFile } from "openai";
 import type OpenAI from "openai";
+import type { FileRetrieveResponse } from "openai/resources/containers/files";
 import type {
   FileDeleted as OpenAIFileDeleted,
   FileListParams,
@@ -54,7 +55,12 @@ function stringHeaders(value: Headers | JsonObject | undefined) {
   );
 }
 
-type OpenAIJsonSource = FileObject | FileObjectsPage | JsonObject | OpenAIFileDeleted;
+type OpenAIJsonSource =
+  | FileObject
+  | FileObjectsPage
+  | FileRetrieveResponse
+  | JsonObject
+  | OpenAIFileDeleted;
 
 function jsonFields(value: OpenAIJsonSource, label: string): JsonObject {
   if (isJsonObject(value)) return value;
@@ -153,7 +159,22 @@ function rfc3339Timestamp(value: JsonValue | undefined): string | undefined {
   return new Date(value * 1_000).toISOString();
 }
 
-export function convertOpenAIFileMetadata(result: FileObject | JsonObject): FileMetadata {
+export function rejectContainerId(containerId: string | undefined, providerName: string): void {
+  if (containerId !== undefined) rejectUnsupported(["container_id"], providerName);
+}
+
+export function readContainerId(
+  containerId: string | undefined,
+  providerName: string,
+): string | undefined {
+  if (containerId === undefined) return undefined;
+  validateOpenAIFileId(containerId, providerName);
+  return containerId;
+}
+
+export function convertOpenAIFileMetadata(
+  result: FileObject | FileRetrieveResponse | JsonObject,
+): FileMetadata {
   const source = jsonFields(result, "OpenAI file");
   const extras: JsonObject = {};
   const mapped: FileMetadata = { id: optionalString(source.id) ?? "" };
@@ -381,10 +402,17 @@ export async function retrieveOpenAIFile(
   providerName: string,
 ): Promise<FileMetadata> {
   validateOpenAIFileId(params.fileId, providerName);
+  const containerId = readContainerId(params.containerId, providerName);
   const request = fileRequestOptions(client, { ...params.providerOptions }, providerName);
-  return convertOpenAIFileMetadata(
-    await request.client.files.retrieve(params.fileId, request.requestOptions),
-  );
+  const result =
+    containerId === undefined
+      ? await request.client.files.retrieve(params.fileId, request.requestOptions)
+      : await request.client.containers.files.retrieve(
+          params.fileId,
+          { container_id: containerId },
+          request.requestOptions,
+        );
+  return convertOpenAIFileMetadata(result);
 }
 
 export async function deleteOpenAIFile(
@@ -392,6 +420,7 @@ export async function deleteOpenAIFile(
   params: FileResourceParams,
   providerName: string,
 ): Promise<FileDeleted> {
+  rejectContainerId(params.containerId, providerName);
   validateOpenAIFileId(params.fileId, providerName);
   const request = fileRequestOptions(client, { ...params.providerOptions }, providerName);
   return convertOpenAIFileDeleted(
@@ -406,10 +435,18 @@ export async function downloadOpenAIFile(
   conversion: { unifiedExceptions?: boolean } = {},
 ): Promise<FileDownload> {
   validateOpenAIFileId(params.fileId, providerName);
+  const containerId = readContainerId(params.containerId, providerName);
   const chunkSize = params.chunkSize ?? 65_536;
   validatePositiveInteger(chunkSize, "chunk_size", providerName);
   const request = fileRequestOptions(client, { ...params.providerOptions }, providerName);
-  const response = await request.client.files.content(params.fileId, request.requestOptions);
+  const response =
+    containerId === undefined
+      ? await request.client.files.content(params.fileId, request.requestOptions)
+      : await request.client.containers.files.content.retrieve(
+          params.fileId,
+          { container_id: containerId },
+          request.requestOptions,
+        );
   const headers = Object.fromEntries(response.headers.entries());
   const chunks = (async function* downloadChunks(): AsyncIterable<Uint8Array> {
     const body = response.body;

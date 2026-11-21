@@ -357,6 +357,7 @@ export async function retrieveGeminiFile(
   client: GoogleGenAI,
   params: FileResourceParams,
 ): Promise<FileMetadata> {
+  if (params.containerId !== undefined) rejectUnsupported(["container_id"]);
   const fileId = validateGeminiFileId(params.fileId);
   const httpOptions = fileHttpOptions({ ...params.providerOptions });
   const fileConfig = httpOptions === undefined ? undefined : { httpOptions };
@@ -376,6 +377,7 @@ export async function deleteGeminiFile(
   client: GoogleGenAI,
   params: FileResourceParams,
 ): Promise<FileDeleted> {
+  if (params.containerId !== undefined) rejectUnsupported(["container_id"]);
   const fileId = validateGeminiFileId(params.fileId);
   const httpOptions = fileHttpOptions({ ...params.providerOptions });
   const fileConfig = httpOptions === undefined ? undefined : { httpOptions };
@@ -408,6 +410,7 @@ export async function downloadGeminiFile(
   auth: GeminiFileAuth,
   conversion: { unifiedExceptions?: boolean } = {},
 ): Promise<FileDownload> {
+  if (params.containerId !== undefined) rejectUnsupported(["container_id"]);
   const fileId = validateGeminiFileId(params.fileId);
   const chunkSize = params.chunkSize ?? 65_536;
   validatePositiveInteger(chunkSize, "chunk_size", PROVIDER_NAME);

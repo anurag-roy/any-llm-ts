@@ -52,6 +52,7 @@ const voyageCapabilities: ProviderCapabilities = {
   rerank: true,
   responses: false,
   streaming: false,
+  videoGeneration: false,
   vision: false,
 };
 

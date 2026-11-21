@@ -49,6 +49,10 @@ returning one choice.
 
 Inspect `metadata.supportsCompletionN` to see which path a provider takes.
 
+`responseFormat` is advertised per provider on `metadata.supportsCompletionResponseFormat`, and per
+model on `AnyLLM.supportsCompletionResponseFormat(provider, model)`. Callers such as a model catalog
+can leave the parameter out where a request carrying it would raise.
+
 ## Reusable client
 
 ```ts
@@ -86,6 +90,11 @@ const response = await llm.completion({
 
 The common content types include text, image URLs, files, and input audio. Actual support depends on
 the provider and selected model.
+
+Bedrock TwelveLabs Pegasus models (`twelvelabs.pegasus-` in the id) take one `video_url` part plus
+text: a base64 data URL, or an `s3://` URI with `video_url.bucket_owner` (required on 1.5, optional
+on 1.2). Those requests go to InvokeModel instead of Converse. Application inference profile ARNs
+are resolved with `GetInferenceProfile` so Pegasus profiles still take that path.
 
 ## Normalized response
 

@@ -3,6 +3,7 @@ import type { JsonValue } from "./types.js";
 import type { JsonObject } from "./types.js";
 import {
   InvalidModelSyntaxError,
+  InvalidRequestError,
   UnsupportedOperationError,
   UnsupportedParameterError,
 } from "./errors.js";
@@ -54,7 +55,12 @@ import type {
   Transcription,
   TranscriptionParams,
   UploadFileParams,
+  PollVideoOptions,
+  VideoGenerationParams,
+  VideoJob,
+  VideoOutput,
 } from "./types.js";
+import { decodeVideoData, delay } from "./video.js";
 import {
   completionResponseFormat,
   isStructuredOutputFormat,
@@ -74,6 +80,7 @@ import {
   getProviderMetadata,
   getSupportedProviders,
   servesMessagesNatively,
+  supportsCompletionResponseFormat,
 } from "./providers/registry.js";
 
 export class AnyLLM {
@@ -104,6 +111,7 @@ export class AnyLLM {
       name: options.name.trim().toLowerCase(),
       promptCacheKeySupport: "passthrough" as const,
       supportsCompletionN: options.metadata?.supportsCompletionN ?? true,
+      supportsCompletionResponseFormat: options.metadata?.supportsCompletionResponseFormat ?? true,
       ...includeWhen(!(capabilities === undefined), {
         capabilities,
       }),
@@ -161,6 +169,18 @@ export class AnyLLM {
 
   servesMessagesNatively(model: string): boolean {
     return this.adapter.servesMessagesNatively(model);
+  }
+
+  /**
+   * Whether a chat completion for `model` may carry `responseFormat`.
+   * When this is false, a request with one raises before it reaches the provider.
+   */
+  static supportsCompletionResponseFormat(provider: string, model: string): boolean {
+    return supportsCompletionResponseFormat(provider, model);
+  }
+
+  supportsCompletionResponseFormat(model: string): boolean {
+    return this.adapter.supportsCompletionResponseFormat(model);
   }
 
   static splitModelProvider(model: string) {
@@ -361,6 +381,52 @@ export class AnyLLM {
     return this.adapter.downloadFile(params);
   }
 
+  videoGeneration(params: VideoGenerationParams): Promise<VideoJob> {
+    if (!this.metadata.capabilities.videoGeneration) {
+      return Promise.reject(new UnsupportedOperationError("video generation", this.provider));
+    }
+    return this.adapter.videoGeneration(params);
+  }
+
+  retrieveVideo(videoId: string, providerOptions?: JsonObject): Promise<VideoJob> {
+    if (!this.metadata.capabilities.videoGeneration) {
+      return Promise.reject(new UnsupportedOperationError("video generation", this.provider));
+    }
+    return this.adapter.retrieveVideo(videoId, providerOptions);
+  }
+
+  completeVideoJob(payload: JsonObject, model?: string): VideoJob {
+    if (!this.metadata.capabilities.videoGeneration) {
+      throw new UnsupportedOperationError("video generation", this.provider);
+    }
+    return this.adapter.completeVideoJob(payload, model);
+  }
+
+  async pollVideo(videoId: string, options: PollVideoOptions = {}): Promise<VideoJob> {
+    const pollInterval = options.pollInterval ?? 5;
+    const timeout = options.timeout === undefined ? 600 : options.timeout;
+    const deadline = timeout === null ? undefined : Date.now() + timeout * 1_000;
+    let job = await this.retrieveVideo(videoId, options.providerOptions);
+    while (!job.done) {
+      if (deadline !== undefined && Date.now() >= deadline) {
+        throw new Error(`Video job ${videoId} is still ${job.status} after ${timeout} seconds.`);
+      }
+      await delay(pollInterval * 1_000);
+      job = await this.retrieveVideo(videoId, options.providerOptions);
+    }
+    return job;
+  }
+
+  downloadVideo(output: VideoOutput, providerOptions?: JsonObject): Promise<Uint8Array> {
+    if (output.b64Data !== undefined) return Promise.resolve(decodeVideoData(output.b64Data));
+    if (output.url === undefined) {
+      return Promise.reject(
+        new InvalidRequestError("Video output has neither a URL nor inline data to download."),
+      );
+    }
+    return this.adapter.downloadVideo(output.url, providerOptions);
+  }
+
   messages<T>(params: StructuredMessagesParams<T>): Promise<ParsedMessageResponse<T>>;
   messages(params: MessagesParams & { stream: true }): Promise<AsyncIterable<MessageStreamEvent>>;
   messages(params: MessagesParams & { stream?: false | undefined }): Promise<MessageResponse>;
@@ -373,6 +439,9 @@ export class AnyLLM {
     AsyncIterable<MessageStreamEvent> | MessageResponse | ParsedMessageResponse<JsonValue>
   > {
     this.validatePromptCacheKey(params.promptCacheKey);
+    if (params.inferenceGeo !== undefined && !this.adapter.supportsMessagesInferenceGeo) {
+      throw new UnsupportedParameterError("inference_geo", this.provider);
+    }
     // A raw output_config dict streams as JSON text deltas. Only a typed format needs a
     // finished message to parse into, which a stream never produces.
     if (
