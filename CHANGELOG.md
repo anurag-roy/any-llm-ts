@@ -1,5 +1,27 @@
 # any-llm-ts
 
+## 0.9.0
+
+### Minor Changes
+
+- 534a23f: Sync with Python any-llm through `0c3e8a7`: retrieve and download OpenAI and Azure Code Interpreter container files via `containerId`.
+- 534a23f: Sync with Python any-llm through `5b5f17e`: add DeepInfra image generation, transcription, and speech, send Together video media in `media`, and report Bedrock streamed usage on a chunk with no choices.
+- 534a23f: Sync with Python any-llm through `6c266c6`: add TokenHub, Gemini image generation and edit, and adapter fixes for context overflows, embeddings, tools, and output token limits.
+- 534a23f: Sync with Python any-llm through `9b43bbc`: report Gemini Google Search grounding queries, add OpenRouter rerank, list Hugging Face Inference Providers chat models, advertise per-model `responseFormat` support, and read served context windows from model listings.
+- 534a23f: Sync with Python any-llm through `a331131`: give Bedrock Converse completions and streams the AWS request id, keep Azure empty-delta finish reasons, map Messages tool-call stops even when finish_reason is stop, and add Tinfoil's attested-enclave provider.
+- 534a23f: Sync with Python any-llm through `b8d10c4`: chat with TwelveLabs Pegasus on Bedrock about a video, edit images with Stability AI image services, and route Pegasus application inference profiles to InvokeModel.
+- 534a23f: Sync with Python any-llm through `c844dd8`: add the video generation job API for Gemini and Together, and enable OVHcloud embeddings.
+- 534a23f: Sync with Python any-llm through `f23ff3a`: add Groq, Together, Mistral, and Gemini text-to-speech, DeepInfra video generation, shared video resolution/aspect/audio fields, and Bedrock gpt-oss reasoning_effort.
+- 534a23f: Sync with Python any-llm through `fc46b04`: add video `referenceVideos` and `generateAudio`, VideoJob cost/tokens, DeepInfra video webhooks, shared-field option conflict checks, and Anthropic `inferenceGeo`.
+
+### Patch Changes
+
+- 41f7971: Sync with Python any-llm through `368f6cf`: use budget thinking on Claude models without adaptive thinking, keep streamed Messages tool arguments on their `tool_use` block, and send Bedrock `reasoning_config` only to Claude (or opaque ARNs).
+- 534a23f: Sync with Python any-llm through `36e436a`: keep Azure OpenAI Responses cache-write token counts, and fill omitted gateway model listing fields (`ownedBy: "unknown"`, `created: 0`).
+- 534a23f: Sync with Python any-llm through `4bac8d3`: pin Gemini Developer API calls to v1beta unless a version is named, send Bedrock tool results that are not JSON objects as text, and leave Messages streams without a finish_reason unfinished.
+- 534a23f: Sync with Python any-llm through `b6c4e19`: declare replayed Bedrock tools when a request passes none, and bill Hugging Face Inference Providers usage to an organization via `clientOptions.billTo`.
+- 534a23f: Sync with Python any-llm through `c308621`: turn a Llama Bedrock answer that is only a JSON call to a declared tool into that tool call.
+
 ## 0.8.0
 
 ### Minor Changes
